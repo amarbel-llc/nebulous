@@ -1,0 +1,1 @@
+- [ ] purse-first go-cli-framework skill references `go-lib-mcp` throughout — should say `go-mcp` (module is `github.com/amarbel-llc/purse-first/libs/go-mcp`)

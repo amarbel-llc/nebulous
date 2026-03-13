@@ -2,9 +2,9 @@
 
 ## Summary
 
-Go MCP server exposing the NewsBlur API via go-lib-mcp's `command.App`.
+Go MCP server exposing the NewsBlur API via go-mcp's `command.App`.
 Authenticates via `NEWSBLUR_TOKEN` env var. Direct `net/http` client, no
-external dependencies beyond go-lib-mcp.
+external dependencies beyond go-mcp.
 
 ## Architecture
 
