@@ -12,6 +12,8 @@ func RegisterAll(client *newsblur.Client) *command.App {
 	registerFeedCommands(app, client)
 	registerStoryCommands(app, client)
 	registerReaderCommands(app, client)
+	registerSubscriptionCommands(app, client)
+	registerFolderCommands(app, client)
 
 	return app
 }
