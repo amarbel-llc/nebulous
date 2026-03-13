@@ -44,7 +44,7 @@
           pname = "nebulous";
           inherit version;
           src = ./.;
-          vendorHash = null;
+          vendorHash = "sha256-vPk1SsLO4F2/Fy4jgOVzzR5TQgjl+/WHAV5Pf1Jw1+Q=";
 
           subPackages = [ "cmd/nebulous" ];
 

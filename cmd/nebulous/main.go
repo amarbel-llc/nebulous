@@ -27,15 +27,9 @@ func main() {
 
 	flag.Parse()
 
-	token := os.Getenv("NEWSBLUR_TOKEN")
-	if token == "" {
-		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
-	}
-
-	client := newsblur.NewClient(token)
-	app := tools.RegisterAll(client)
-
+	// generate-plugin and hook don't need a live NewsBlur connection.
 	if flag.NArg() >= 1 && flag.Arg(0) == "generate-plugin" {
+		app := tools.RegisterAll(nil)
 		if err := app.HandleGeneratePlugin(flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatalf("generating plugin: %v", err)
 		}
@@ -43,11 +37,20 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "hook" {
+		app := tools.RegisterAll(nil)
 		if err := app.HandleHook(os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("handling hook: %v", err)
 		}
 		return
 	}
+
+	token := os.Getenv("NEWSBLUR_TOKEN")
+	if token == "" {
+		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
+	}
+
+	client := newsblur.NewClient(token)
+	app := tools.RegisterAll(client)
 
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "nebulous: unexpected arguments: %v\n", flag.Args())
