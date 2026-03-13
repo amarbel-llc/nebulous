@@ -10,6 +10,7 @@ func RegisterAll(client *newsblur.Client) *command.App {
 	app.Version = "0.1.0"
 
 	registerFeedCommands(app, client)
+	registerStoryCommands(app, client)
 
 	return app
 }
