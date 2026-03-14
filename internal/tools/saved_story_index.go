@@ -58,8 +58,8 @@ func (idx *savedStoryIndex) ensureBuilt(ctx context.Context) savedStoryIndexResu
 
 	fp, fpErr := idx.fetchFingerprint(ctx)
 
-	if idx.built && fpErr == nil && fp == idx.fingerprint {
-		return savedStoryIndexResult{words: idx.words}
+	if fpErr == nil && fp == idx.fingerprint && len(idx.words) > 0 {
+		return savedStoryIndexResult{words: idx.words, partial: !idx.built}
 	}
 
 	if fpErr != nil {
@@ -86,6 +86,7 @@ func (idx *savedStoryIndex) buildAndReturn(ctx context.Context, fp string) saved
 	if err := idx.build(ctx); err != nil {
 		var rle *newsblur.RateLimitError
 		if errors.As(err, &rle) && len(idx.words) > 0 {
+			idx.fingerprint = fp
 			return savedStoryIndexResult{
 				words:   idx.words,
 				partial: true,
