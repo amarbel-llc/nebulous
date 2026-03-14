@@ -64,8 +64,12 @@ func (idx *savedStoryIndex) ensureBuilt(ctx context.Context) savedStoryIndexResu
 
 	if fpErr != nil {
 		log.Printf("saved story index: fingerprint fetch failed: %v", fpErr)
-		if idx.built {
-			return savedStoryIndexResult{words: idx.words}
+		if idx.built || len(idx.words) > 0 {
+			return savedStoryIndexResult{
+				words:   idx.words,
+				partial: !idx.built,
+				warning: fpErr.Error(),
+			}
 		}
 	}
 
@@ -88,7 +92,9 @@ func (idx *savedStoryIndex) buildAndReturn(ctx context.Context, fp string) saved
 				warning: err.Error(),
 			}
 		}
-		idx.words = nil
+		if len(idx.words) == 0 {
+			idx.words = nil
+		}
 		return savedStoryIndexResult{warning: err.Error()}
 	}
 
