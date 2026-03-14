@@ -33,11 +33,11 @@
       },
       "locked": {
         "dir": "devenvs/go",
-        "lastModified": 1773422429,
-        "narHash": "sha256-JSyNFMiN+O7TtZB8sJMeqBxElCjQCmd9jBbvB39u2qU=",
+        "lastModified": 1773439223,
+        "narHash": "sha256-8pwyvXWdN0oEYb25igXU1VcY22iHgi/9oiAXATx/ZBk=",
         "owner": "amarbel-llc",
         "repo": "purse-first",
-        "rev": "95e1e5de5c68ef64596ad18a115ab61709f147b0",
+        "rev": "0653d2ec0500979b34b5fc774e8a042bcf09a3f1",
         "type": "github"
       },
       "original": {
@@ -71,33 +71,33 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1771419570,
-        "narHash": "sha256-bxAlQgre3pcQcaRUm/8A0v/X8d2nhfraWSFqVmMcBcU=",
+        "lastModified": 1773375660,
+        "narHash": "sha256-SEzUWw2Rf5Ki3bcM26nSKgbeoqi2uYy8IHVBqOKjX3w=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "6d41bc27aaf7b6a3ba6b169db3bd5d6159cfaa47",
+        "rev": "3e20095fe3c6cbb1ddcef89b26969a69a1570776",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "6d41bc27aaf7b6a3ba6b169db3bd5d6159cfaa47",
+        "rev": "3e20095fe3c6cbb1ddcef89b26969a69a1570776",
         "type": "github"
       }
     },
     "nixpkgs-master": {
       "locked": {
-        "lastModified": 1771603159,
-        "narHash": "sha256-9T7Ml6t7hI7rNi2kOgZhm2himxunOcsSBx1LLAlQSvI=",
+        "lastModified": 1773486025,
+        "narHash": "sha256-ea+4Zg0lMGErMGZrgkg25c9fiGzMmHStyBjwH1xJFFw=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "5b7e21f22978c4b740b3907f3251b470f466a9a2",
+        "rev": "e034e386767a6d00b65ac951821835bd977a08f7",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "5b7e21f22978c4b740b3907f3251b470f466a9a2",
+        "rev": "e034e386767a6d00b65ac951821835bd977a08f7",
         "type": "github"
       }
     },
@@ -124,11 +124,11 @@
       },
       "locked": {
         "dir": "devenvs/shell",
-        "lastModified": 1773422429,
-        "narHash": "sha256-JSyNFMiN+O7TtZB8sJMeqBxElCjQCmd9jBbvB39u2qU=",
+        "lastModified": 1773439223,
+        "narHash": "sha256-8pwyvXWdN0oEYb25igXU1VcY22iHgi/9oiAXATx/ZBk=",
         "owner": "amarbel-llc",
         "repo": "purse-first",
-        "rev": "95e1e5de5c68ef64596ad18a115ab61709f147b0",
+        "rev": "0653d2ec0500979b34b5fc774e8a042bcf09a3f1",
         "type": "github"
       },
       "original": {

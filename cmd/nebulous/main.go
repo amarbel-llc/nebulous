@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
@@ -29,7 +31,7 @@ func main() {
 
 	// generate-plugin and hook don't need a live NewsBlur connection.
 	if flag.NArg() >= 1 && flag.Arg(0) == "generate-plugin" {
-		app := tools.RegisterAll(nil)
+		app, _ := tools.RegisterAll(nil)
 		if err := app.HandleGeneratePlugin(flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatalf("generating plugin: %v", err)
 		}
@@ -37,7 +39,7 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "hook" {
-		app := tools.RegisterAll(nil)
+		app, _ := tools.RegisterAll(nil)
 		if err := app.HandleHook(os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("handling hook: %v", err)
 		}
@@ -45,7 +47,7 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "install-mcp" {
-		app := tools.RegisterAll(nil)
+		app, _ := tools.RegisterAll(nil)
 		if err := app.InstallMCP(); err != nil {
 			log.Fatalf("installing MCP: %v", err)
 		}
@@ -58,7 +60,13 @@ func main() {
 	}
 
 	client := newsblur.NewClient(token)
-	app := tools.RegisterAll(client)
+
+	if home, err := os.UserHomeDir(); err == nil {
+		cacheDir := filepath.Join(home, ".cache", "nebulous", "responses")
+		client.WithCache(cacheDir, 1*time.Hour)
+	}
+
+	app, resources := tools.RegisterAll(client)
 
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "nebulous: unexpected arguments: %v\n", flag.Args())
@@ -77,8 +85,9 @@ func main() {
 	srv, err := server.New(t, server.Options{
 		ServerName:    app.Name,
 		ServerVersion: app.Version,
-		Instructions:  "NewsBlur MCP server. Provides tools for reading feeds, managing stories, subscriptions, folders, and OPML import/export.",
+		Instructions:  "NewsBlur MCP server. Provides tools for reading feeds, managing stories, subscriptions, folders, and OPML import/export. Feed and story content responses are verbose — delegate queries to a subagent to keep the main context lean. Use feed_query/saved_story_query as lightweight entry points for discovery.",
 		Tools:         registry,
+		Resources:     resources,
 	})
 	if err != nil {
 		log.Fatalf("creating server: %v", err)

@@ -57,6 +57,10 @@ func (c *Client) UnreadStoryHashes(ctx context.Context, feedIDs []int) (json.Raw
 	return c.get(ctx, "/reader/unread_story_hashes", params)
 }
 
+func (c *Client) StarredStoryHashes(ctx context.Context) (json.RawMessage, error) {
+	return c.getSkipCache(ctx, "/reader/starred_story_hashes", nil)
+}
+
 func (c *Client) OriginalText(ctx context.Context, storyHash string) (json.RawMessage, error) {
 	params := url.Values{"story_hash": {storyHash}}
 	return c.get(ctx, "/rss_feeds/original_text", params)

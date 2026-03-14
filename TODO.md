@@ -3,3 +3,6 @@
 - [x] Live verification against NewsBlur API (Task 15 from impl plan)
 - [x] Add output.LimitText to feed_list, feed_stats, feed_autocomplete, story_feed, story_river (all exceeded 90K+ chars)
 - [ ] Add spec + code quality review pass over all tool implementations
+- [ ] Index story_content (HTML stripped) in saved_story_index for deeper content search
+- [x] Persist index caches to ~/.cache/nebulous to avoid rebuilding on every session start
+- [ ] Explore content-based cache addressing (etags or digests) for response cache freshness

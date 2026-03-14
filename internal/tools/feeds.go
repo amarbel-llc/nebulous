@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/output"
@@ -10,7 +11,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-func registerFeedCommands(app *command.App, client *newsblur.Client) {
+func registerFeedCommands(app *command.App, client *newsblur.Client, index *feedIndex) {
 	defaults := output.StandardDefaults()
 
 	readOnlyAnnotations := &protocol.ToolAnnotations{
@@ -23,7 +24,7 @@ func registerFeedCommands(app *command.App, client *newsblur.Client) {
 	app.AddCommand(&command.Command{
 		Name: "feed_list",
 		Description: command.Description{
-			Short: "List all subscribed feeds with folder structure",
+			Short: "List all subscribed feeds with folder structure. WARNING: response is very large (100KB+). Prefer feed_query for discovery, or delegate to a subagent.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{
@@ -129,6 +130,52 @@ func registerFeedCommands(app *command.App, client *newsblur.Client) {
 				return command.JSONResult(limited), nil
 			}
 			return command.TextResult(limited.Content), nil
+		},
+	})
+
+	app.AddCommand(&command.Command{
+		Name: "feed_query",
+		Description: command.Description{
+			Short: "Search feeds by word. Returns OR-union of matching feed summaries from the word index. Lightweight entry point for feed discovery — use this before reading full feed details.",
+		},
+		Annotations: readOnlyAnnotations,
+		Params: []command.Param{
+			{Name: "words", Type: command.Array, Required: true, Description: "Words to search for (OR-union)"},
+		},
+		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+			if index == nil {
+				return command.TextErrorResult("feed index not available (no client)"), nil
+			}
+			var p struct {
+				Words []string `json:"words"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
+			}
+			if len(p.Words) == 0 {
+				return command.TextErrorResult("at least one word is required"), nil
+			}
+			if err := index.ensureBuilt(ctx); err != nil {
+				return command.TextErrorResult("building feed index: " + err.Error()), nil
+			}
+
+			seen := make(map[string]bool)
+			var results []feedSummary
+			for _, word := range p.Words {
+				for _, s := range index.words[strings.ToLower(word)] {
+					id := s.ID.String()
+					if !seen[id] {
+						seen[id] = true
+						results = append(results, s)
+					}
+				}
+			}
+
+			if results == nil {
+				results = []feedSummary{}
+			}
+
+			return command.JSONResult(results), nil
 		},
 	})
 }

@@ -26,12 +26,20 @@ func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []str
 	if len(userTags) > 0 {
 		form.Set("user_tags", strings.Join(userTags, ","))
 	}
-	return c.post(ctx, "/reader/mark_story_hash_as_starred", form)
+	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
+	if err == nil {
+		c.InvalidateStarredStoryPages()
+	}
+	return raw, err
 }
 
 func (c *Client) UnstarStory(ctx context.Context, storyHash string) (json.RawMessage, error) {
 	form := url.Values{"story_hash": {storyHash}}
-	return c.post(ctx, "/reader/mark_story_hash_as_unstarred", form)
+	raw, err := c.post(ctx, "/reader/mark_story_hash_as_unstarred", form)
+	if err == nil {
+		c.InvalidateStarredStoryPages()
+	}
+	return raw, err
 }
 
 func (c *Client) MarkFeedRead(ctx context.Context, feedID int) (json.RawMessage, error) {
