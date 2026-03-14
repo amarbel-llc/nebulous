@@ -6,3 +6,4 @@
 - [ ] Index story_content (HTML stripped) in saved_story_index for deeper content search
 - [x] Persist index caches to ~/.cache/nebulous to avoid rebuilding on every session start
 - [ ] Explore content-based cache addressing (etags or digests) for response cache freshness
+- [ ] Evaluate starred story word-index + query + cache workflows: are `starred_story_index_query` (local index) and `story_starred` with `query` param redundant? Consider index build cost (~100 API calls, rate limit risk) vs server-side search
