@@ -1,4 +1,5 @@
 - [ ] purse-first go-cli-framework skill references `go-lib-mcp` throughout — should say `go-mcp` (module is `github.com/amarbel-llc/purse-first/libs/go-mcp`)
 - [ ] Add `/api/login` support: accept NEWSBLUR_USER + NEWSBLUR_PASS env vars, auto-login and persist session cookie (currently requires pre-obtained session cookie via NEWSBLUR_TOKEN)
-- [ ] Live verification against NewsBlur API (Task 15 from impl plan)
+- [x] Live verification against NewsBlur API (Task 15 from impl plan)
+- [x] Add output.LimitText to feed_list, feed_stats, feed_autocomplete, story_feed, story_river (all exceeded 90K+ chars)
 - [ ] Add spec + code quality review pass over all tool implementations

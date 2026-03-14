@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
+	"github.com/amarbel-llc/purse-first/libs/go-mcp/output"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
 func registerStoryCommands(app *command.App, client *newsblur.Client) {
+	defaults := output.StandardDefaults()
+
 	readOnlyAnnotations := &protocol.ToolAnnotations{
 		ReadOnlyHint:    protocol.BoolPtr(true),
 		DestructiveHint: protocol.BoolPtr(false),
@@ -46,7 +50,11 @@ func registerStoryCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			limited := output.LimitText(string(result), defaults.MergeTextLimits(output.TextLimits{}))
+			if limited.Truncated {
+				return command.JSONResult(limited), nil
+			}
+			return command.TextResult(limited.Content), nil
 		},
 	})
 
@@ -76,7 +84,11 @@ func registerStoryCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			limited := output.LimitText(string(result), defaults.MergeTextLimits(output.TextLimits{}))
+			if limited.Truncated {
+				return command.JSONResult(limited), nil
+			}
+			return command.TextResult(limited.Content), nil
 		},
 	})
 
@@ -173,6 +185,12 @@ func toIntSlice(raw []any) ([]int, error) {
 				return nil, fmt.Errorf("expected integer, got %v", v)
 			}
 			out = append(out, int(i))
+		case string:
+			i, err := strconv.Atoi(n)
+			if err != nil {
+				return nil, fmt.Errorf("expected integer string, got %q", n)
+			}
+			out = append(out, i)
 		default:
 			return nil, fmt.Errorf("expected integer, got %T", v)
 		}

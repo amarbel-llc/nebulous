@@ -40,11 +40,11 @@
 
         version = "0.1.0";
 
-        nebulous = pkgs.buildGoModule {
+        nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
           inherit version;
           src = ./.;
-          vendorHash = "sha256-vPk1SsLO4F2/Fy4jgOVzzR5TQgjl+/WHAV5Pf1Jw1+Q=";
+          modules = ./gomod2nix.toml;
 
           subPackages = [ "cmd/nebulous" ];
 

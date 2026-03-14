@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
+	"github.com/amarbel-llc/purse-first/libs/go-mcp/output"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
 func registerFeedCommands(app *command.App, client *newsblur.Client) {
+	defaults := output.StandardDefaults()
+
 	readOnlyAnnotations := &protocol.ToolAnnotations{
 		ReadOnlyHint:    protocol.BoolPtr(true),
 		DestructiveHint: protocol.BoolPtr(false),
@@ -41,7 +44,11 @@ func registerFeedCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			limited := output.LimitText(string(result), defaults.MergeTextLimits(output.TextLimits{}))
+			if limited.Truncated {
+				return command.JSONResult(limited), nil
+			}
+			return command.TextResult(limited.Content), nil
 		},
 	})
 
@@ -89,7 +96,11 @@ func registerFeedCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			limited := output.LimitText(string(result), defaults.MergeTextLimits(output.TextLimits{}))
+			if limited.Truncated {
+				return command.JSONResult(limited), nil
+			}
+			return command.TextResult(limited.Content), nil
 		},
 	})
 
@@ -113,7 +124,11 @@ func registerFeedCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			limited := output.LimitText(string(result), defaults.MergeTextLimits(output.TextLimits{}))
+			if limited.Truncated {
+				return command.JSONResult(limited), nil
+			}
+			return command.TextResult(limited.Content), nil
 		},
 	})
 }
