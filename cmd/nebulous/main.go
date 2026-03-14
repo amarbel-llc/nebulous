@@ -44,6 +44,14 @@ func main() {
 		return
 	}
 
+	if flag.NArg() >= 1 && flag.Arg(0) == "install-mcp" {
+		app := tools.RegisterAll(nil)
+		if err := app.InstallMCP(); err != nil {
+			log.Fatalf("installing MCP: %v", err)
+		}
+		return
+	}
+
 	token := os.Getenv("NEWSBLUR_TOKEN")
 	if token == "" {
 		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
