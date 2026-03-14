@@ -85,7 +85,7 @@ func main() {
 	srv, err := server.New(t, server.Options{
 		ServerName:    app.Name,
 		ServerVersion: app.Version,
-		Instructions:  "NewsBlur MCP server. Provides tools for reading feeds, managing stories, subscriptions, folders, and OPML import/export. Feed and story content responses are verbose — delegate queries to a subagent to keep the main context lean. Use feed_query/saved_story_query as lightweight entry points for discovery.",
+		Instructions:  "NewsBlur MCP server. Provides tools for reading feeds, managing stories, subscriptions, folders, and OPML import/export. Feed and story content responses are verbose — delegate queries to a subagent to keep the main context lean. Use feed_query/starred_story_index_query as lightweight entry points for discovery.",
 		Tools:         registry,
 		Resources:     resources,
 	})
