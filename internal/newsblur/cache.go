@@ -43,6 +43,12 @@ func (c *responseCache) remove(key string) {
 	os.Remove(filepath.Join(c.dir, key))
 }
 
+func (c *responseCache) has(key string) bool {
+	fp := filepath.Join(c.dir, key)
+	_, err := os.Stat(fp)
+	return err == nil
+}
+
 func (c *responseCache) put(key string, body json.RawMessage) error {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return err
