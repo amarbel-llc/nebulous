@@ -8,10 +8,10 @@ import (
 )
 
 func (c *Client) StoriesFeed(ctx context.Context, feedID int, page int, order, readFilter, query string) (json.RawMessage, error) {
-	params := url.Values{}
-	if page > 0 {
-		params.Set("page", fmt.Sprintf("%d", page))
+	if page < 1 {
+		page = 1
 	}
+	params := url.Values{"page": {fmt.Sprintf("%d", page)}}
 	if order != "" {
 		params.Set("order", order)
 	}
@@ -29,17 +29,18 @@ func (c *Client) StoriesRiver(ctx context.Context, feedIDs []int, page int) (jso
 	for _, id := range feedIDs {
 		params.Add("feeds", fmt.Sprintf("%d", id))
 	}
-	if page > 0 {
-		params.Set("page", fmt.Sprintf("%d", page))
+	if page < 1 {
+		page = 1
 	}
+	params.Set("page", fmt.Sprintf("%d", page))
 	return c.get(ctx, "/reader/river_stories", params)
 }
 
 func (c *Client) StoriesStarred(ctx context.Context, page int, tag, query string) (json.RawMessage, error) {
-	params := url.Values{}
-	if page > 0 {
-		params.Set("page", fmt.Sprintf("%d", page))
+	if page < 1 {
+		page = 1
 	}
+	params := url.Values{"page": {fmt.Sprintf("%d", page)}}
 	if tag != "" {
 		params.Set("tag", tag)
 	}
