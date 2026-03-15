@@ -198,7 +198,7 @@ type adaptiveBackoff struct {
 
 func newAdaptiveBackoff(max time.Duration) *adaptiveBackoff {
 	return &adaptiveBackoff{
-		base:  0,
+		base:  3 * time.Minute,
 		max:   max,
 		extra: 1 * time.Second,
 	}
