@@ -132,9 +132,13 @@ func (c *Client) InvalidateStarredStoryPages() {
 	if c.cache == nil {
 		return
 	}
-	for page := 1; page <= 100; page++ {
+	for page := 1; ; page++ {
 		params := url.Values{"page": {fmt.Sprintf("%d", page)}}
-		c.cache.remove(c.cache.cacheKey("/reader/starred_stories", params))
+		key := c.cache.cacheKey("/reader/starred_stories", params)
+		if !c.cache.has(key) {
+			break
+		}
+		c.cache.remove(key)
 	}
 	c.cache.remove(c.cache.cacheKey("/reader/starred_story_hashes", nil))
 }
