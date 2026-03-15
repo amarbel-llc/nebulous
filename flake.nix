@@ -68,7 +68,7 @@
         devShells.default = pkgs.mkShell {
           inputsFrom = [
             go.devShells.${system}.default
-            shell.devShell.${system}
+            shell.devShells.${system}.default
           ];
         };
       }
