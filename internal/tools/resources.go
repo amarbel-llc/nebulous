@@ -184,13 +184,43 @@ func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, story
 		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
 	}
 
+	hasContent := storyHasContent(raw)
+
+	// Wrap raw story with has_content flag so agents know whether
+	// to fall back to story/{hash}/original for full text.
+	wrapped := struct {
+		HasContent bool            `json:"has_content"`
+		Story      json.RawMessage `json:"story"`
+	}{
+		HasContent: hasContent,
+		Story:      raw,
+	}
+
+	data, err := json.Marshal(wrapped)
+	if err != nil {
+		return nil, err
+	}
+
 	return &protocol.ResourceReadResult{
 		Contents: []protocol.ResourceContent{{
 			URI:      resourceURI,
 			MimeType: "application/json",
-			Text:     string(raw),
+			Text:     string(data),
 		}},
 	}, nil
+}
+
+// storyHasContent checks whether story_content contains substantive text
+// or is just a stub (e.g. HN stories that only contain a comments link).
+func storyHasContent(raw json.RawMessage) bool {
+	var story struct {
+		Content string `json:"story_content"`
+	}
+	if err := json.Unmarshal(raw, &story); err != nil {
+		return false
+	}
+	text := stripHTMLTags(story.Content)
+	return len(text) > 200
 }
 
 func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
@@ -213,7 +243,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.Resource{
 			URI:         "nebulous://feed_index",
 			Name:        "Feed Index",
-			Description: "Word index of all subscribed feeds. Returns word list for progressive discovery. Start here, then drill into feed_index/{word} → feed/{id} → feed/{id}/stories. Best used via subagent to keep main context lean.",
+			Description: "Word index of all subscribed feeds. Returns word list for progressive discovery. Pipeline: feed_query(words) → feed/{id} → feed/{id}/stories. Prefer feed_query tool over this resource — it searches directly. Best used via subagent.",
 			MimeType:    "application/json",
 		},
 		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
@@ -264,7 +294,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://feed_index/{word}",
 			Name:        "Feed Index Word Lookup",
-			Description: "Look up feeds matching a word. Returns compact feed summaries (id, title, folder, unread counts, active). Use feed IDs from results to drill into feed/{feed_id} or feed/{feed_id}/stories.",
+			Description: "Look up feeds matching a word. Returns compact feed summaries (id, title, folder, unread counts, active). Prefer feed_query tool instead — it accepts multiple words in one call. Use feed IDs to drill into feed/{feed_id} or feed/{feed_id}/stories.",
 			MimeType:    "application/json",
 		},
 		nil, // Template URIs handled by feedResourceProvider
@@ -294,7 +324,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://story/{story_hash}",
 			Name:        "Story Details",
-			Description: "Full story metadata and content from cache (title, content, tags, date, feed, permalink). Served from local cache — no API call. Use story hashes from index queries to fetch details for specific stories.",
+			Description: "Full story metadata and content from local cache — no API call. Returns {has_content, story} where has_content indicates whether story_content is substantive or a stub (e.g. HN link-only posts). When has_content is false, use story/{hash}/original to fetch the full article from the source URL. Get hashes from starred_story_index_query or feed tools. Ideal for subagent fanout: dispatch parallel resource reads by hash.",
 			MimeType:    "application/json",
 		},
 		nil,
@@ -304,7 +334,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://story/{story_hash}/original",
 			Name:        "Story Original Text",
-			Description: "Full original article text fetched from source URL. Response is very large — delegate to a subagent.",
+			Description: "Full original article text fetched from source URL. Use as fallback when story/{hash} returns has_content=false (stub content). Makes an HTTP request — slower than story/{hash}. Response can be very large — delegate to a subagent.",
 			MimeType:    "application/json",
 		},
 		nil,
@@ -314,7 +344,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.Resource{
 			URI:         "nebulous://saved_story_index",
 			Name:        "Saved Story Index",
-			Description: "Word index of starred/saved story titles and content (built from cache). Start here, then drill into saved_story_index/{word} → story/{hash}/original. Best used via subagent.",
+			Description: "Word index of starred/saved story titles and content (built from cache). Returns word list for discovery. Prefer starred_story_index_query tool — it searches directly and returns story summaries with hashes. Pipeline: starred_story_index_query(words) → story/{hash} → story/{hash}/original. Best used via subagent.",
 			MimeType:    "application/json",
 		},
 		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
@@ -369,7 +399,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://saved_story_index/{word}",
 			Name:        "Saved Story Index Word Lookup",
-			Description: "Look up saved stories matching a word by title. Returns compact summaries (hash, title, feed_id, date, permalink). Use story hashes to drill into story/{hash}/original.",
+			Description: "Look up saved stories matching a word. Returns compact summaries (hash, title, feed_id, date, permalink). Prefer starred_story_index_query tool — it accepts multiple words in one call. Use hashes to drill into story/{hash} (cached metadata) then story/{hash}/original if needed.",
 			MimeType:    "application/json",
 		},
 		nil,

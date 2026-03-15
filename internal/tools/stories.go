@@ -95,7 +95,7 @@ func registerStoryCommands(app *command.App, client *newsblur.Client) {
 	app.AddCommand(&command.Command{
 		Name: "story_starred",
 		Description: command.Description{
-			Short: "Get starred stories",
+			Short: "Get starred stories. Returns full story objects (10 per page). For discovery, prefer starred_story_index_query — it returns compact summaries with hashes for all matching stories in one call. Use those hashes with nebulous://story/{hash} resources for targeted reads. Only use story_starred for browsing without keywords or when you need server-side query/tag filtering.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{
@@ -151,7 +151,7 @@ func registerStoryCommands(app *command.App, client *newsblur.Client) {
 	app.AddCommand(&command.Command{
 		Name: "story_original_text",
 		Description: command.Description{
-			Short: "Get the original text content of a story",
+			Short: "Fetch original article text from source URL by story hash. Use as fallback when nebulous://story/{hash} returns has_content=false (common for HN and link-aggregator stories that only cache a stub). Makes an HTTP request — prefer story/{hash} resource first.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{
