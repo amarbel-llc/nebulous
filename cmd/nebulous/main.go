@@ -184,6 +184,67 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 	return nil
 }
 
+// adaptiveBackoff learns from rate limit bursts. After a burst of rate limits
+// resolves (success), the cumulative wait minus the peak single wait becomes
+// the starting backoff for the next burst. This progressively optimizes toward
+// the actual rate limit window, avoiding wasted small waits.
+type adaptiveBackoff struct {
+	base       time.Duration // learned starting backoff
+	max        time.Duration
+	current    time.Duration // current wait in this burst
+	cumulative time.Duration // total wait accumulated in this burst
+	peak       time.Duration // largest single wait in this burst
+}
+
+func newAdaptiveBackoff(max time.Duration) *adaptiveBackoff {
+	return &adaptiveBackoff{
+		base:    1 * time.Second,
+		max:     max,
+		current: 1 * time.Second,
+	}
+}
+
+func (b *adaptiveBackoff) nextWait(retryAfter time.Duration) time.Duration {
+	wait := b.current
+	if retryAfter > wait {
+		wait = retryAfter
+	}
+	b.cumulative += wait
+	if wait > b.peak {
+		b.peak = wait
+	}
+	b.current = b.current * 2
+	if b.current > b.max {
+		b.current = b.max
+	}
+	return wait
+}
+
+func (b *adaptiveBackoff) onSuccess() {
+	if b.cumulative > 0 {
+		learned := b.cumulative - b.peak
+		if learned > b.base {
+			b.base = learned
+			log.Printf("[backoff] learned new base: %s (cumulative %s - peak %s)",
+				learned, b.cumulative, b.peak)
+		}
+	}
+	b.current = b.base
+	b.cumulative = 0
+	b.peak = 0
+}
+
+func (b *adaptiveBackoff) wait(ctx context.Context, wait time.Duration) error {
+	t := time.NewTimer(wait)
+	select {
+	case <-ctx.Done():
+		t.Stop()
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, error) {
 	// Find first uncached page
 	startPage := 1
@@ -199,8 +260,7 @@ func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, 
 	}
 
 	fetched := 0
-	backoff := 1 * time.Second
-	maxBackoff := 5 * time.Minute
+	bo := newAdaptiveBackoff(5 * time.Minute)
 
 	for page := startPage; ; page++ {
 		if err := ctx.Err(); err != nil {
@@ -212,31 +272,20 @@ func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, 
 		if err != nil {
 			var rle *newsblur.RateLimitError
 			if errors.As(err, &rle) {
-				wait := backoff
-				if rle.RetryAfter > 0 {
-					wait = rle.RetryAfter
-				}
+				wait := bo.nextWait(rle.RetryAfter)
 				log.Printf("[starred] rate limited at page %d, backing off %s", page, wait)
 
-				t := time.NewTimer(wait)
-				select {
-				case <-ctx.Done():
-					t.Stop()
-					return startPage - 1 + fetched, ctx.Err()
-				case <-t.C:
+				if err := bo.wait(ctx, wait); err != nil {
+					return startPage - 1 + fetched, err
 				}
 
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
 				page-- // retry same page
 				continue
 			}
 			return startPage - 1 + fetched, fmt.Errorf("page %d: %w", page, err)
 		}
 
-		backoff = 1 * time.Second
+		bo.onSuccess()
 
 		var resp struct {
 			Stories []json.RawMessage `json:"stories"`
@@ -261,8 +310,7 @@ func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, 
 }
 
 func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) error) int {
-	backoff := 1 * time.Second
-	maxBackoff := 5 * time.Minute
+	bo := newAdaptiveBackoff(5 * time.Minute)
 	fetched := 0
 
 	for _, item := range items {
@@ -276,23 +324,11 @@ func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) er
 		if err != nil {
 			var rle *newsblur.RateLimitError
 			if errors.As(err, &rle) {
-				wait := backoff
-				if rle.RetryAfter > 0 {
-					wait = rle.RetryAfter
-				}
+				wait := bo.nextWait(rle.RetryAfter)
 				log.Printf("[original-text] rate limited at %d/%d, backing off %s", fetched, len(items), wait)
 
-				t := time.NewTimer(wait)
-				select {
-				case <-ctx.Done():
-					t.Stop()
+				if err := bo.wait(ctx, wait); err != nil {
 					return fetched
-				case <-t.C:
-				}
-
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
 				}
 				continue
 			}
@@ -300,8 +336,8 @@ func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) er
 			continue
 		}
 
+		bo.onSuccess()
 		fetched++
-		backoff = 1 * time.Second
 
 		if fetched%100 == 0 {
 			log.Printf("[original-text] fetched %d/%d", fetched, len(items))
