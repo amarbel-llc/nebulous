@@ -189,23 +189,23 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 // the starting backoff for the next burst. This progressively optimizes toward
 // the actual rate limit window, avoiding wasted small waits.
 type adaptiveBackoff struct {
-	base       time.Duration // learned starting backoff
+	base       time.Duration // learned floor from past bursts
 	max        time.Duration
-	current    time.Duration // current wait in this burst
+	extra      time.Duration // exponential addition on top of base
 	cumulative time.Duration // total wait accumulated in this burst
 	peak       time.Duration // largest single wait in this burst
 }
 
 func newAdaptiveBackoff(max time.Duration) *adaptiveBackoff {
 	return &adaptiveBackoff{
-		base:    1 * time.Second,
-		max:     max,
-		current: 1 * time.Second,
+		base:  0,
+		max:   max,
+		extra: 1 * time.Second,
 	}
 }
 
 func (b *adaptiveBackoff) nextWait(retryAfter time.Duration) time.Duration {
-	wait := b.current
+	wait := b.base + b.extra
 	if retryAfter > wait {
 		wait = retryAfter
 	}
@@ -213,9 +213,9 @@ func (b *adaptiveBackoff) nextWait(retryAfter time.Duration) time.Duration {
 	if wait > b.peak {
 		b.peak = wait
 	}
-	b.current = b.current * 2
-	if b.current > b.max {
-		b.current = b.max
+	b.extra = b.extra * 2
+	if b.base+b.extra > b.max {
+		b.extra = b.max - b.base
 	}
 	return wait
 }
@@ -229,7 +229,7 @@ func (b *adaptiveBackoff) onSuccess() {
 				learned, b.cumulative, b.peak)
 		}
 	}
-	b.current = b.base
+	b.extra = 1 * time.Second
 	b.cumulative = 0
 	b.peak = 0
 }
