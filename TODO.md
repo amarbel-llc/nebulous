@@ -3,7 +3,9 @@
 - [x] Live verification against NewsBlur API (Task 15 from impl plan)
 - [x] Add output.LimitText to feed_list, feed_stats, feed_autocomplete, story_feed, story_river (all exceeded 90K+ chars)
 - [ ] Add spec + code quality review pass over all tool implementations
-- [ ] Index story_content (HTML stripped) in saved_story_index for deeper content search
+- [x] Index story_content (HTML stripped) in saved_story_index for deeper content search
+- [ ] Move nebulous cache/index from ~/.cache/nebulous to ~/.local/share/nebulous (XDG_DATA_HOME) — it's an index, not a throwaway cache
+- [ ] Switch blob-storage portion of index to madder (github:amarbel-llc/dodder)
 - [x] Persist index caches to ~/.cache/nebulous to avoid rebuilding on every session start
 - [ ] Explore content-based cache addressing (etags or digests) for response cache freshness
 - [ ] Evaluate starred story word-index + query + cache workflows: are `starred_story_index_query` (local index) and `story_starred` with `query` param redundant? Consider index build cost (~100 API calls, rate limit risk) vs server-side search

@@ -20,7 +20,7 @@ func registerSavedStoryCommands(app *command.App, index *savedStoryIndex) {
 	app.AddCommand(&command.Command{
 		Name: "starred_story_index_query",
 		Description: command.Description{
-			Short: "Search saved/starred stories by word. Returns OR-union of matching story summaries from the title index. Lightweight entry point for saved story discovery — use this before fetching full story content.",
+			Short: "Search saved/starred stories by word. Returns OR-union of matching story summaries from the title and content index. Lightweight entry point for saved story discovery — use this before fetching full story content.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{
