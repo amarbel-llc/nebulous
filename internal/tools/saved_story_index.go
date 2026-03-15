@@ -15,10 +15,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-// TODO: Index story_content (HTML stripped) in addition to story_title for deeper content search.
-
 const (
-	savedStoryMaxPages  = 100           // ~1000 stories, avoids hammering the API
 	savedStoryPageDelay = 500 * time.Millisecond
 	savedStoryMaxRetries = 3
 	savedStoryBaseBackoff = 1 * time.Second
@@ -141,7 +138,7 @@ func computeStarredFingerprint(raw json.RawMessage) string {
 func (idx *savedStoryIndex) build(ctx context.Context) error {
 	totalStories := 0
 
-	for page := 1; page <= savedStoryMaxPages; page++ {
+	for page := 1; ; page++ {
 		if page > 1 {
 			if err := sleepCtx(ctx, savedStoryPageDelay); err != nil {
 				return err
@@ -165,32 +162,7 @@ func (idx *savedStoryIndex) build(ctx context.Context) error {
 		}
 
 		for _, storyRaw := range resp.Stories {
-			var story struct {
-				Hash      string `json:"story_hash"`
-				Title     string `json:"story_title"`
-				FeedID    int    `json:"story_feed_id"`
-				Date      string `json:"story_date"`
-				Permalink string `json:"story_permalink"`
-			}
-			if err := json.Unmarshal(storyRaw, &story); err != nil {
-				continue
-			}
-
-			summary := storySummary{
-				Hash:      story.Hash,
-				Title:     story.Title,
-				FeedID:    story.FeedID,
-				Date:      story.Date,
-				Permalink: story.Permalink,
-			}
-
-			seen := make(map[string]bool)
-			for _, word := range extractWords(story.Title) {
-				if !seen[word] {
-					seen[word] = true
-					idx.words[word] = append(idx.words[word], summary)
-				}
-			}
+			idx.indexStory(storyRaw)
 		}
 
 		totalStories += len(resp.Stories)
@@ -198,6 +170,56 @@ func (idx *savedStoryIndex) build(ctx context.Context) error {
 
 	log.Printf("saved story index: indexed %d stories, %d words", totalStories, len(idx.words))
 	return nil
+}
+
+func (idx *savedStoryIndex) indexStory(storyRaw json.RawMessage) {
+	var story struct {
+		Hash      string `json:"story_hash"`
+		Title     string `json:"story_title"`
+		Content   string `json:"story_content"`
+		FeedID    int    `json:"story_feed_id"`
+		Date      string `json:"story_date"`
+		Permalink string `json:"story_permalink"`
+	}
+	if err := json.Unmarshal(storyRaw, &story); err != nil {
+		return
+	}
+
+	summary := storySummary{
+		Hash:      story.Hash,
+		Title:     story.Title,
+		FeedID:    story.FeedID,
+		Date:      story.Date,
+		Permalink: story.Permalink,
+	}
+
+	seen := make(map[string]bool)
+	addWords := func(text string) {
+		for _, word := range extractWords(text) {
+			if !seen[word] {
+				seen[word] = true
+				idx.words[word] = append(idx.words[word], summary)
+			}
+		}
+	}
+
+	addWords(story.Title)
+
+	if story.Content != "" {
+		addWords(stripHTMLTags(story.Content))
+	}
+
+	// Opportunistically index cached original_text
+	if idx.client != nil {
+		if raw, ok := idx.client.CachedOriginalText(story.Hash); ok {
+			var ot struct {
+				OriginalText string `json:"original_text"`
+			}
+			if json.Unmarshal(raw, &ot) == nil && ot.OriginalText != "" {
+				addWords(stripHTMLTags(ot.OriginalText))
+			}
+		}
+	}
 }
 
 func (idx *savedStoryIndex) fetchPageWithRetry(ctx context.Context, page int) (json.RawMessage, error) {
