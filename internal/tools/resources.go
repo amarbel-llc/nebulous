@@ -50,8 +50,11 @@ func (p *feedResourceProvider) ReadResource(ctx context.Context, uri string) (*p
 	}
 	if strings.HasPrefix(uri, "nebulous://story/") {
 		hash := strings.TrimPrefix(uri, "nebulous://story/")
-		hash = strings.TrimSuffix(hash, "/original")
-		return p.readStoryOriginal(ctx, uri, hash)
+		if strings.HasSuffix(hash, "/original") {
+			hash = strings.TrimSuffix(hash, "/original")
+			return p.readStoryOriginal(ctx, uri, hash)
+		}
+		return p.readStory(ctx, uri, hash)
 	}
 	if strings.HasPrefix(uri, "nebulous://feed/") {
 		rest := strings.TrimPrefix(uri, "nebulous://feed/")
@@ -175,6 +178,21 @@ func (p *feedResourceProvider) readFeedStories(ctx context.Context, resourceURI,
 	}, nil
 }
 
+func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
+	raw, ok := p.savedStories.storyByHash(storyHash)
+	if !ok {
+		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{
+			URI:      resourceURI,
+			MimeType: "application/json",
+			Text:     string(raw),
+		}},
+	}, nil
+}
+
 func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
 	raw, err := p.client.OriginalText(ctx, storyHash)
 	if err != nil {
@@ -267,6 +285,16 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 			URITemplate: "nebulous://feed/{feed_id}/stories",
 			Name:        "Feed Stories",
 			Description: "Stories from a feed with full HTML content. Response is very large — delegate to a subagent.",
+			MimeType:    "application/json",
+		},
+		nil,
+	)
+
+	registry.RegisterTemplate(
+		protocol.ResourceTemplate{
+			URITemplate: "nebulous://story/{story_hash}",
+			Name:        "Story Details",
+			Description: "Full story metadata and content from cache (title, content, tags, date, feed, permalink). Served from local cache — no API call. Use story hashes from index queries to fetch details for specific stories.",
 			MimeType:    "application/json",
 		},
 		nil,

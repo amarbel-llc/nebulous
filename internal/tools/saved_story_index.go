@@ -22,10 +22,11 @@ type savedStoryIndexResult struct {
 }
 
 type savedStoryIndex struct {
-	client *newsblur.Client
-	once   sync.Once
-	words  map[string][]storySummary
-	err    error
+	client  *newsblur.Client
+	once    sync.Once
+	words   map[string][]storySummary
+	stories map[string]json.RawMessage
+	err     error
 }
 
 func newSavedStoryIndex(client *newsblur.Client) *savedStoryIndex {
@@ -46,8 +47,15 @@ func (idx *savedStoryIndex) ensureBuilt() savedStoryIndexResult {
 	return savedStoryIndexResult{words: idx.words}
 }
 
+func (idx *savedStoryIndex) storyByHash(hash string) (json.RawMessage, bool) {
+	idx.ensureBuilt()
+	raw, ok := idx.stories[hash]
+	return raw, ok
+}
+
 func (idx *savedStoryIndex) build() error {
 	totalStories := 0
+	idx.stories = make(map[string]json.RawMessage)
 
 	for page := 1; ; page++ {
 		raw, ok := idx.client.CachedStarredStoryPage(page)
@@ -68,6 +76,7 @@ func (idx *savedStoryIndex) build() error {
 
 		for _, storyRaw := range resp.Stories {
 			idx.indexStory(storyRaw)
+			idx.storeStory(storyRaw)
 		}
 
 		totalStories += len(resp.Stories)
@@ -125,5 +134,15 @@ func (idx *savedStoryIndex) indexStory(storyRaw json.RawMessage) {
 			}
 		}
 	}
+}
+
+func (idx *savedStoryIndex) storeStory(storyRaw json.RawMessage) {
+	var story struct {
+		Hash string `json:"story_hash"`
+	}
+	if err := json.Unmarshal(storyRaw, &story); err != nil || story.Hash == "" {
+		return
+	}
+	idx.stories[story.Hash] = storyRaw
 }
 
