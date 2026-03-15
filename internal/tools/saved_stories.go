@@ -39,7 +39,7 @@ func registerSavedStoryCommands(app *command.App, index *savedStoryIndex) {
 			if len(p.Words) == 0 {
 				return command.TextErrorResult("at least one word is required"), nil
 			}
-			res := index.ensureBuilt(ctx)
+			res := index.ensureBuilt()
 			if res.words == nil {
 				return command.TextErrorResult("building saved story index: " + res.warning), nil
 			}

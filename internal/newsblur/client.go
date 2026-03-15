@@ -168,6 +168,20 @@ func (c *Client) CachedOriginalText(storyHash string) (json.RawMessage, bool) {
 	return json.RawMessage(data), true
 }
 
+func (c *Client) CachedStarredStoryPage(page int) (json.RawMessage, bool) {
+	if c.cache == nil {
+		return nil, false
+	}
+	params := url.Values{"page": {fmt.Sprintf("%d", page)}}
+	key := c.cache.cacheKey("/reader/starred_stories", params)
+	fp := filepath.Join(c.cache.dir, key)
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
 func (c *Client) post(ctx context.Context, path string, form url.Values) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(form.Encode()))
 	if err != nil {

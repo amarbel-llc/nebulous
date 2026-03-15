@@ -1,24 +1,11 @@
 package tools
 
 import (
-	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log"
-	"sort"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/friedenberg/nebulous/internal/newsblur"
-)
-
-const (
-	savedStoryPageDelay = 500 * time.Millisecond
-	savedStoryMaxRetries = 3
-	savedStoryBaseBackoff = 1 * time.Second
 )
 
 type storySummary struct {
@@ -31,16 +18,14 @@ type storySummary struct {
 
 type savedStoryIndexResult struct {
 	words   map[string][]storySummary
-	partial bool
 	warning string
 }
 
 type savedStoryIndex struct {
-	client      *newsblur.Client
-	mu          sync.Mutex
-	built       bool
-	fingerprint string
-	words       map[string][]storySummary
+	client *newsblur.Client
+	once   sync.Once
+	words  map[string][]storySummary
+	err    error
 }
 
 func newSavedStoryIndex(client *newsblur.Client) *savedStoryIndex {
@@ -49,102 +34,25 @@ func newSavedStoryIndex(client *newsblur.Client) *savedStoryIndex {
 	}
 }
 
-func (idx *savedStoryIndex) ensureBuilt(ctx context.Context) savedStoryIndexResult {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
+func (idx *savedStoryIndex) ensureBuilt() savedStoryIndexResult {
+	idx.once.Do(func() {
+		idx.words = make(map[string][]storySummary)
+		idx.err = idx.build()
+	})
 
-	fp, fpErr := idx.fetchFingerprint(ctx)
-
-	if fpErr == nil && fp == idx.fingerprint && len(idx.words) > 0 {
-		return savedStoryIndexResult{words: idx.words, partial: !idx.built}
+	if idx.err != nil {
+		return savedStoryIndexResult{warning: idx.err.Error()}
 	}
-
-	if fpErr != nil {
-		log.Printf("saved story index: fingerprint fetch failed: %v", fpErr)
-		if idx.built || len(idx.words) > 0 {
-			return savedStoryIndexResult{
-				words:   idx.words,
-				partial: !idx.built,
-				warning: fpErr.Error(),
-			}
-		}
-	}
-
-	if fpErr == nil && fp != idx.fingerprint {
-		idx.client.InvalidateStarredStoryPages()
-	}
-
-	return idx.buildAndReturn(ctx, fp)
-}
-
-func (idx *savedStoryIndex) buildAndReturn(ctx context.Context, fp string) savedStoryIndexResult {
-	idx.words = make(map[string][]storySummary)
-
-	if err := idx.build(ctx); err != nil {
-		var rle *newsblur.RateLimitError
-		if errors.As(err, &rle) && len(idx.words) > 0 {
-			idx.fingerprint = fp
-			return savedStoryIndexResult{
-				words:   idx.words,
-				partial: true,
-				warning: err.Error(),
-			}
-		}
-		if len(idx.words) == 0 {
-			idx.words = nil
-		}
-		return savedStoryIndexResult{warning: err.Error()}
-	}
-
-	idx.built = true
-	idx.fingerprint = fp
 	return savedStoryIndexResult{words: idx.words}
 }
 
-func (idx *savedStoryIndex) fetchFingerprint(ctx context.Context) (string, error) {
-	raw, err := idx.client.StarredStoryHashes(ctx)
-	if err != nil {
-		return "", err
-	}
-	return computeStarredFingerprint(raw), nil
-}
-
-func computeStarredFingerprint(raw json.RawMessage) string {
-	var hashes []string
-
-	// API returns {"starred_story_hashes": ["hash1", ...], ...}
-	var envelope struct {
-		Hashes []string `json:"starred_story_hashes"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
-		hashes = envelope.Hashes
-		sort.Strings(hashes)
-		return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(hashes, ","))))
-	}
-
-	// Try flat array of strings: ["hash1", "hash2"]
-	if err := json.Unmarshal(raw, &hashes); err == nil {
-		sort.Strings(hashes)
-		return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(hashes, ","))))
-	}
-
-	// Fallback: hash the raw response
-	return fmt.Sprintf("%x", sha256.Sum256(raw))
-}
-
-func (idx *savedStoryIndex) build(ctx context.Context) error {
+func (idx *savedStoryIndex) build() error {
 	totalStories := 0
 
 	for page := 1; ; page++ {
-		if page > 1 {
-			if err := sleepCtx(ctx, savedStoryPageDelay); err != nil {
-				return err
-			}
-		}
-
-		raw, err := idx.fetchPageWithRetry(ctx, page)
-		if err != nil {
-			return fmt.Errorf("page %d (%d stories indexed so far): %w", page, totalStories, err)
+		raw, ok := idx.client.CachedStarredStoryPage(page)
+		if !ok {
+			break
 		}
 
 		var resp struct {
@@ -219,48 +127,3 @@ func (idx *savedStoryIndex) indexStory(storyRaw json.RawMessage) {
 	}
 }
 
-func (idx *savedStoryIndex) fetchPageWithRetry(ctx context.Context, page int) (json.RawMessage, error) {
-	backoff := savedStoryBaseBackoff
-
-	for attempt := range savedStoryMaxRetries {
-		raw, err := idx.client.StoriesStarred(ctx, page, "", "")
-		if err == nil {
-			return raw, nil
-		}
-
-		var rle *newsblur.RateLimitError
-		if !errors.As(err, &rle) {
-			return nil, err
-		}
-
-		if attempt == savedStoryMaxRetries-1 {
-			return nil, err
-		}
-
-		wait := backoff
-		if rle.RetryAfter > 0 {
-			wait = rle.RetryAfter
-		}
-
-		log.Printf("saved story index: rate limited on page %d, retrying in %s", page, wait)
-		if err := sleepCtx(ctx, wait); err != nil {
-			return nil, err
-		}
-
-		backoff *= 2
-	}
-
-	// unreachable
-	return nil, nil
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}

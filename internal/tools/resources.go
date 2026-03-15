@@ -119,7 +119,7 @@ func (p *feedResourceProvider) readFeed(ctx context.Context, resourceURI, feedID
 }
 
 func (p *feedResourceProvider) readSavedStoryIndexWord(ctx context.Context, resourceURI, word string) (*protocol.ResourceReadResult, error) {
-	res := p.savedStories.ensureBuilt(ctx)
+	res := p.savedStories.ensureBuilt()
 	if res.words == nil {
 		return nil, fmt.Errorf("building saved story index: %s", res.warning)
 	}
@@ -286,11 +286,11 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.Resource{
 			URI:         "nebulous://saved_story_index",
 			Name:        "Saved Story Index",
-			Description: "Word index of starred/saved story titles (~1000 most recent). Start here, then drill into saved_story_index/{word} → story/{hash}/original. Best used via subagent.",
+			Description: "Word index of starred/saved story titles and content (built from cache). Start here, then drill into saved_story_index/{word} → story/{hash}/original. Best used via subagent.",
 			MimeType:    "application/json",
 		},
 		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
-			res := savedStories.ensureBuilt(ctx)
+			res := savedStories.ensureBuilt()
 			if res.words == nil {
 				return nil, fmt.Errorf("building saved story index: %s", res.warning)
 			}
