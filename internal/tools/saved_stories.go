@@ -20,7 +20,7 @@ func registerSavedStoryCommands(app *command.App, index *savedStoryIndex) {
 	app.AddCommand(&command.Command{
 		Name: "starred_story_index_query",
 		Description: command.Description{
-			Short: "Search saved/starred stories by word. Returns compact summaries (hash, title, feed_id, date, permalink) — no full content, no pagination. This is the primary entry point for saved story discovery. Pipeline: starred_story_index_query(words) → nebulous://story/{hash} (cached metadata, check has_content) → nebulous://story/{hash}/original (full article from source, only if has_content=false). For broad analysis, use multiple topic words to get wide coverage. Fan out story/{hash} reads to subagents in parallel.",
+			Short: "Search saved/starred stories by word. Returns compact summaries (hash, title, feed_id, date, permalink) — no full content, no pagination. This is the primary entry point for saved story discovery. Pipeline: starred_story_index_query(words) → story/{hash} (metadata ~200B) → story/{hash}/content (text ~4KB) → story/{hash}/original (full article, API call). Fan out story/{hash} reads to subagents in parallel.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{

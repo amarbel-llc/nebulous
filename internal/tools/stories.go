@@ -151,7 +151,7 @@ func registerStoryCommands(app *command.App, client *newsblur.Client) {
 	app.AddCommand(&command.Command{
 		Name: "story_original_text",
 		Description: command.Description{
-			Short: "Fetch original article text from source URL by story hash. Use as fallback when nebulous://story/{hash} returns has_content=false (common for HN and link-aggregator stories that only cache a stub). Makes an HTTP request — prefer story/{hash} resource first.",
+			Short: "Fetch original article text from source URL by story hash. Use when story/{hash} shows has_content=false or story/{hash}/content was truncated. Makes an HTTP request — prefer story/{hash} and story/{hash}/content first.",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{

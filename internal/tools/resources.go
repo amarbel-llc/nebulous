@@ -54,6 +54,10 @@ func (p *feedResourceProvider) ReadResource(ctx context.Context, uri string) (*p
 			hash = strings.TrimSuffix(hash, "/original")
 			return p.readStoryOriginal(ctx, uri, hash)
 		}
+		if strings.HasSuffix(hash, "/content") {
+			hash = strings.TrimSuffix(hash, "/content")
+			return p.readStoryContent(ctx, uri, hash)
+		}
 		return p.readStory(ctx, uri, hash)
 	}
 	if strings.HasPrefix(uri, "nebulous://feed/") {
@@ -178,25 +182,60 @@ func (p *feedResourceProvider) readFeedStories(ctx context.Context, resourceURI,
 	}, nil
 }
 
+// readStory returns compact metadata only — no content, no NewsBlur noise fields.
+// Safe to read in top-level context without blowing up token budget.
 func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
 	raw, ok := p.savedStories.storyByHash(storyHash)
 	if !ok {
 		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
 	}
 
-	hasContent := storyHasContent(raw)
-
-	// Wrap raw story with has_content flag so agents know whether
-	// to fall back to story/{hash}/original for full text.
-	wrapped := struct {
-		HasContent bool            `json:"has_content"`
-		Story      json.RawMessage `json:"story"`
-	}{
-		HasContent: hasContent,
-		Story:      raw,
+	var full struct {
+		Hash      string   `json:"story_hash"`
+		Title     string   `json:"story_title"`
+		Content   string   `json:"story_content"`
+		Authors   string   `json:"story_authors"`
+		FeedID    int      `json:"story_feed_id"`
+		Date      string   `json:"story_date"`
+		Permalink string   `json:"story_permalink"`
+		Tags      []string `json:"story_tags"`
+		UserTags  []string `json:"user_tags"`
+	}
+	if err := json.Unmarshal(raw, &full); err != nil {
+		return nil, fmt.Errorf("parsing story: %w", err)
 	}
 
-	data, err := json.Marshal(wrapped)
+	stripped := stripHTMLTags(full.Content)
+	hasContent := len(stripped) > 200
+
+	// Rough token estimate: ~4 chars per token for English prose
+	contentTokens := len(stripped) / 4
+
+	meta := struct {
+		Hash          string   `json:"hash"`
+		Title         string   `json:"title"`
+		Authors       string   `json:"authors,omitempty"`
+		FeedID        int      `json:"feed_id"`
+		Date          string   `json:"date"`
+		Permalink     string   `json:"permalink"`
+		Tags          []string `json:"tags,omitempty"`
+		UserTags      []string `json:"user_tags,omitempty"`
+		HasContent    bool     `json:"has_content"`
+		ContentTokens int      `json:"content_tokens"`
+	}{
+		Hash:          full.Hash,
+		Title:         full.Title,
+		Authors:       full.Authors,
+		FeedID:        full.FeedID,
+		Date:          full.Date,
+		Permalink:     full.Permalink,
+		Tags:          full.Tags,
+		UserTags:      full.UserTags,
+		HasContent:    hasContent,
+		ContentTokens: contentTokens,
+	}
+
+	data, err := json.Marshal(meta)
 	if err != nil {
 		return nil, err
 	}
@@ -210,17 +249,61 @@ func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, story
 	}, nil
 }
 
-// storyHasContent checks whether story_content contains substantive text
-// or is just a stub (e.g. HN stories that only contain a comments link).
-func storyHasContent(raw json.RawMessage) bool {
-	var story struct {
-		Content string `json:"story_content"`
+// readStoryContent returns the cached story_content (HTML stripped, truncated).
+// Middle tier: more than metadata, less than original article.
+func (p *feedResourceProvider) readStoryContent(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
+	raw, ok := p.savedStories.storyByHash(storyHash)
+	if !ok {
+		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
 	}
-	if err := json.Unmarshal(raw, &story); err != nil {
-		return false
+
+	var full struct {
+		Hash      string `json:"story_hash"`
+		Title     string `json:"story_title"`
+		Content   string `json:"story_content"`
+		Permalink string `json:"story_permalink"`
 	}
-	text := stripHTMLTags(story.Content)
-	return len(text) > 200
+	if err := json.Unmarshal(raw, &full); err != nil {
+		return nil, fmt.Errorf("parsing story: %w", err)
+	}
+
+	text := stripHTMLTags(full.Content)
+	truncated := false
+	if len(text) > 4000 {
+		text = text[:4000]
+		truncated = true
+	}
+
+	hasContent := len(text) > 200
+
+	resp := struct {
+		Hash       string `json:"hash"`
+		Title      string `json:"title"`
+		Permalink  string `json:"permalink"`
+		Content    string `json:"content"`
+		HasContent bool   `json:"has_content"`
+		Truncated  bool   `json:"truncated"`
+	}{
+		Hash:       full.Hash,
+		Title:      full.Title,
+		Permalink:  full.Permalink,
+		Content:    text,
+		HasContent: hasContent,
+		Truncated:  truncated,
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{
+			URI:      resourceURI,
+			MimeType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
 }
 
 func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
@@ -323,8 +406,18 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 	registry.RegisterTemplate(
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://story/{story_hash}",
-			Name:        "Story Details",
-			Description: "Full story metadata and content from local cache — no API call. Returns {has_content, story} where has_content indicates whether story_content is substantive or a stub (e.g. HN link-only posts). When has_content is false, use story/{hash}/original to fetch the full article from the source URL. Get hashes from starred_story_index_query or feed tools. Ideal for subagent fanout: dispatch parallel resource reads by hash.",
+			Name:        "Story Metadata",
+			Description: "Compact story metadata from cache (~200 bytes, no API call). Returns hash, title, authors, date, permalink, tags, has_content, content_tokens. Safe to read in bulk without blowing context. Use has_content and content_tokens to decide whether to drill into story/{hash}/content or story/{hash}/original.",
+			MimeType:    "application/json",
+		},
+		nil,
+	)
+
+	registry.RegisterTemplate(
+		protocol.ResourceTemplate{
+			URITemplate: "nebulous://story/{story_hash}/content",
+			Name:        "Story Content",
+			Description: "Cached story content as plain text (HTML stripped, max 4000 chars). From local cache — no API call. When has_content=false (stub), content will be minimal; use story/{hash}/original instead to fetch from source URL.",
 			MimeType:    "application/json",
 		},
 		nil,
@@ -334,7 +427,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://story/{story_hash}/original",
 			Name:        "Story Original Text",
-			Description: "Full original article text fetched from source URL. Use as fallback when story/{hash} returns has_content=false (stub content). Makes an HTTP request — slower than story/{hash}. Response can be very large — delegate to a subagent.",
+			Description: "Full original article text fetched from source URL. Use when story/{hash} shows has_content=false or content was truncated. Makes an HTTP request. Response can be very large — delegate to a subagent.",
 			MimeType:    "application/json",
 		},
 		nil,
@@ -344,7 +437,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.Resource{
 			URI:         "nebulous://saved_story_index",
 			Name:        "Saved Story Index",
-			Description: "Word index of starred/saved story titles and content (built from cache). Returns word list for discovery. Prefer starred_story_index_query tool — it searches directly and returns story summaries with hashes. Pipeline: starred_story_index_query(words) → story/{hash} → story/{hash}/original. Best used via subagent.",
+			Description: "Word index of starred/saved story titles and content (built from cache). Returns word list for discovery. Prefer starred_story_index_query tool — it searches directly and returns story summaries with hashes. Pipeline: starred_story_index_query(words) → story/{hash} → story/{hash}/content → story/{hash}/original. Best used via subagent.",
 			MimeType:    "application/json",
 		},
 		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
@@ -399,7 +492,7 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://saved_story_index/{word}",
 			Name:        "Saved Story Index Word Lookup",
-			Description: "Look up saved stories matching a word. Returns compact summaries (hash, title, feed_id, date, permalink). Prefer starred_story_index_query tool — it accepts multiple words in one call. Use hashes to drill into story/{hash} (cached metadata) then story/{hash}/original if needed.",
+			Description: "Look up saved stories matching a word. Returns compact summaries (hash, title, feed_id, date, permalink). Prefer starred_story_index_query tool — it accepts multiple words in one call. Use hashes to drill into story/{hash} (metadata) → story/{hash}/content → story/{hash}/original.",
 			MimeType:    "application/json",
 		},
 		nil,
