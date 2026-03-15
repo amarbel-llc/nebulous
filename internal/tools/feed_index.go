@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"unicode"
@@ -195,4 +197,44 @@ func isNumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+var (
+	htmlTagRe    = regexp.MustCompile(`<[^>]*>`)
+	htmlEntityRe = regexp.MustCompile(`&(?:#x?)?[a-zA-Z0-9]+;`)
+	whitespaceRe = regexp.MustCompile(`\s+`)
+)
+
+var htmlEntities = map[string]string{
+	"&amp;":  "&",
+	"&lt;":   "<",
+	"&gt;":   ">",
+	"&quot;": `"`,
+	"&apos;": "'",
+	"&#39;":  "'",
+	"&nbsp;": " ",
+}
+
+func stripHTMLTags(s string) string {
+	s = htmlTagRe.ReplaceAllString(s, " ")
+	s = htmlEntityRe.ReplaceAllStringFunc(s, func(entity string) string {
+		if r, ok := htmlEntities[entity]; ok {
+			return r
+		}
+		if len(entity) > 3 && entity[1] == '#' {
+			inner := entity[2 : len(entity)-1]
+			var n int64
+			if inner[0] == 'x' || inner[0] == 'X' {
+				fmt.Sscanf(inner[1:], "%x", &n)
+			} else {
+				fmt.Sscanf(inner, "%d", &n)
+			}
+			if n > 0 && n < 0x10FFFF {
+				return string(rune(n))
+			}
+		}
+		return entity
+	})
+	s = whitespaceRe.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
 }
