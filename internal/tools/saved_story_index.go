@@ -112,21 +112,18 @@ func (idx *savedStoryIndex) fetchFingerprint(ctx context.Context) (string, error
 func computeStarredFingerprint(raw json.RawMessage) string {
 	var hashes []string
 
-	// Try flat array of strings: ["hash1", "hash2"]
-	if err := json.Unmarshal(raw, &hashes); err == nil {
+	// API returns {"starred_story_hashes": ["hash1", ...], ...}
+	var envelope struct {
+		Hashes []string `json:"starred_story_hashes"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
+		hashes = envelope.Hashes
 		sort.Strings(hashes)
 		return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(hashes, ","))))
 	}
 
-	// Try object with feed_id keys mapping to arrays of [hash, timestamp] pairs:
-	// {"123": [["hash1", "ts1"], ["hash2", "ts2"]]}
-	var byFeed map[string][][2]string
-	if err := json.Unmarshal(raw, &byFeed); err == nil {
-		for _, pairs := range byFeed {
-			for _, pair := range pairs {
-				hashes = append(hashes, pair[0])
-			}
-		}
+	// Try flat array of strings: ["hash1", "hash2"]
+	if err := json.Unmarshal(raw, &hashes); err == nil {
 		sort.Strings(hashes)
 		return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(hashes, ","))))
 	}

@@ -204,22 +204,18 @@ func fetchOriginalText(ctx context.Context, client *newsblur.Client) error {
 }
 
 func parseStarredHashes(raw json.RawMessage) ([]string, error) {
+	// API returns {"starred_story_hashes": ["hash1", ...], ...}
+	var envelope struct {
+		Hashes []string `json:"starred_story_hashes"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
+		return envelope.Hashes, nil
+	}
+
 	// Try flat array: ["hash1", "hash2"]
 	var flat []string
 	if err := json.Unmarshal(raw, &flat); err == nil {
 		return flat, nil
-	}
-
-	// Try feed-grouped: {"123": [["hash1", "ts1"], ...]}
-	var byFeed map[string][][2]string
-	if err := json.Unmarshal(raw, &byFeed); err == nil {
-		var hashes []string
-		for _, pairs := range byFeed {
-			for _, pair := range pairs {
-				hashes = append(hashes, pair[0])
-			}
-		}
-		return hashes, nil
 	}
 
 	return nil, fmt.Errorf("unrecognized starred_story_hashes format")
