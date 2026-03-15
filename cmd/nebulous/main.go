@@ -26,7 +26,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch-original-text  Progressively cache original article text\n\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch              Progressively cache feeds, starred stories, and original text\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN  NewsBlur session cookie (required)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
@@ -60,7 +60,7 @@ func main() {
 		return
 	}
 
-	if flag.NArg() >= 1 && flag.Arg(0) == "fetch-original-text" {
+	if flag.NArg() >= 1 && flag.Arg(0) == "fetch" {
 		token := os.Getenv("NEWSBLUR_TOKEN")
 		if token == "" {
 			log.Fatal("NEWSBLUR_TOKEN environment variable is required")
@@ -75,8 +75,8 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
-		if err := fetchOriginalText(ctx, client); err != nil {
-			log.Fatalf("fetch-original-text: %v", err)
+		if err := fetchAll(ctx, client); err != nil {
+			log.Fatalf("fetch: %v", err)
 		}
 		return
 	}
@@ -125,8 +125,32 @@ func main() {
 	}
 }
 
-func fetchOriginalText(ctx context.Context, client *newsblur.Client) error {
-	log.Println("fetching starred story hashes...")
+func fetchAll(ctx context.Context, client *newsblur.Client) error {
+	// Phase 1: Feeds metadata
+	log.Println("[feeds] fetching feed list...")
+	if _, err := client.Feeds(ctx, false, true, false); err != nil {
+		log.Printf("[feeds] error: %v (continuing)", err)
+	} else {
+		log.Println("[feeds] cached")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Phase 2: Starred story pages
+	log.Println("[starred] fetching starred story pages...")
+	starredPages, err := fetchStarredStoryPages(ctx, client)
+	if err != nil {
+		return fmt.Errorf("starred stories: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Phase 3: Original text for all starred story hashes
+	log.Println("[original-text] fetching starred story hashes...")
 	raw, err := client.StarredStoryHashes(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching hashes: %w", err)
@@ -144,26 +168,47 @@ func fetchOriginalText(ctx context.Context, client *newsblur.Client) error {
 		}
 	}
 
-	log.Printf("total: %d, cached: %d, missing: %d", len(hashes), len(hashes)-len(missing), len(missing))
+	log.Printf("[original-text] total: %d, cached: %d, missing: %d",
+		len(hashes), len(hashes)-len(missing), len(missing))
 
-	if len(missing) == 0 {
-		log.Println("all original text already cached")
-		return nil
+	if len(missing) > 0 {
+		fetched := fetchWithBackoff(ctx, missing, func(hash string) error {
+			_, err := client.OriginalText(ctx, hash)
+			return err
+		})
+		log.Printf("[original-text] fetched %d/%d", fetched, len(missing))
 	}
 
+	log.Printf("[done] feeds: cached, starred pages: %d, original text: %d/%d cached",
+		starredPages, len(hashes)-len(missing), len(hashes))
+	return nil
+}
+
+func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, error) {
+	// Find first uncached page
+	startPage := 1
+	for {
+		if _, ok := client.CachedStarredStoryPage(startPage); !ok {
+			break
+		}
+		startPage++
+	}
+
+	if startPage > 1 {
+		log.Printf("[starred] %d pages already cached, resuming from page %d", startPage-1, startPage)
+	}
+
+	fetched := 0
 	backoff := 1 * time.Second
 	maxBackoff := 5 * time.Minute
-	fetched := 0
 
-	for _, hash := range missing {
-		select {
-		case <-ctx.Done():
-			log.Printf("interrupted after fetching %d/%d", fetched, len(missing))
-			return ctx.Err()
-		default:
+	for page := startPage; ; page++ {
+		if err := ctx.Err(); err != nil {
+			log.Printf("[starred] interrupted at page %d (%d new pages cached)", page, fetched)
+			return startPage - 1 + fetched, err
 		}
 
-		_, err := client.OriginalText(ctx, hash)
+		raw, err := client.StoriesStarred(ctx, page, "", "")
 		if err != nil {
 			var rle *newsblur.RateLimitError
 			if errors.As(err, &rle) {
@@ -171,13 +216,77 @@ func fetchOriginalText(ctx context.Context, client *newsblur.Client) error {
 				if rle.RetryAfter > 0 {
 					wait = rle.RetryAfter
 				}
-				log.Printf("rate limited at %d/%d, backing off %s", fetched, len(missing), wait)
+				log.Printf("[starred] rate limited at page %d, backing off %s", page, wait)
 
 				t := time.NewTimer(wait)
 				select {
 				case <-ctx.Done():
 					t.Stop()
-					return ctx.Err()
+					return startPage - 1 + fetched, ctx.Err()
+				case <-t.C:
+				}
+
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				page-- // retry same page
+				continue
+			}
+			return startPage - 1 + fetched, fmt.Errorf("page %d: %w", page, err)
+		}
+
+		backoff = 1 * time.Second
+
+		var resp struct {
+			Stories []json.RawMessage `json:"stories"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return startPage - 1 + fetched, fmt.Errorf("page %d: %w", page, err)
+		}
+
+		if len(resp.Stories) == 0 {
+			break
+		}
+
+		fetched++
+
+		if fetched%100 == 0 {
+			log.Printf("[starred] cached %d pages (page %d)", fetched, page)
+		}
+	}
+
+	log.Printf("[starred] done: %d total pages cached", startPage-1+fetched)
+	return startPage - 1 + fetched, nil
+}
+
+func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) error) int {
+	backoff := 1 * time.Second
+	maxBackoff := 5 * time.Minute
+	fetched := 0
+
+	for _, item := range items {
+		select {
+		case <-ctx.Done():
+			return fetched
+		default:
+		}
+
+		err := fetch(item)
+		if err != nil {
+			var rle *newsblur.RateLimitError
+			if errors.As(err, &rle) {
+				wait := backoff
+				if rle.RetryAfter > 0 {
+					wait = rle.RetryAfter
+				}
+				log.Printf("[original-text] rate limited at %d/%d, backing off %s", fetched, len(items), wait)
+
+				t := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return fetched
 				case <-t.C:
 				}
 
@@ -187,20 +296,19 @@ func fetchOriginalText(ctx context.Context, client *newsblur.Client) error {
 				}
 				continue
 			}
-			log.Printf("error fetching %s: %v (skipping)", hash, err)
+			log.Printf("[original-text] error fetching %s: %v (skipping)", item, err)
 			continue
 		}
 
 		fetched++
-		backoff = 1 * time.Second // reset on success
+		backoff = 1 * time.Second
 
 		if fetched%100 == 0 {
-			log.Printf("fetched %d/%d", fetched, len(missing))
+			log.Printf("[original-text] fetched %d/%d", fetched, len(items))
 		}
 	}
 
-	log.Printf("done: fetched %d/%d", fetched, len(missing))
-	return nil
+	return fetched
 }
 
 func parseStarredHashes(raw json.RawMessage) ([]string, error) {
