@@ -12,3 +12,5 @@
 - [ ] `fetch`: retry rate-limited items instead of skipping — currently `fetchWithBackoff` continues to the next item on 429, silently skipping it until the next run
 - [ ] `fetch`: persist learned adaptive backoff base between runs — currently resets to default on each invocation, losing rate limit knowledge
 - [ ] FDR: cache-as-persistent-index architecture — MCP server is now fully offline (reads only from cache), `fetch` is the sole ingestion pipeline, cache is really a persistent index. Document design intent, data flow, and implications for the XDG migration
+- [ ] rename `fetch` to `sync`
+- [ ] add logs for `fetch` to help debug
