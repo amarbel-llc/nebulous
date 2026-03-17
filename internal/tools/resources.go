@@ -65,6 +65,17 @@ func (p *feedResourceProvider) ReadResource(
 		word := strings.TrimPrefix(uri, "nebulous://feed_index/")
 		return p.readFeedIndexWord(ctx, uri, word)
 	}
+	if uri == "nebulous://river" {
+		return p.readRiver(ctx, uri)
+	}
+	if strings.HasPrefix(uri, "nebulous://river/") {
+		pageStr := strings.TrimPrefix(uri, "nebulous://river/")
+		page, err := strconv.Atoi(pageStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid page number: %s", pageStr)
+		}
+		return p.readRiverPage(ctx, uri, page)
+	}
 	if strings.HasPrefix(uri, "nebulous://story/") {
 		hash := strings.TrimPrefix(uri, "nebulous://story/")
 		if strings.HasSuffix(hash, "/original") {
@@ -445,11 +456,148 @@ func (p *feedResourceProvider) readStoryOriginal(
 	}, nil
 }
 
+func (p *feedResourceProvider) readRiver(ctx context.Context, resourceURI string) (*protocol.ResourceReadResult, error) {
+	if err := p.stories.ensureBuilt(); err != nil {
+		return nil, fmt.Errorf("building story store: %w", err)
+	}
+
+	// Count cached pages
+	totalPages := 0
+	for page := 1; ; page++ {
+		if _, ok := p.client.CachedStarredStoryPage(page); !ok {
+			break
+		}
+		totalPages = page
+	}
+
+	type pageEntry struct {
+		Page int    `json:"page"`
+		URI  string `json:"uri"`
+	}
+
+	pages := make([]pageEntry, 0, totalPages)
+	for i := 1; i <= totalPages; i++ {
+		pages = append(pages, pageEntry{
+			Page: i,
+			URI:  fmt.Sprintf("nebulous://river/%d", i),
+		})
+	}
+
+	resp := struct {
+		TotalPages   int         `json:"total_pages"`
+		TotalStories int         `json:"total_stories"`
+		Pages        []pageEntry `json:"pages"`
+	}{
+		TotalPages:   totalPages,
+		TotalStories: len(p.stories.stories),
+		Pages:        pages,
+	}
+
+	data, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{
+			URI:      resourceURI,
+			MimeType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
+func (p *feedResourceProvider) readRiverPage(ctx context.Context, resourceURI string, page int) (*protocol.ResourceReadResult, error) {
+	raw, ok := p.client.CachedStarredStoryPage(page)
+	if !ok {
+		return nil, fmt.Errorf("page %d not in cache", page)
+	}
+
+	var resp struct {
+		Stories []json.RawMessage `json:"stories"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("parsing cached page: %w", err)
+	}
+
+	type riverSummary struct {
+		Hash      string `json:"hash"`
+		Title     string `json:"title"`
+		FeedID    int    `json:"feed_id"`
+		Date      string `json:"date"`
+		Permalink string `json:"permalink"`
+	}
+
+	summaries := make([]riverSummary, 0, len(resp.Stories))
+	for _, storyRaw := range resp.Stories {
+		var story struct {
+			Hash      string `json:"story_hash"`
+			Title     string `json:"story_title"`
+			FeedID    int    `json:"story_feed_id"`
+			Date      string `json:"story_date"`
+			Permalink string `json:"story_permalink"`
+		}
+		if err := json.Unmarshal(storyRaw, &story); err != nil {
+			continue
+		}
+		summaries = append(summaries, riverSummary{
+			Hash:      story.Hash,
+			Title:     story.Title,
+			FeedID:    story.FeedID,
+			Date:      story.Date,
+			Permalink: story.Permalink,
+		})
+	}
+
+	result := struct {
+		Page    int            `json:"page"`
+		Count   int            `json:"count"`
+		Stories []riverSummary `json:"stories"`
+	}{
+		Page:    page,
+		Count:   len(summaries),
+		Stories: summaries,
+	}
+
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{
+			URI:      resourceURI,
+			MimeType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
 func registerResources(
 	registry *server.ResourceRegistry,
 	index *feedIndex,
 	stories *storyStore,
 ) {
+	registry.RegisterResource(
+		protocol.Resource{
+			URI:         "nebulous://river",
+			Name:        "Story River",
+			Description: "Index of cached story pages. Returns page count, total stories, and URIs for each nebulous://river/{page} resource. Use as entry point for browsing all available stories.",
+			MimeType:    "application/json",
+		},
+		nil, // Handled by feedResourceProvider
+	)
+
+	registry.RegisterTemplate(
+		protocol.ResourceTemplate{
+			URITemplate: "nebulous://river/{page}",
+			Name:        "Story River Page",
+			Description: "Compact story summaries (hash, title, feed_id, date, permalink) for a cached page. No API call. Use nebulous://river to discover available pages.",
+			MimeType:    "application/json",
+		},
+		nil, // Handled by feedResourceProvider
+	)
+
 	registry.RegisterResource(
 		protocol.Resource{
 			URI:         "nebulous://feed_index",
