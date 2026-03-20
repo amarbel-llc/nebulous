@@ -20,7 +20,7 @@ func registerFeedCommands(app *command.App, index *feedIndex) {
 	app.AddCommand(&command.Command{
 		Name: "feed_query",
 		Description: command.Description{
-			Short: "Search feeds by word. Returns compact feed summaries (id, title, folder, unread counts). This is the primary entry point for feed discovery — no pagination needed. Pipeline: feed_query(words) → nebulous://feed/{id} (full metadata) → nebulous://feed/{id}/stories (recent stories). Prefer this over feed_list which returns 100KB+ for all feeds.",
+			Short: "Search feeds by word. Returns compact feed summaries (id, title, folder, unread counts). Primary entry point for feed discovery — no pagination needed. Pipeline: feed_query(words) → nebulous://feed/{id} (full metadata) → nebulous://feed/{id}/stories (recent stories).",
 		},
 		Annotations: readOnlyAnnotations,
 		Params: []command.Param{
