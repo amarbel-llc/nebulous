@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Nebulous is a NewsBlur MCP server written in Go. It wraps the NewsBlur REST API
-as MCP tools, enabling Claude to interact with feeds, stories, subscriptions,
-folders, and OPML import/export over JSON-RPC stdio.
+Nebulous is a NewsBlur MCP server written in Go. It serves feed and story data
+from a local persistent index, enabling Claude to interact with feeds, stories,
+subscriptions, folders, and OPML import/export over JSON-RPC stdio.
 
 Built on `go-mcp` from `github.com/amarbel-llc/purse-first/libs/go-mcp`.
 
@@ -33,8 +33,8 @@ The subcommands `generate-plugin`, `hook`, and `install-mcp` do not require a to
 ```
 cmd/nebulous/main.go          Entry point: parses args, creates client, starts MCP server
 internal/newsblur/             HTTP client wrapping NewsBlur REST API
-  client.go                    Client struct, request helpers
-  cache.go                     SHA256-keyed response cache (~/.cache/nebulous/responses/, 1h TTL)
+  client.go                    Client struct, request helpers, cache access
+  cache.go                     SHA256-keyed persistent store (~/.cache/nebulous/responses/)
   feeds.go, stories.go, ...    One file per API domain
 internal/tools/                MCP tool registration + handlers
   registry.go                  RegisterAll() → *command.App + ResourceProvider
@@ -44,11 +44,28 @@ internal/tools/                MCP tool registration + handlers
   resources.go                 MCP Resource provider with template URI resolution
 ```
 
+### Two-Phase Architecture: Sync + Serve
+
+The server operates in two distinct modes:
+
+- **`nebulous fetch`** (sync phase): Sequential CLI command that populates the
+  local persistent store by fetching from the NewsBlur API. Handles rate
+  limiting with adaptive backoff. Fetches feeds metadata, starred story pages,
+  and original article text. This is the sole ingestion pipeline — the MCP
+  server never hits the API for reads.
+
+- **MCP server** (serve phase): Reads exclusively from the local persistent
+  store. In-memory indices (`feedIndex`, `savedStoryIndex`) are built from
+  cached responses on first use via `sync.Once`. All query tools and resources
+  operate against these local indices.
+
 ### Data Flow
 
-MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers → `newsblur.Client`
-→ HTTP to `newsblur.com/api/*` → JSON response (optionally cached) →
-`output.LimitText()` (100KB / 2000 lines) → MCP response.
+Sync: `nebulous fetch` → `newsblur.Client` → HTTP to `newsblur.com/api/*`
+→ JSON response → persistent store (`~/.cache/nebulous/responses/`)
+
+Serve: MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers
+→ in-memory index (built from persistent store) → MCP response
 
 ### Key Patterns
 
@@ -56,11 +73,15 @@ MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers → `newsblur.Clie
   (`generate-plugin`, `hook`, `install-mcp`). Tool handlers and indices are
   only initialized when client is non-nil.
 - **In-memory indices**: `feedIndex` and `savedStoryIndex` use `sync.Once` for
-  lazy initialization with fingerprint-based cache invalidation persisted to
-  `~/.cache/nebulous/`.
+  lazy initialization, building from the persistent store on first query.
 - **All newsblur client methods return `json.RawMessage`** — parsing happens in
   tool handlers.
-- **Rate limiting**: `RateLimitError` type parses HTTP 429 + `Retry-After` header.
+- **Persistent store**: SHA256-keyed files under `~/.cache/nebulous/responses/`.
+  The 1h TTL applies to API-fetched responses; the `fetch` command and index
+  builders read without TTL checks for immutable content (original text, starred
+  story pages).
+- **Rate limiting**: `RateLimitError` type parses HTTP 429 + `Retry-After`
+  header. `adaptiveBackoff` learns optimal wait times from rate limit bursts.
 
 ## Nix Flake
 
