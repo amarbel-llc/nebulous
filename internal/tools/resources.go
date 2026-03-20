@@ -16,18 +16,18 @@ import (
 // feedResourceProvider wraps a ResourceRegistry to handle template URIs
 // via prefix matching (same pattern as lux).
 type feedResourceProvider struct {
-	registry       *server.ResourceRegistry
-	index          *feedIndex
-	savedStories   *savedStoryIndex
-	client         *newsblur.Client
+	registry *server.ResourceRegistry
+	index    *feedIndex
+	stories  *storyStore
+	client   *newsblur.Client
 }
 
-func newFeedResourceProvider(registry *server.ResourceRegistry, index *feedIndex, savedStories *savedStoryIndex, client *newsblur.Client) *feedResourceProvider {
+func newFeedResourceProvider(registry *server.ResourceRegistry, index *feedIndex, stories *storyStore, client *newsblur.Client) *feedResourceProvider {
 	return &feedResourceProvider{
-		registry:     registry,
-		index:        index,
-		savedStories: savedStories,
-		client:       client,
+		registry: registry,
+		index:    index,
+		stories:  stories,
+		client:   client,
 	}
 }
 
@@ -40,13 +40,15 @@ func (p *feedResourceProvider) ListResourceTemplates(ctx context.Context) ([]pro
 }
 
 func (p *feedResourceProvider) ReadResource(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
+	if uri == "nebulous://stories/facets" {
+		return p.readStoryFacets(ctx, uri)
+	}
+	if uri == "nebulous://feeds/facets" {
+		return p.readFeedFacets(ctx, uri)
+	}
 	if strings.HasPrefix(uri, "nebulous://feed_index/") {
 		word := strings.TrimPrefix(uri, "nebulous://feed_index/")
 		return p.readFeedIndexWord(ctx, uri, word)
-	}
-	if strings.HasPrefix(uri, "nebulous://saved_story_index/") {
-		word := strings.TrimPrefix(uri, "nebulous://saved_story_index/")
-		return p.readSavedStoryIndexWord(ctx, uri, word)
 	}
 	if strings.HasPrefix(uri, "nebulous://story/") {
 		hash := strings.TrimPrefix(uri, "nebulous://story/")
@@ -125,27 +127,59 @@ func (p *feedResourceProvider) readFeed(ctx context.Context, resourceURI, feedID
 	}, nil
 }
 
-func (p *feedResourceProvider) readSavedStoryIndexWord(ctx context.Context, resourceURI, word string) (*protocol.ResourceReadResult, error) {
-	res := p.savedStories.ensureBuilt()
-	if res.words == nil {
-		return nil, fmt.Errorf("building saved story index: %s", res.warning)
+func (p *feedResourceProvider) readStoryFacets(ctx context.Context, resourceURI string) (*protocol.ResourceReadResult, error) {
+	if err := p.stories.ensureBuilt(); err != nil {
+		return nil, fmt.Errorf("building story store: %w", err)
 	}
 
-	word = strings.ToLower(word)
-	stories := res.words[word]
+	facets := p.stories.facets()
+	data, err := json.MarshalIndent(facets, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{URI: resourceURI, MimeType: "application/json", Text: string(data)}},
+	}, nil
+}
+
+func (p *feedResourceProvider) readFeedFacets(ctx context.Context, resourceURI string) (*protocol.ResourceReadResult, error) {
+	if err := p.index.ensureBuilt(ctx); err != nil {
+		return nil, fmt.Errorf("building feed index: %w", err)
+	}
+
+	byFolder := make(map[string]int)
+	active, inactive := 0, 0
+
+	seen := make(map[string]bool)
+	for _, summaries := range p.index.words {
+		for _, s := range summaries {
+			id := s.ID.String()
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			if s.Folder != "" {
+				byFolder[s.Folder]++
+			}
+			if s.Active {
+				active++
+			} else {
+				inactive++
+			}
+		}
+	}
 
 	resp := struct {
-		Word    string         `json:"word"`
-		Count   int            `json:"count"`
-		Stories []storySummary `json:"stories"`
+		TotalFeeds int            `json:"total_feeds"`
+		Active     int            `json:"active"`
+		Inactive   int            `json:"inactive"`
+		ByFolder   map[string]int `json:"by_folder"`
 	}{
-		Word:    word,
-		Count:   len(stories),
-		Stories: stories,
-	}
-
-	if resp.Stories == nil {
-		resp.Stories = []storySummary{}
+		TotalFeeds: len(seen),
+		Active:     active,
+		Inactive:   inactive,
+		ByFolder:   byFolder,
 	}
 
 	data, err := json.MarshalIndent(resp, "", "  ")
@@ -154,11 +188,7 @@ func (p *feedResourceProvider) readSavedStoryIndexWord(ctx context.Context, reso
 	}
 
 	return &protocol.ResourceReadResult{
-		Contents: []protocol.ResourceContent{{
-			URI:      resourceURI,
-			MimeType: "application/json",
-			Text:     string(data),
-		}},
+		Contents: []protocol.ResourceContent{{URI: resourceURI, MimeType: "application/json", Text: string(data)}},
 	}, nil
 }
 
@@ -185,31 +215,10 @@ func (p *feedResourceProvider) readFeedStories(ctx context.Context, resourceURI,
 // readStory returns compact metadata only — no content, no NewsBlur noise fields.
 // Safe to read in top-level context without blowing up token budget.
 func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
-	raw, ok := p.savedStories.storyByHash(storyHash)
+	rec, ok := p.stories.storyByHash(storyHash)
 	if !ok {
-		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
+		return nil, fmt.Errorf("story not found in store: %s", storyHash)
 	}
-
-	var full struct {
-		Hash      string   `json:"story_hash"`
-		Title     string   `json:"story_title"`
-		Content   string   `json:"story_content"`
-		Authors   string   `json:"story_authors"`
-		FeedID    int      `json:"story_feed_id"`
-		Date      string   `json:"story_date"`
-		Permalink string   `json:"story_permalink"`
-		Tags      []string `json:"story_tags"`
-		UserTags  []string `json:"user_tags"`
-	}
-	if err := json.Unmarshal(raw, &full); err != nil {
-		return nil, fmt.Errorf("parsing story: %w", err)
-	}
-
-	stripped := stripHTMLTags(full.Content)
-	hasContent := len(stripped) > 200
-
-	// Rough token estimate: ~4 chars per token for English prose
-	contentTokens := len(stripped) / 4
 
 	meta := struct {
 		Hash          string   `json:"hash"`
@@ -223,16 +232,16 @@ func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, story
 		HasContent    bool     `json:"has_content"`
 		ContentTokens int      `json:"content_tokens"`
 	}{
-		Hash:          full.Hash,
-		Title:         full.Title,
-		Authors:       full.Authors,
-		FeedID:        full.FeedID,
-		Date:          full.Date,
-		Permalink:     full.Permalink,
-		Tags:          full.Tags,
-		UserTags:      full.UserTags,
-		HasContent:    hasContent,
-		ContentTokens: contentTokens,
+		Hash:          rec.Hash,
+		Title:         rec.Title,
+		Authors:       rec.Authors,
+		FeedID:        rec.FeedID,
+		Date:          rec.Date.Format("2006-01-02 15:04:05"),
+		Permalink:     rec.Permalink,
+		Tags:          rec.Tags,
+		UserTags:      rec.UserTags,
+		HasContent:    rec.HasContent,
+		ContentTokens: rec.ContentTokens,
 	}
 
 	data, err := json.Marshal(meta)
@@ -252,9 +261,9 @@ func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, story
 // readStoryContent returns the cached story_content (HTML stripped, truncated).
 // Middle tier: more than metadata, less than original article.
 func (p *feedResourceProvider) readStoryContent(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
-	raw, ok := p.savedStories.storyByHash(storyHash)
+	raw, ok := p.stories.rawStoryByHash(storyHash)
 	if !ok {
-		return nil, fmt.Errorf("story not found in cache: %s", storyHash)
+		return nil, fmt.Errorf("story not found in store: %s", storyHash)
 	}
 
 	var full struct {
@@ -321,7 +330,7 @@ func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceUR
 	}, nil
 }
 
-func registerResources(registry *server.ResourceRegistry, index *feedIndex, savedStories *savedStoryIndex) {
+func registerResources(registry *server.ResourceRegistry, index *feedIndex, stories *storyStore) {
 	registry.RegisterResource(
 		protocol.Resource{
 			URI:         "nebulous://feed_index",
@@ -435,64 +444,19 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, save
 
 	registry.RegisterResource(
 		protocol.Resource{
-			URI:         "nebulous://saved_story_index",
-			Name:        "Saved Story Index",
-			Description: "Word index of starred/saved story titles and content (built from cache). Returns word list for discovery. Prefer starred_story_index_query tool — it searches directly and returns story summaries with hashes. Pipeline: starred_story_index_query(words) → story/{hash} → story/{hash}/content → story/{hash}/original. Best used via subagent.",
+			URI:         "nebulous://stories/facets",
+			Name:        "Story Facets",
+			Description: "Aggregate counts of all indexed stories by year, tag, feed, and status. Read this first to understand the data shape before querying with story_query. Lightweight — no story content, just counts.",
 			MimeType:    "application/json",
 		},
-		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
-			res := savedStories.ensureBuilt()
-			if res.words == nil {
-				return nil, fmt.Errorf("building saved story index: %s", res.warning)
-			}
-
-			words := make([]string, 0, len(res.words))
-			for w := range res.words {
-				words = append(words, w)
-			}
-			sort.Strings(words)
-
-			totalStories := 0
-			storiesSeen := make(map[string]bool)
-			for _, summaries := range res.words {
-				for _, s := range summaries {
-					if !storiesSeen[s.Hash] {
-						storiesSeen[s.Hash] = true
-						totalStories++
-					}
-				}
-			}
-
-			resp := struct {
-				TotalWords   int      `json:"total_words"`
-				TotalStories int      `json:"total_stories"`
-				Words        []string `json:"words"`
-			}{
-				TotalWords:   len(words),
-				TotalStories: totalStories,
-				Words:        words,
-			}
-
-			data, err := json.MarshalIndent(resp, "", "  ")
-			if err != nil {
-				return nil, err
-			}
-
-			return &protocol.ResourceReadResult{
-				Contents: []protocol.ResourceContent{{
-					URI:      uri,
-					MimeType: "application/json",
-					Text:     string(data),
-				}},
-			}, nil
-		},
+		nil,
 	)
 
-	registry.RegisterTemplate(
-		protocol.ResourceTemplate{
-			URITemplate: "nebulous://saved_story_index/{word}",
-			Name:        "Saved Story Index Word Lookup",
-			Description: "Look up saved stories matching a word. Returns compact summaries (hash, title, feed_id, date, permalink). Prefer starred_story_index_query tool — it accepts multiple words in one call. Use hashes to drill into story/{hash} (metadata) → story/{hash}/content → story/{hash}/original.",
+	registry.RegisterResource(
+		protocol.Resource{
+			URI:         "nebulous://feeds/facets",
+			Name:        "Feed Facets",
+			Description: "Aggregate counts of subscribed feeds by folder and active/inactive status. Lightweight overview of the subscription list.",
 			MimeType:    "application/json",
 		},
 		nil,

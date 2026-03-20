@@ -188,3 +188,32 @@ func (s *storyStore) storyByHash(hash string) (*storyRecord, bool) {
 	}
 	return nil, false
 }
+
+// rawStoryByHash walks cached pages to find the raw JSON for a story hash.
+// Used by readStoryContent which needs the original story_content HTML.
+func (s *storyStore) rawStoryByHash(hash string) (json.RawMessage, bool) {
+	if err := s.ensureBuilt(); err != nil {
+		return nil, false
+	}
+	for page := 1; ; page++ {
+		raw, ok := s.client.CachedStarredStoryPage(page)
+		if !ok {
+			break
+		}
+		var resp struct {
+			Stories []json.RawMessage `json:"stories"`
+		}
+		if json.Unmarshal(raw, &resp) != nil {
+			continue
+		}
+		for _, storyRaw := range resp.Stories {
+			var story struct {
+				Hash string `json:"story_hash"`
+			}
+			if json.Unmarshal(storyRaw, &story) == nil && story.Hash == hash {
+				return storyRaw, true
+			}
+		}
+	}
+	return nil, false
+}
