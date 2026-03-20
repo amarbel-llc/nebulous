@@ -17,14 +17,12 @@ func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider
 		storyStr = newStoryStore(client)
 	}
 
-	registerFeedCommands(app, client, feedIdx)
-	registerStoryCommands(app, client)
+	registerFeedCommands(app, feedIdx)
 	registerStoryQueryCommand(app, storyStr)
 	registerReaderCommands(app, client)
 	registerSubscriptionCommands(app, client)
 	registerFolderCommands(app, client)
 	registerImportExportCommands(app, client)
-	registerSavedStoryCommands(app, nil) // Keep old tools temporarily
 
 	var resources server.ResourceProvider
 	if feedIdx != nil {
