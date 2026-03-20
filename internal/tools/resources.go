@@ -22,7 +22,12 @@ type feedResourceProvider struct {
 	client   *newsblur.Client
 }
 
-func newFeedResourceProvider(registry *server.ResourceRegistry, index *feedIndex, stories *storyStore, client *newsblur.Client) *feedResourceProvider {
+func newFeedResourceProvider(
+	registry *server.ResourceRegistry,
+	index *feedIndex,
+	stories *storyStore,
+	client *newsblur.Client,
+) *feedResourceProvider {
 	return &feedResourceProvider{
 		registry: registry,
 		index:    index,
@@ -31,15 +36,25 @@ func newFeedResourceProvider(registry *server.ResourceRegistry, index *feedIndex
 	}
 }
 
-func (p *feedResourceProvider) ListResources(ctx context.Context) ([]protocol.Resource, error) {
+func (p *feedResourceProvider) ListResources(
+	ctx context.Context,
+) ([]protocol.Resource, error) {
 	return p.registry.ListResources(ctx)
 }
 
-func (p *feedResourceProvider) ListResourceTemplates(ctx context.Context) ([]protocol.ResourceTemplate, error) {
+func (p *feedResourceProvider) ListResourceTemplates(
+	ctx context.Context,
+) ([]protocol.ResourceTemplate, error) {
 	return p.registry.ListResourceTemplates(ctx)
 }
 
-func (p *feedResourceProvider) ReadResource(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) ReadResource(
+	ctx context.Context,
+	uri string,
+) (*protocol.ResourceReadResult, error) {
+	if uri == "nebulous://tags" {
+		return p.readTags(ctx, uri)
+	}
 	if uri == "nebulous://stories/facets" {
 		return p.readStoryFacets(ctx, uri)
 	}
@@ -72,7 +87,10 @@ func (p *feedResourceProvider) ReadResource(ctx context.Context, uri string) (*p
 	return p.registry.ReadResource(ctx, uri)
 }
 
-func (p *feedResourceProvider) readFeedIndexWord(ctx context.Context, resourceURI, word string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readFeedIndexWord(
+	ctx context.Context,
+	resourceURI, word string,
+) (*protocol.ResourceReadResult, error) {
 	if err := p.index.ensureBuilt(ctx); err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
@@ -108,7 +126,10 @@ func (p *feedResourceProvider) readFeedIndexWord(ctx context.Context, resourceUR
 	}, nil
 }
 
-func (p *feedResourceProvider) readFeed(ctx context.Context, resourceURI, feedID string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readFeed(
+	ctx context.Context,
+	resourceURI, feedID string,
+) (*protocol.ResourceReadResult, error) {
 	if err := p.index.ensureBuilt(ctx); err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
@@ -127,7 +148,73 @@ func (p *feedResourceProvider) readFeed(ctx context.Context, resourceURI, feedID
 	}, nil
 }
 
-func (p *feedResourceProvider) readStoryFacets(ctx context.Context, resourceURI string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readTags(
+	ctx context.Context,
+	resourceURI string,
+) (*protocol.ResourceReadResult, error) {
+	if err := p.stories.ensureBuilt(); err != nil {
+		return nil, fmt.Errorf("building story store: %w", err)
+	}
+
+	userTags := make(map[string]int)
+	storyTags := make(map[string]int)
+
+	for _, rec := range p.stories.stories {
+		for _, t := range rec.UserTags {
+			userTags[t]++
+		}
+		for _, t := range rec.Tags {
+			storyTags[t]++
+		}
+	}
+
+	type tagEntry struct {
+		Tag   string `json:"tag"`
+		Count int    `json:"count"`
+	}
+
+	sortedTags := func(m map[string]int) []tagEntry {
+		entries := make([]tagEntry, 0, len(m))
+		for t, c := range m {
+			entries = append(entries, tagEntry{Tag: t, Count: c})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].Count != entries[j].Count {
+				return entries[i].Count > entries[j].Count
+			}
+			return entries[i].Tag < entries[j].Tag
+		})
+		return entries
+	}
+
+	resp := struct {
+		TotalStories int        `json:"total_stories"`
+		UserTags     []tagEntry `json:"user_tags"`
+		StoryTags    []tagEntry `json:"story_tags"`
+	}{
+		TotalStories: len(p.stories.stories),
+		UserTags:     sortedTags(userTags),
+		StoryTags:    sortedTags(storyTags),
+	}
+
+	data, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.ResourceReadResult{
+		Contents: []protocol.ResourceContent{{
+			URI:      resourceURI,
+			MimeType: "application/json",
+			Text:     string(data),
+		}},
+	}, nil
+}
+
+func (p *feedResourceProvider) readStoryFacets(
+	ctx context.Context,
+	resourceURI string,
+) (*protocol.ResourceReadResult, error) {
 	if err := p.stories.ensureBuilt(); err != nil {
 		return nil, fmt.Errorf("building story store: %w", err)
 	}
@@ -139,11 +226,20 @@ func (p *feedResourceProvider) readStoryFacets(ctx context.Context, resourceURI 
 	}
 
 	return &protocol.ResourceReadResult{
-		Contents: []protocol.ResourceContent{{URI: resourceURI, MimeType: "application/json", Text: string(data)}},
+		Contents: []protocol.ResourceContent{
+			{
+				URI:      resourceURI,
+				MimeType: "application/json",
+				Text:     string(data),
+			},
+		},
 	}, nil
 }
 
-func (p *feedResourceProvider) readFeedFacets(ctx context.Context, resourceURI string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readFeedFacets(
+	ctx context.Context,
+	resourceURI string,
+) (*protocol.ResourceReadResult, error) {
 	if err := p.index.ensureBuilt(ctx); err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
@@ -188,11 +284,20 @@ func (p *feedResourceProvider) readFeedFacets(ctx context.Context, resourceURI s
 	}
 
 	return &protocol.ResourceReadResult{
-		Contents: []protocol.ResourceContent{{URI: resourceURI, MimeType: "application/json", Text: string(data)}},
+		Contents: []protocol.ResourceContent{
+			{
+				URI:      resourceURI,
+				MimeType: "application/json",
+				Text:     string(data),
+			},
+		},
 	}, nil
 }
 
-func (p *feedResourceProvider) readFeedStories(ctx context.Context, resourceURI, feedID string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readFeedStories(
+	ctx context.Context,
+	resourceURI, feedID string,
+) (*protocol.ResourceReadResult, error) {
 	id, err := strconv.Atoi(feedID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid feed ID: %s", feedID)
@@ -212,9 +317,13 @@ func (p *feedResourceProvider) readFeedStories(ctx context.Context, resourceURI,
 	}, nil
 }
 
-// readStory returns compact metadata only — no content, no NewsBlur noise fields.
+// readStory returns compact metadata only — no content, no NewsBlur noise
+// fields.
 // Safe to read in top-level context without blowing up token budget.
-func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readStory(
+	ctx context.Context,
+	resourceURI, storyHash string,
+) (*protocol.ResourceReadResult, error) {
 	rec, ok := p.stories.storyByHash(storyHash)
 	if !ok {
 		return nil, fmt.Errorf("story not found in store: %s", storyHash)
@@ -260,7 +369,10 @@ func (p *feedResourceProvider) readStory(ctx context.Context, resourceURI, story
 
 // readStoryContent returns the cached story_content (HTML stripped, truncated).
 // Middle tier: more than metadata, less than original article.
-func (p *feedResourceProvider) readStoryContent(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readStoryContent(
+	ctx context.Context,
+	resourceURI, storyHash string,
+) (*protocol.ResourceReadResult, error) {
 	raw, ok := p.stories.rawStoryByHash(storyHash)
 	if !ok {
 		return nil, fmt.Errorf("story not found in store: %s", storyHash)
@@ -315,7 +427,10 @@ func (p *feedResourceProvider) readStoryContent(ctx context.Context, resourceURI
 	}, nil
 }
 
-func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceURI, storyHash string) (*protocol.ResourceReadResult, error) {
+func (p *feedResourceProvider) readStoryOriginal(
+	ctx context.Context,
+	resourceURI, storyHash string,
+) (*protocol.ResourceReadResult, error) {
 	raw, err := p.client.OriginalText(ctx, storyHash)
 	if err != nil {
 		return nil, fmt.Errorf("fetching original text: %w", err)
@@ -330,7 +445,11 @@ func (p *feedResourceProvider) readStoryOriginal(ctx context.Context, resourceUR
 	}, nil
 }
 
-func registerResources(registry *server.ResourceRegistry, index *feedIndex, stories *storyStore) {
+func registerResources(
+	registry *server.ResourceRegistry,
+	index *feedIndex,
+	stories *storyStore,
+) {
 	registry.RegisterResource(
 		protocol.Resource{
 			URI:         "nebulous://feed_index",
@@ -457,6 +576,16 @@ func registerResources(registry *server.ResourceRegistry, index *feedIndex, stor
 			URI:         "nebulous://feeds/facets",
 			Name:        "Feed Facets",
 			Description: "Aggregate counts of subscribed feeds by folder and active/inactive status. Lightweight overview of the subscription list.",
+			MimeType:    "application/json",
+		},
+		nil,
+	)
+
+	registry.RegisterResource(
+		protocol.Resource{
+			URI:         "nebulous://tags",
+			Name:        "Tags",
+			Description: "All tags across indexed stories, sorted by frequency. Shows user_tags (star tags you assigned) and story_tags (feed-assigned categories) separately with counts. Lightweight entry point for tag discovery.",
 			MimeType:    "application/json",
 		},
 		nil,
