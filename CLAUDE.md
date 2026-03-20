@@ -38,10 +38,17 @@ internal/newsblur/             HTTP client wrapping NewsBlur REST API
   feeds.go, stories.go, ...    One file per API domain
 internal/tools/                MCP tool registration + handlers
   registry.go                  RegisterAll() → *command.App + ResourceProvider
-  feeds.go, stories.go, ...    One file per tool domain (mirrors newsblur/ layout)
-  feed_index.go                In-memory word index over feed metadata for lightweight discovery
-  saved_story_index.go         In-memory word index over starred story content
+  feeds.go                     feed_query tool (word search over feeds)
+  story_store.go               Flat story store with typed records and word index
+  story_query.go               Query engine with structured filters + word search
+  story_query_tool.go          story_query MCP tool handler
+  facets.go                    Aggregate counts by year/tag/feed/status
+  reader.go                    Mutation tools (mark read/unread, star/unstar)
+  subscriptions.go             subscribe/unsubscribe/rename_feed
+  folders.go                   Folder management
+  import_export.go             OPML import/export
   resources.go                 MCP Resource provider with template URI resolution
+  feed_index.go                In-memory word index over feed metadata
 ```
 
 ### Two-Phase Architecture: Sync + Serve
@@ -72,8 +79,8 @@ Serve: MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers
 - **Nil client convention**: `RegisterAll(nil)` is used for offline subcommands
   (`generate-plugin`, `hook`, `install-mcp`). Tool handlers and indices are
   only initialized when client is non-nil.
-- **In-memory indices**: `feedIndex` and `savedStoryIndex` use `sync.Once` for
-  lazy initialization, building from the persistent store on first query.
+- **Story store**: `storyStore` holds all stories as typed records with a word
+  acceleration index. Built once from cached starred story pages via `sync.Once`.
 - **All newsblur client methods return `json.RawMessage`** — parsing happens in
   tool handlers.
 - **Persistent store**: SHA256-keyed files under `~/.cache/nebulous/responses/`.
