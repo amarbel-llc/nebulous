@@ -11,25 +11,26 @@ func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider
 	app.Version = "0.1.0"
 
 	var feedIdx *feedIndex
-	var savedIdx *savedStoryIndex
+	var storyStr *storyStore
 	if client != nil {
 		feedIdx = newFeedIndex(client)
-		savedIdx = newSavedStoryIndex(client)
+		storyStr = newStoryStore(client)
 	}
 
 	registerFeedCommands(app, client, feedIdx)
 	registerStoryCommands(app, client)
+	registerStoryQueryCommand(app, storyStr)
 	registerReaderCommands(app, client)
 	registerSubscriptionCommands(app, client)
 	registerFolderCommands(app, client)
 	registerImportExportCommands(app, client)
-	registerSavedStoryCommands(app, savedIdx)
+	registerSavedStoryCommands(app, nil) // Keep old tools temporarily
 
 	var resources server.ResourceProvider
 	if feedIdx != nil {
 		registry := server.NewResourceRegistry()
-		registerResources(registry, feedIdx, savedIdx)
-		resources = newFeedResourceProvider(registry, feedIdx, savedIdx, client)
+		registerResources(registry, feedIdx, nil)
+		resources = newFeedResourceProvider(registry, feedIdx, nil, client)
 	}
 
 	return app, resources
