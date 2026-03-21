@@ -315,16 +315,55 @@ func (p *feedResourceProvider) readFeedStories(
 		return nil, fmt.Errorf("invalid feed ID: %s", feedID)
 	}
 
-	raw, err := p.client.StoriesFeed(ctx, id, 0, "", "", "")
+	if err := p.stories.ensureBuilt(); err != nil {
+		return nil, fmt.Errorf("building story store: %w", err)
+	}
+
+	type storySummary struct {
+		Hash      string   `json:"hash"`
+		Title     string   `json:"title"`
+		Authors   string   `json:"authors,omitempty"`
+		Date      string   `json:"date"`
+		Permalink string   `json:"permalink"`
+		Tags      []string `json:"tags,omitempty"`
+		UserTags  []string `json:"user_tags,omitempty"`
+	}
+
+	var matches []storySummary
+	for _, rec := range p.stories.stories {
+		if rec.FeedID == id {
+			matches = append(matches, storySummary{
+				Hash:      rec.Hash,
+				Title:     rec.Title,
+				Authors:   rec.Authors,
+				Date:      rec.Date.Format("2006-01-02 15:04:05"),
+				Permalink: rec.Permalink,
+				Tags:      rec.Tags,
+				UserTags:  rec.UserTags,
+			})
+		}
+	}
+
+	resp := struct {
+		FeedID  int            `json:"feed_id"`
+		Count   int            `json:"count"`
+		Stories []storySummary `json:"stories"`
+	}{
+		FeedID:  id,
+		Count:   len(matches),
+		Stories: matches,
+	}
+
+	data, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("fetching stories: %w", err)
+		return nil, err
 	}
 
 	return &protocol.ResourceReadResult{
 		Contents: []protocol.ResourceContent{{
 			URI:      resourceURI,
 			MimeType: "application/json",
-			Text:     string(raw),
+			Text:     string(data),
 		}},
 	}, nil
 }
@@ -443,9 +482,9 @@ func (p *feedResourceProvider) readStoryOriginal(
 	ctx context.Context,
 	resourceURI, storyHash string,
 ) (*protocol.ResourceReadResult, error) {
-	raw, err := p.client.OriginalText(ctx, storyHash)
-	if err != nil {
-		return nil, fmt.Errorf("fetching original text: %w", err)
+	raw, ok := p.client.CachedOriginalText(storyHash)
+	if !ok {
+		return nil, fmt.Errorf("original text not in cache for story %s (run 'nebulous fetch' to populate)", storyHash)
 	}
 
 	return &protocol.ResourceReadResult{
@@ -674,7 +713,7 @@ func registerResources(
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://feed/{feed_id}/stories",
 			Name:        "Feed Stories",
-			Description: "Stories from a feed with full HTML content. Response is very large — delegate to a subagent.",
+			Description: "Starred stories from a feed, from local index. Returns compact summaries (hash, title, date, permalink, tags). No API call.",
 			MimeType:    "application/json",
 		},
 		nil,
@@ -704,7 +743,7 @@ func registerResources(
 		protocol.ResourceTemplate{
 			URITemplate: "nebulous://story/{story_hash}/original",
 			Name:        "Story Original Text",
-			Description: "Full original article text fetched from source URL. Use when story/{hash} shows has_content=false or content was truncated. Makes an HTTP request. Response can be very large — delegate to a subagent.",
+			Description: "Full original article text from local cache. Use when story/{hash} shows has_content=false or content was truncated. No API call — requires 'nebulous fetch' to have populated the cache. Response can be large — delegate to a subagent.",
 			MimeType:    "application/json",
 		},
 		nil,
