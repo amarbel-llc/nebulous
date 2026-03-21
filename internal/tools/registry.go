@@ -28,8 +28,9 @@ func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider
 	if feedIdx != nil {
 		registry := server.NewResourceRegistry()
 		registerResources(registry, feedIdx, storyStr)
-		resources = newFeedResourceProvider(registry, feedIdx, storyStr, client)
-		registerReadResourceCommand(app, resources)
+		resProvider := newFeedResourceProvider(registry, feedIdx, storyStr, client)
+		resources = resProvider
+		registerResourceToolCommands(app, resProvider)
 	}
 
 	return app, resources
