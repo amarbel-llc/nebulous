@@ -168,18 +168,6 @@ func (p *feedResourceProvider) readTags(
 		return nil, fmt.Errorf("building story store: %w", err)
 	}
 
-	userTags := make(map[string]int)
-	storyTags := make(map[string]int)
-
-	for _, rec := range p.stories.stories {
-		for _, t := range rec.UserTags {
-			userTags[t]++
-		}
-		for _, t := range rec.Tags {
-			storyTags[t]++
-		}
-	}
-
 	type tagEntry struct {
 		Tag   string `json:"tag"`
 		Count int    `json:"count"`
@@ -205,8 +193,8 @@ func (p *feedResourceProvider) readTags(
 		StoryTags    []tagEntry `json:"story_tags"`
 	}{
 		TotalStories: len(p.stories.stories),
-		UserTags:     sortedTags(userTags),
-		StoryTags:    sortedTags(storyTags),
+		UserTags:     sortedTags(p.stories.userTags),
+		StoryTags:    sortedTags(p.stories.storyTags),
 	}
 
 	data, err := json.MarshalIndent(resp, "", "  ")
