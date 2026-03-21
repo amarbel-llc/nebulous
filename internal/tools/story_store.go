@@ -29,11 +29,13 @@ type storyRecord struct {
 }
 
 type storyStore struct {
-	client  *newsblur.Client
-	once    sync.Once
-	stories []*storyRecord
-	words   map[string][]*storyRecord
-	err     error
+	client    *newsblur.Client
+	once      sync.Once
+	stories   []*storyRecord
+	words     map[string][]*storyRecord
+	userTags  map[string]int
+	storyTags map[string]int
+	err       error
 }
 
 func newStoryStore(client *newsblur.Client) *storyStore {
@@ -43,6 +45,8 @@ func newStoryStore(client *newsblur.Client) *storyStore {
 func (s *storyStore) ensureBuilt() error {
 	s.once.Do(func() {
 		s.words = make(map[string][]*storyRecord)
+		s.userTags = make(map[string]int)
+		s.storyTags = make(map[string]int)
 		s.err = s.build()
 	})
 	return s.err
@@ -78,6 +82,16 @@ func (s *storyStore) build() error {
 
 			for word := range rec.Words {
 				s.words[word] = append(s.words[word], rec)
+			}
+			for _, t := range rec.UserTags {
+				if t != "" {
+					s.userTags[t]++
+				}
+			}
+			for _, t := range rec.Tags {
+				if t != "" {
+					s.storyTags[t]++
+				}
 			}
 		}
 
