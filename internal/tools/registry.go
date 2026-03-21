@@ -29,6 +29,7 @@ func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider
 		registry := server.NewResourceRegistry()
 		registerResources(registry, feedIdx, storyStr)
 		resources = newFeedResourceProvider(registry, feedIdx, storyStr, client)
+		registerReadResourceCommand(app, resources)
 	}
 
 	return app, resources
