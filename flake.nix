@@ -70,6 +70,7 @@
             go.devShells.${system}.default
             shell.devShells.${system}.default
           ];
+          packages = [ pkgs.just ];
         };
       }
     );
