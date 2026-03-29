@@ -1,13 +1,20 @@
-build tag="debug":
+
+default: build test
+
+build: build-go build-nix
+
+test: test-go
+
+build-go tag="debug":
   go build {{if tag == "release" { "-ldflags='-s -w'" } else { "'-gcflags=all=-N -l'" } }} -o build/{{tag}}/nebulous ./cmd/nebulous
 
-test *args:
-  go test {{args}} ./...
-
-nix-build:
+build-nix:
   nix build --show-trace
 
-dev-install: nix-build
+test-go *args:
+  go test {{args}} ./...
+
+install-dev: build-nix
   ./result/bin/nebulous install-mcp
 
 cache-dir := env("HOME") / ".cache/nebulous/responses"
