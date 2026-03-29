@@ -2,7 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sort"
 	"sync"
@@ -60,7 +59,7 @@ func (s *storyStore) build() error {
 		return nil
 	}
 
-	hashes, err := parseStarredHashes(raw)
+	hashes, err := newsblur.ParseStarredHashes(raw)
 	if err != nil {
 		return err
 	}
@@ -99,22 +98,6 @@ func (s *storyStore) build() error {
 
 	log.Printf("story store: indexed %d stories, %d words", len(s.stories), len(s.words))
 	return nil
-}
-
-func parseStarredHashes(raw json.RawMessage) ([]string, error) {
-	var envelope struct {
-		Hashes []string `json:"starred_story_hashes"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
-		return envelope.Hashes, nil
-	}
-
-	var flat []string
-	if err := json.Unmarshal(raw, &flat); err == nil {
-		return flat, nil
-	}
-
-	return nil, fmt.Errorf("unrecognized starred_story_hashes format")
 }
 
 var storyDateFormats = []string{

@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -144,12 +142,7 @@ func (c *Client) CachedStarredStory(hash string) (json.RawMessage, bool) {
 	if c.cache == nil {
 		return nil, false
 	}
-	fp := filepath.Join(c.cache.dir, c.starredStoryCacheKey(hash))
-	data, err := os.ReadFile(fp)
-	if err != nil {
-		return nil, false
-	}
-	return json.RawMessage(data), true
+	return c.cache.getNoTTL(c.starredStoryCacheKey(hash))
 }
 
 func (c *Client) PutCachedStarredStory(hash string, raw json.RawMessage) error {
@@ -163,13 +156,7 @@ func (c *Client) CachedStarredStoryHashes() (json.RawMessage, bool) {
 	if c.cache == nil {
 		return nil, false
 	}
-	key := c.cache.cacheKey("/reader/starred_story_hashes", nil)
-	fp := filepath.Join(c.cache.dir, key)
-	data, err := os.ReadFile(fp)
-	if err != nil {
-		return nil, false
-	}
-	return json.RawMessage(data), true
+	return c.cache.getNoTTL(c.cache.cacheKey("/reader/starred_story_hashes", nil))
 }
 
 func (c *Client) PutCachedStarredStoryHashes(raw json.RawMessage) error {
@@ -187,7 +174,7 @@ func (c *Client) InvalidateStarredStoryHashManifest() {
 	c.cache.remove(c.cache.cacheKey("/reader/starred_story_hashes", nil))
 }
 
-func (c *Client) OriginalTextCacheKey(storyHash string) string {
+func (c *Client) originalTextCacheKey(storyHash string) string {
 	params := url.Values{"story_hash": {storyHash}}
 	return c.cache.cacheKey("/rss_feeds/original_text", params)
 }
@@ -196,20 +183,14 @@ func (c *Client) HasCachedOriginalText(storyHash string) bool {
 	if c.cache == nil {
 		return false
 	}
-	return c.cache.has(c.OriginalTextCacheKey(storyHash))
+	return c.cache.has(c.originalTextCacheKey(storyHash))
 }
 
 func (c *Client) CachedOriginalText(storyHash string) (json.RawMessage, bool) {
 	if c.cache == nil {
 		return nil, false
 	}
-	key := c.OriginalTextCacheKey(storyHash)
-	fp := filepath.Join(c.cache.dir, key)
-	data, err := os.ReadFile(fp)
-	if err != nil {
-		return nil, false
-	}
-	return json.RawMessage(data), true
+	return c.cache.getNoTTL(c.originalTextCacheKey(storyHash))
 }
 
 func (c *Client) post(ctx context.Context, path string, form url.Values) (json.RawMessage, error) {

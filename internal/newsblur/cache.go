@@ -39,6 +39,18 @@ func (c *responseCache) get(key string) (json.RawMessage, bool) {
 	return json.RawMessage(data), true
 }
 
+// getNoTTL reads a cached value regardless of age. Used for immutable content
+// (individual stories, original text) and manifests that are explicitly
+// refreshed by the fetch command rather than expiring on a timer.
+func (c *responseCache) getNoTTL(key string) (json.RawMessage, bool) {
+	fp := filepath.Join(c.dir, key)
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
 func (c *responseCache) remove(key string) {
 	os.Remove(filepath.Join(c.dir, key))
 }

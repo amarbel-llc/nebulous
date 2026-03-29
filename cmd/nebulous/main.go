@@ -149,7 +149,7 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 		return fmt.Errorf("caching hash manifest: %w", err)
 	}
 
-	hashes, err := parseStarredHashes(raw)
+	hashes, err := newsblur.ParseStarredHashes(raw)
 	if err != nil {
 		return fmt.Errorf("parsing hashes: %w", err)
 	}
@@ -188,7 +188,7 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 		len(hashes), len(hashes)-len(missingText), len(missingText))
 
 	if len(missingText) > 0 {
-		fetched := fetchWithBackoff(ctx, missingText, func(hash string) error {
+		fetched := fetchWithBackoff(ctx, "original-text", missingText, func(hash string) error {
 			_, err := client.OriginalText(ctx, hash)
 			return err
 		})
@@ -319,30 +319,30 @@ func fetchStarredStoriesByHash(ctx context.Context, client *newsblur.Client, has
 	return fetched, nil
 }
 
-func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) error) int {
+func fetchWithBackoff(ctx context.Context, label string, items []string, fetch func(string) error) int {
 	bo := newAdaptiveBackoff(5 * time.Minute)
 	fetched := 0
 
-	for _, item := range items {
-		select {
-		case <-ctx.Done():
+	for i := 0; i < len(items); i++ {
+		if err := ctx.Err(); err != nil {
 			return fetched
-		default:
 		}
 
-		err := fetch(item)
+		err := fetch(items[i])
 		if err != nil {
 			var rle *newsblur.RateLimitError
 			if errors.As(err, &rle) {
 				wait := bo.nextWait(rle.RetryAfter)
-				log.Printf("[original-text] rate limited at %d/%d, backing off %s", fetched, len(items), wait)
+				log.Printf("[%s] rate limited at %d/%d, backing off %s", label, fetched, len(items), wait)
 
 				if err := bo.wait(ctx, wait); err != nil {
 					return fetched
 				}
+
+				i-- // retry same item
 				continue
 			}
-			log.Printf("[original-text] error fetching %s: %v (skipping)", item, err)
+			log.Printf("[%s] error fetching %s: %v (skipping)", label, items[i], err)
 			continue
 		}
 
@@ -350,27 +350,9 @@ func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) er
 		fetched++
 
 		if fetched%100 == 0 {
-			log.Printf("[original-text] fetched %d/%d", fetched, len(items))
+			log.Printf("[%s] fetched %d/%d", label, fetched, len(items))
 		}
 	}
 
 	return fetched
-}
-
-func parseStarredHashes(raw json.RawMessage) ([]string, error) {
-	// API returns {"starred_story_hashes": ["hash1", ...], ...}
-	var envelope struct {
-		Hashes []string `json:"starred_story_hashes"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
-		return envelope.Hashes, nil
-	}
-
-	// Try flat array: ["hash1", "hash2"]
-	var flat []string
-	if err := json.Unmarshal(raw, &flat); err == nil {
-		return flat, nil
-	}
-
-	return nil, fmt.Errorf("unrecognized starred_story_hashes format")
 }

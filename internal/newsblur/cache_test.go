@@ -98,6 +98,44 @@ func TestCacheKeyDeterministic(t *testing.T) {
 	}
 }
 
+func TestCacheGetNoTTLIgnoresExpiry(t *testing.T) {
+	c := &responseCache{dir: t.TempDir(), ttl: time.Hour}
+	key := c.cacheKey("/test", nil)
+	body := json.RawMessage(`{"ok":true}`)
+
+	if err := c.put(key, body); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Backdate past TTL
+	fp := filepath.Join(c.dir, key)
+	past := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(fp, past, past)
+
+	// get should fail (TTL expired)
+	_, ok := c.get(key)
+	if ok {
+		t.Error("get should return false for expired key")
+	}
+
+	// getNoTTL should succeed
+	got, ok := c.getNoTTL(key)
+	if !ok {
+		t.Fatal("getNoTTL returned false for expired-but-existing key")
+	}
+	if string(got) != string(body) {
+		t.Errorf("got %s, want %s", got, body)
+	}
+}
+
+func TestCacheGetNoTTLMissing(t *testing.T) {
+	c := &responseCache{dir: t.TempDir(), ttl: time.Hour}
+	_, ok := c.getNoTTL("nonexistent")
+	if ok {
+		t.Error("getNoTTL returned true for missing key")
+	}
+}
+
 func TestCacheGetMissing(t *testing.T) {
 	c := &responseCache{dir: t.TempDir(), ttl: time.Hour}
 	_, ok := c.get("nonexistent")

@@ -105,9 +105,9 @@ func TestParseStarredHashes(t *testing.T) {
 			want:  []string{"abc", "def"},
 		},
 		{
-			name:    "empty envelope falls through to error",
-			input:   `{"starred_story_hashes":[]}`,
-			wantErr: true,
+			name:  "empty envelope returns empty slice",
+			input: `{"starred_story_hashes":[]}`,
+			want:  []string{},
 		},
 		{
 			name:    "invalid json",
@@ -123,7 +123,7 @@ func TestParseStarredHashes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseStarredHashes(json.RawMessage(tt.input))
+			got, err := newsblur.ParseStarredHashes(json.RawMessage(tt.input))
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error, got %v", got)
