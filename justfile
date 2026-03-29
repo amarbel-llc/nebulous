@@ -6,3 +6,17 @@ nix-build:
 
 dev-install: nix-build
   ./result/bin/nebulous install-mcp
+
+cache-dir := env("HOME") / ".cache/nebulous/responses"
+
+backup-cache:
+  cp -r {{cache-dir}} {{cache-dir}}.bak
+  @echo "Backed up to {{cache-dir}}.bak"
+
+restore-cache:
+  rm -rf {{cache-dir}}
+  mv {{cache-dir}}.bak {{cache-dir}}
+  @echo "Restored from backup"
+
+fetch: build
+  ./build/debug/nebulous fetch
