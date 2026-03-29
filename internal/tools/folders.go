@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
@@ -35,13 +36,13 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.CreateFolder(ctx, p.FolderName, p.ParentFolder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Created folder %q.", p.FolderName)), nil
 		},
 	})
 
@@ -65,13 +66,13 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.RenameFolder(ctx, p.FolderName, p.NewFolderName, p.InFolder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Renamed folder %q to %q.", p.FolderName, p.NewFolderName)), nil
 		},
 	})
 
@@ -96,13 +97,13 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.DeleteFolder(ctx, p.FolderName)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Deleted folder %q.", p.FolderName)), nil
 		},
 	})
 
@@ -126,13 +127,13 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.MoveFeed(ctx, p.FeedID, p.InFolder, p.ToFolder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Moved feed %d to %q.", p.FeedID, p.ToFolder)), nil
 		},
 	})
 
@@ -156,13 +157,13 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.MoveFolder(ctx, p.FolderName, p.InFolder, p.ToFolder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Moved folder %q to %q.", p.FolderName, p.ToFolder)), nil
 		},
 	})
 }

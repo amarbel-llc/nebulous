@@ -51,13 +51,13 @@ func registerImportExportCommands(app *command.App, client *newsblur.Client, ml 
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.OPMLImport(ctx, p.OPMLContent)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult("OPML imported."), nil
 		},
 	})
 }

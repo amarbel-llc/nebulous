@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
@@ -35,13 +36,13 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client, ml 
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.Subscribe(ctx, p.URL, p.Folder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Subscribed to %s.", p.URL)), nil
 		},
 	})
 
@@ -68,13 +69,13 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client, ml 
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.Unsubscribe(ctx, p.FeedID, p.InFolder)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Unsubscribed from feed %d.", p.FeedID)), nil
 		},
 	})
 
@@ -96,13 +97,13 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client, ml 
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := ml.call(func() (json.RawMessage, error) {
+			_, err := ml.call(func() (json.RawMessage, error) {
 				return client.RenameFeed(ctx, p.FeedID, p.FeedTitle)
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
-			return command.TextResult(string(result)), nil
+			return command.TextResult(fmt.Sprintf("Renamed feed %d to %q.", p.FeedID, p.FeedTitle)), nil
 		},
 	})
 }
