@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
 	"sync"
@@ -53,57 +54,67 @@ func (s *storyStore) ensureBuilt() error {
 }
 
 func (s *storyStore) build() error {
-	total := 0
+	raw, ok := s.client.CachedStarredStoryHashes()
+	if !ok {
+		log.Printf("story store: no cached hash manifest, run 'nebulous fetch' first")
+		return nil
+	}
 
-	for page := 1; ; page++ {
-		raw, ok := s.client.CachedStarredStoryPage(page)
+	hashes, err := parseStarredHashes(raw)
+	if err != nil {
+		return err
+	}
+
+	for _, hash := range hashes {
+		storyRaw, ok := s.client.CachedStarredStory(hash)
 		if !ok {
-			break
+			continue
 		}
 
-		var resp struct {
-			Stories []json.RawMessage `json:"stories"`
+		rec, err := parseStoryRecord(storyRaw, s.client)
+		if err != nil {
+			continue
 		}
-		if err := json.Unmarshal(raw, &resp); err != nil {
-			return err
+		rec.Starred = true
+		s.stories = append(s.stories, rec)
+
+		for word := range rec.Words {
+			s.words[word] = append(s.words[word], rec)
 		}
-
-		if len(resp.Stories) == 0 {
-			break
-		}
-
-		for _, storyRaw := range resp.Stories {
-			rec, err := parseStoryRecord(storyRaw, s.client)
-			if err != nil {
-				continue
-			}
-			rec.Starred = true
-			s.stories = append(s.stories, rec)
-
-			for word := range rec.Words {
-				s.words[word] = append(s.words[word], rec)
-			}
-			for _, t := range rec.UserTags {
-				if t != "" {
-					s.userTags[t]++
-				}
-			}
-			for _, t := range rec.Tags {
-				if t != "" {
-					s.storyTags[t]++
-				}
+		for _, t := range rec.UserTags {
+			if t != "" {
+				s.userTags[t]++
 			}
 		}
-
-		total += len(resp.Stories)
+		for _, t := range rec.Tags {
+			if t != "" {
+				s.storyTags[t]++
+			}
+		}
 	}
 
 	sort.Slice(s.stories, func(i, j int) bool {
 		return s.stories[i].Date.After(s.stories[j].Date)
 	})
 
-	log.Printf("story store: indexed %d stories, %d words", total, len(s.words))
+	log.Printf("story store: indexed %d stories, %d words", len(s.stories), len(s.words))
 	return nil
+}
+
+func parseStarredHashes(raw json.RawMessage) ([]string, error) {
+	var envelope struct {
+		Hashes []string `json:"starred_story_hashes"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Hashes) > 0 {
+		return envelope.Hashes, nil
+	}
+
+	var flat []string
+	if err := json.Unmarshal(raw, &flat); err == nil {
+		return flat, nil
+	}
+
+	return nil, fmt.Errorf("unrecognized starred_story_hashes format")
 }
 
 var storyDateFormats = []string{
@@ -203,31 +214,6 @@ func (s *storyStore) storyByHash(hash string) (*storyRecord, bool) {
 	return nil, false
 }
 
-// rawStoryByHash walks cached pages to find the raw JSON for a story hash.
-// Used by readStoryContent which needs the original story_content HTML.
 func (s *storyStore) rawStoryByHash(hash string) (json.RawMessage, bool) {
-	if err := s.ensureBuilt(); err != nil {
-		return nil, false
-	}
-	for page := 1; ; page++ {
-		raw, ok := s.client.CachedStarredStoryPage(page)
-		if !ok {
-			break
-		}
-		var resp struct {
-			Stories []json.RawMessage `json:"stories"`
-		}
-		if json.Unmarshal(raw, &resp) != nil {
-			continue
-		}
-		for _, storyRaw := range resp.Stories {
-			var story struct {
-				Hash string `json:"story_hash"`
-			}
-			if json.Unmarshal(storyRaw, &story) == nil && story.Hash == hash {
-				return storyRaw, true
-			}
-		}
-	}
-	return nil, false
+	return s.client.CachedStarredStory(hash)
 }

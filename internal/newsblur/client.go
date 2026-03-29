@@ -128,17 +128,61 @@ func (c *Client) doGet(ctx context.Context, path string, params url.Values) (jso
 	return raw, nil
 }
 
-func (c *Client) InvalidateStarredStoryPages() {
+func (c *Client) starredStoryCacheKey(hash string) string {
+	params := url.Values{"story_hash": {hash}}
+	return c.cache.cacheKey("/starred_story", params)
+}
+
+func (c *Client) HasCachedStarredStory(hash string) bool {
+	if c.cache == nil {
+		return false
+	}
+	return c.cache.has(c.starredStoryCacheKey(hash))
+}
+
+func (c *Client) CachedStarredStory(hash string) (json.RawMessage, bool) {
+	if c.cache == nil {
+		return nil, false
+	}
+	fp := filepath.Join(c.cache.dir, c.starredStoryCacheKey(hash))
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
+func (c *Client) PutCachedStarredStory(hash string, raw json.RawMessage) error {
+	if c.cache == nil {
+		return nil
+	}
+	return c.cache.put(c.starredStoryCacheKey(hash), raw)
+}
+
+func (c *Client) CachedStarredStoryHashes() (json.RawMessage, bool) {
+	if c.cache == nil {
+		return nil, false
+	}
+	key := c.cache.cacheKey("/reader/starred_story_hashes", nil)
+	fp := filepath.Join(c.cache.dir, key)
+	data, err := os.ReadFile(fp)
+	if err != nil {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
+func (c *Client) PutCachedStarredStoryHashes(raw json.RawMessage) error {
+	if c.cache == nil {
+		return nil
+	}
+	key := c.cache.cacheKey("/reader/starred_story_hashes", nil)
+	return c.cache.put(key, raw)
+}
+
+func (c *Client) InvalidateStarredStoryHashManifest() {
 	if c.cache == nil {
 		return
-	}
-	for page := 1; ; page++ {
-		params := url.Values{"page": {fmt.Sprintf("%d", page)}}
-		key := c.cache.cacheKey("/reader/starred_stories", params)
-		if !c.cache.has(key) {
-			break
-		}
-		c.cache.remove(key)
 	}
 	c.cache.remove(c.cache.cacheKey("/reader/starred_story_hashes", nil))
 }
@@ -160,20 +204,6 @@ func (c *Client) CachedOriginalText(storyHash string) (json.RawMessage, bool) {
 		return nil, false
 	}
 	key := c.OriginalTextCacheKey(storyHash)
-	fp := filepath.Join(c.cache.dir, key)
-	data, err := os.ReadFile(fp)
-	if err != nil {
-		return nil, false
-	}
-	return json.RawMessage(data), true
-}
-
-func (c *Client) CachedStarredStoryPage(page int) (json.RawMessage, bool) {
-	if c.cache == nil {
-		return nil, false
-	}
-	params := url.Values{"page": {fmt.Sprintf("%d", page)}}
-	key := c.cache.cacheKey("/reader/starred_stories", params)
 	fp := filepath.Join(c.cache.dir, key)
 	data, err := os.ReadFile(fp)
 	if err != nil {

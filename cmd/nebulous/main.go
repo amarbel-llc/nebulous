@@ -138,22 +138,15 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 		return err
 	}
 
-	// Phase 2: Starred story pages
-	log.Println("[starred] fetching starred story pages...")
-	starredPages, err := fetchStarredStoryPages(ctx, client)
-	if err != nil {
-		return fmt.Errorf("starred stories: %w", err)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// Phase 3: Original text for all starred story hashes
-	log.Println("[original-text] fetching starred story hashes...")
+	// Phase 2: Hash manifest + missing story fetch
+	log.Println("[starred] fetching hash manifest...")
 	raw, err := client.StarredStoryHashes(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching hashes: %w", err)
+	}
+
+	if err := client.PutCachedStarredStoryHashes(raw); err != nil {
+		return fmt.Errorf("caching hash manifest: %w", err)
 	}
 
 	hashes, err := parseStarredHashes(raw)
@@ -161,26 +154,49 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 		return fmt.Errorf("parsing hashes: %w", err)
 	}
 
-	var missing []string
+	var missingStories []string
+	for _, h := range hashes {
+		if !client.HasCachedStarredStory(h) {
+			missingStories = append(missingStories, h)
+		}
+	}
+
+	log.Printf("[starred] total: %d, cached: %d, missing: %d",
+		len(hashes), len(hashes)-len(missingStories), len(missingStories))
+
+	if len(missingStories) > 0 {
+		fetched, err := fetchStarredStoriesByHash(ctx, client, missingStories)
+		if err != nil {
+			return fmt.Errorf("fetching starred stories: %w", err)
+		}
+		log.Printf("[starred] fetched %d/%d stories", fetched, len(missingStories))
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Phase 3: Original text for starred story hashes
+	var missingText []string
 	for _, h := range hashes {
 		if !client.HasCachedOriginalText(h) {
-			missing = append(missing, h)
+			missingText = append(missingText, h)
 		}
 	}
 
 	log.Printf("[original-text] total: %d, cached: %d, missing: %d",
-		len(hashes), len(hashes)-len(missing), len(missing))
+		len(hashes), len(hashes)-len(missingText), len(missingText))
 
-	if len(missing) > 0 {
-		fetched := fetchWithBackoff(ctx, missing, func(hash string) error {
+	if len(missingText) > 0 {
+		fetched := fetchWithBackoff(ctx, missingText, func(hash string) error {
 			_, err := client.OriginalText(ctx, hash)
 			return err
 		})
-		log.Printf("[original-text] fetched %d/%d", fetched, len(missing))
+		log.Printf("[original-text] fetched %d/%d", fetched, len(missingText))
 	}
 
-	log.Printf("[done] feeds: cached, starred pages: %d, original text: %d/%d cached",
-		starredPages, len(hashes)-len(missing), len(hashes))
+	log.Printf("[done] feeds: cached, stories: %d, original text: %d/%d cached",
+		len(hashes), len(hashes)-len(missingText), len(hashes))
 	return nil
 }
 
@@ -237,44 +253,38 @@ func (b *adaptiveBackoff) wait(ctx context.Context, wait time.Duration) error {
 	}
 }
 
-func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, error) {
-	// Find first uncached page
-	startPage := 1
-	for {
-		if _, ok := client.CachedStarredStoryPage(startPage); !ok {
-			break
-		}
-		startPage++
-	}
+const starredBatchSize = 100
 
-	if startPage > 1 {
-		log.Printf("[starred] %d pages already cached, resuming from page %d", startPage-1, startPage)
-	}
-
-	fetched := 0
+func fetchStarredStoriesByHash(ctx context.Context, client *newsblur.Client, hashes []string) (int, error) {
 	bo := newAdaptiveBackoff(5 * time.Minute)
+	fetched := 0
 
-	for page := startPage; ; page++ {
+	for i := 0; i < len(hashes); i += starredBatchSize {
 		if err := ctx.Err(); err != nil {
-			log.Printf("[starred] interrupted at page %d (%d new pages cached)", page, fetched)
-			return startPage - 1 + fetched, err
+			return fetched, err
 		}
 
-		raw, err := client.StoriesStarred(ctx, page, "", "")
+		end := i + starredBatchSize
+		if end > len(hashes) {
+			end = len(hashes)
+		}
+		batch := hashes[i:end]
+
+		raw, err := client.StoriesStarredByHash(ctx, batch)
 		if err != nil {
 			var rle *newsblur.RateLimitError
 			if errors.As(err, &rle) {
 				wait := bo.nextWait(rle.RetryAfter)
-				log.Printf("[starred] rate limited at page %d, backing off %s", page, wait)
+				log.Printf("[starred] rate limited at %d/%d, backing off %s", fetched, len(hashes), wait)
 
 				if err := bo.wait(ctx, wait); err != nil {
-					return startPage - 1 + fetched, err
+					return fetched, err
 				}
 
-				page-- // retry same page
+				i -= starredBatchSize // retry same batch
 				continue
 			}
-			return startPage - 1 + fetched, fmt.Errorf("page %d: %w", page, err)
+			return fetched, fmt.Errorf("batch at %d: %w", i, err)
 		}
 
 		bo.onSuccess()
@@ -283,22 +293,30 @@ func fetchStarredStoryPages(ctx context.Context, client *newsblur.Client) (int, 
 			Stories []json.RawMessage `json:"stories"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
-			return startPage - 1 + fetched, fmt.Errorf("page %d: %w", page, err)
+			return fetched, fmt.Errorf("parsing batch at %d: %w", i, err)
 		}
 
-		if len(resp.Stories) == 0 {
-			break
+		for _, storyRaw := range resp.Stories {
+			var story struct {
+				Hash string `json:"story_hash"`
+			}
+			if err := json.Unmarshal(storyRaw, &story); err != nil {
+				log.Printf("[starred] skipping story with unparseable hash: %v", err)
+				continue
+			}
+			if err := client.PutCachedStarredStory(story.Hash, storyRaw); err != nil {
+				log.Printf("[starred] error caching story %s: %v", story.Hash, err)
+				continue
+			}
+			fetched++
 		}
 
-		fetched++
-
-		if fetched%100 == 0 {
-			log.Printf("[starred] cached %d pages (page %d)", fetched, page)
+		if fetched%500 == 0 && fetched > 0 {
+			log.Printf("[starred] cached %d/%d stories", fetched, len(hashes))
 		}
 	}
 
-	log.Printf("[starred] done: %d total pages cached", startPage-1+fetched)
-	return startPage - 1 + fetched, nil
+	return fetched, nil
 }
 
 func fetchWithBackoff(ctx context.Context, items []string, fetch func(string) error) int {

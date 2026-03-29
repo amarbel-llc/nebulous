@@ -36,20 +36,6 @@ func (c *Client) StoriesRiver(ctx context.Context, feedIDs []int, page int) (jso
 	return c.get(ctx, "/reader/river_stories", params)
 }
 
-func (c *Client) StoriesStarred(ctx context.Context, page int, tag, query string) (json.RawMessage, error) {
-	if page < 1 {
-		page = 1
-	}
-	params := url.Values{"page": {fmt.Sprintf("%d", page)}}
-	if tag != "" {
-		params.Set("tag", tag)
-	}
-	if query != "" {
-		params.Set("query", query)
-	}
-	return c.get(ctx, "/reader/starred_stories", params)
-}
-
 func (c *Client) UnreadStoryHashes(ctx context.Context, feedIDs []int) (json.RawMessage, error) {
 	params := url.Values{}
 	for _, id := range feedIDs {
@@ -60,6 +46,14 @@ func (c *Client) UnreadStoryHashes(ctx context.Context, feedIDs []int) (json.Raw
 
 func (c *Client) StarredStoryHashes(ctx context.Context) (json.RawMessage, error) {
 	return c.getSkipCache(ctx, "/reader/starred_story_hashes", nil)
+}
+
+func (c *Client) StoriesStarredByHash(ctx context.Context, hashes []string) (json.RawMessage, error) {
+	params := url.Values{}
+	for _, h := range hashes {
+		params.Add("h", h)
+	}
+	return c.doGet(ctx, "/reader/starred_stories", params)
 }
 
 func (c *Client) OriginalText(ctx context.Context, storyHash string) (json.RawMessage, error) {

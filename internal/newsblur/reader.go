@@ -28,7 +28,7 @@ func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []str
 	}
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
 	if err == nil {
-		c.InvalidateStarredStoryPages()
+		c.InvalidateStarredStoryHashManifest()
 	}
 	return raw, err
 }
@@ -37,7 +37,7 @@ func (c *Client) UnstarStory(ctx context.Context, storyHash string) (json.RawMes
 	form := url.Values{"story_hash": {storyHash}}
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_unstarred", form)
 	if err == nil {
-		c.InvalidateStarredStoryPages()
+		c.InvalidateStarredStoryHashManifest()
 	}
 	return raw, err
 }
