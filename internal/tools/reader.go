@@ -10,7 +10,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-func registerReaderCommands(app *command.App, client *newsblur.Client) {
+func registerReaderCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {
 	idempotentMutationAnnotations := &protocol.ToolAnnotations{
 		ReadOnlyHint:    protocol.BoolPtr(false),
 		DestructiveHint: protocol.BoolPtr(false),
@@ -45,7 +45,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 			if err != nil {
 				return command.TextErrorResult("story_hashes: " + err.Error()), nil
 			}
-			result, err := client.MarkStoriesRead(ctx, hashes)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MarkStoriesRead(ctx, hashes)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -69,7 +71,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.MarkStoryUnread(ctx, p.StoryHash)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MarkStoryUnread(ctx, p.StoryHash)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -103,7 +107,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 					return command.TextErrorResult("user_tags: " + err.Error()), nil
 				}
 			}
-			result, err := client.StarStory(ctx, p.StoryHash, tags)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.StarStory(ctx, p.StoryHash, tags)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -127,7 +133,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.UnstarStory(ctx, p.StoryHash)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.UnstarStory(ctx, p.StoryHash)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -151,7 +159,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.MarkFeedRead(ctx, p.FeedID)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MarkFeedRead(ctx, p.FeedID)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -175,7 +185,9 @@ func registerReaderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.MarkAllRead(ctx, p.Days)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MarkAllRead(ctx, p.Days)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}

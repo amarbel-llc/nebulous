@@ -9,7 +9,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-func registerFolderCommands(app *command.App, client *newsblur.Client) {
+func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {
 	mutationAnnotations := &protocol.ToolAnnotations{
 		ReadOnlyHint:    protocol.BoolPtr(false),
 		DestructiveHint: protocol.BoolPtr(false),
@@ -35,7 +35,9 @@ func registerFolderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.CreateFolder(ctx, p.FolderName, p.ParentFolder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.CreateFolder(ctx, p.FolderName, p.ParentFolder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -63,7 +65,9 @@ func registerFolderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.RenameFolder(ctx, p.FolderName, p.NewFolderName, p.InFolder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.RenameFolder(ctx, p.FolderName, p.NewFolderName, p.InFolder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -92,7 +96,9 @@ func registerFolderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.DeleteFolder(ctx, p.FolderName)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.DeleteFolder(ctx, p.FolderName)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -120,7 +126,9 @@ func registerFolderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.MoveFeed(ctx, p.FeedID, p.InFolder, p.ToFolder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MoveFeed(ctx, p.FeedID, p.InFolder, p.ToFolder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -148,7 +156,9 @@ func registerFolderCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.MoveFolder(ctx, p.FolderName, p.InFolder, p.ToFolder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.MoveFolder(ctx, p.FolderName, p.InFolder, p.ToFolder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}

@@ -9,7 +9,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-func registerSubscriptionCommands(app *command.App, client *newsblur.Client) {
+func registerSubscriptionCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {
 	mutationAnnotations := &protocol.ToolAnnotations{
 		ReadOnlyHint:    protocol.BoolPtr(false),
 		DestructiveHint: protocol.BoolPtr(false),
@@ -35,7 +35,9 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.Subscribe(ctx, p.URL, p.Folder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.Subscribe(ctx, p.URL, p.Folder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -66,7 +68,9 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.Unsubscribe(ctx, p.FeedID, p.InFolder)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.Unsubscribe(ctx, p.FeedID, p.InFolder)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
@@ -92,7 +96,9 @@ func registerSubscriptionCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.RenameFeed(ctx, p.FeedID, p.FeedTitle)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.RenameFeed(ctx, p.FeedID, p.FeedTitle)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}

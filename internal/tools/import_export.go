@@ -9,7 +9,7 @@ import (
 	"github.com/friedenberg/nebulous/internal/newsblur"
 )
 
-func registerImportExportCommands(app *command.App, client *newsblur.Client) {
+func registerImportExportCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {
 	app.AddCommand(&command.Command{
 		Name: "opml_export",
 		Description: command.Description{
@@ -51,7 +51,9 @@ func registerImportExportCommands(app *command.App, client *newsblur.Client) {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
-			result, err := client.OPMLImport(ctx, p.OPMLContent)
+			result, err := ml.call(func() (json.RawMessage, error) {
+				return client.OPMLImport(ctx, p.OPMLContent)
+			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
