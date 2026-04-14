@@ -31,6 +31,19 @@ restore-cache:
 fetch: build
   ./build/debug/nebulous fetch
 
+# [group: test]
+test-corpus: build
+  ./build/debug/nebulous corpus-list | head -5
+  @echo "---"
+  @echo "total keys: $(./build/debug/nebulous corpus-list | wc -l)"
+  @echo "---"
+  ./build/debug/nebulous corpus-read $(./build/debug/nebulous corpus-list | head -1)
+
+# [group: explore]
+test-corpus-search query="microplastics":
+  maneater index
+  maneater search "{{query}}"
+
 # Archive comparison test
 # Compares monolith (static fetch) vs single-file-cli (headless browser)
 # on representative page types: static blog, complex layout, JS-heavy news

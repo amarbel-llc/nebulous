@@ -22,13 +22,15 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "nebulous — a NewsBlur MCP server\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  nebulous [flags]             Start MCP server\n")
+		fmt.Fprintf(os.Stderr, "  nebulous [flags]              Start MCP server\n")
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch              Progressively cache feeds, starred stories, and original text\n\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch                Progressively cache feeds, starred stories, and original text\n")
+		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
+		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN  NewsBlur session cookie (required)\n\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN  NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -60,6 +62,30 @@ func main() {
 		return
 	}
 
+	if flag.NArg() >= 1 && flag.Arg(0) == "corpus-list" {
+		limit := 0
+		corpusFlags := flag.NewFlagSet("corpus-list", flag.ExitOnError)
+		corpusFlags.IntVar(&limit, "limit", 0, "maximum number of keys to emit (0 = all)")
+		corpusFlags.Parse(flag.Args()[1:])
+
+		client := newsblur.NewCacheOnlyClient(defaultCacheDir())
+		if err := tools.CorpusList(client, os.Stdout, limit); err != nil {
+			log.Fatalf("corpus-list: %v", err)
+		}
+		return
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "corpus-read" {
+		if flag.NArg() < 2 {
+			log.Fatal("corpus-read: missing key argument")
+		}
+		client := newsblur.NewCacheOnlyClient(defaultCacheDir())
+		if err := tools.CorpusRead(client, flag.Arg(1), os.Stdout); err != nil {
+			log.Fatalf("corpus-read: %v", err)
+		}
+		return
+	}
+
 	if flag.NArg() >= 1 && flag.Arg(0) == "fetch" {
 		token := os.Getenv("NEWSBLUR_TOKEN")
 		if token == "" {
@@ -67,9 +93,8 @@ func main() {
 		}
 
 		client := newsblur.NewClient(token)
-		if home, err := os.UserHomeDir(); err == nil {
-			cacheDir := filepath.Join(home, ".cache", "nebulous", "responses")
-			client.WithCache(cacheDir, 1*time.Hour)
+		if cd := defaultCacheDir(); cd != "" {
+			client.WithCache(cd, 1*time.Hour)
 		}
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -87,10 +112,8 @@ func main() {
 	}
 
 	client := newsblur.NewClient(token)
-
-	if home, err := os.UserHomeDir(); err == nil {
-		cacheDir := filepath.Join(home, ".cache", "nebulous", "responses")
-		client.WithCache(cacheDir, 1*time.Hour)
+	if cd := defaultCacheDir(); cd != "" {
+		client.WithCache(cd, 1*time.Hour)
 	}
 
 	app, resources := tools.RegisterAll(client)
@@ -123,6 +146,13 @@ func main() {
 	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func defaultCacheDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".cache", "nebulous", "responses")
+	}
+	return ""
 }
 
 func fetchAll(ctx context.Context, client *newsblur.Client) error {

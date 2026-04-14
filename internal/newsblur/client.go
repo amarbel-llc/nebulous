@@ -63,6 +63,15 @@ func NewClient(token string) *Client {
 	}
 }
 
+// NewCacheOnlyClient creates a client that reads exclusively from the local
+// persistent cache. It has no auth token or HTTP client — any attempt to make
+// API calls will fail. Used by offline subcommands (corpus-list, corpus-read).
+func NewCacheOnlyClient(cacheDir string) *Client {
+	c := &Client{}
+	c.WithCache(cacheDir, 0)
+	return c
+}
+
 func (c *Client) WithCache(dir string, ttl time.Duration) {
 	c.cache = &responseCache{dir: dir, ttl: ttl}
 }
@@ -191,6 +200,13 @@ func (c *Client) CachedOriginalText(storyHash string) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return c.cache.getNoTTL(c.originalTextCacheKey(storyHash))
+}
+
+func (c *Client) PutCachedOriginalText(storyHash string, raw json.RawMessage) error {
+	if c.cache == nil {
+		return nil
+	}
+	return c.cache.put(c.originalTextCacheKey(storyHash), raw)
 }
 
 func (c *Client) post(ctx context.Context, path string, form url.Values) (json.RawMessage, error) {
