@@ -148,7 +148,9 @@ func TestParseStarredHashes(t *testing.T) {
 func testClientWithCachedStories(t *testing.T) *newsblur.Client {
 	t.Helper()
 	c := newsblur.NewClient("test-token")
-	c.WithCache(t.TempDir(), time.Hour)
+	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	manifest := json.RawMessage(`{"starred_story_hashes":["hash1","hash2"]}`)
 	if err := c.PutCachedStarredStoryHashes(manifest); err != nil {
@@ -268,7 +270,9 @@ func TestRawStoryByHash(t *testing.T) {
 
 func TestBuildEmptyManifest(t *testing.T) {
 	c := newsblur.NewClient("test-token")
-	c.WithCache(t.TempDir(), time.Hour)
+	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	// No manifest cached at all
 	s := newStoryStore(c)
@@ -282,7 +286,9 @@ func TestBuildEmptyManifest(t *testing.T) {
 
 func TestBuildSkipsMissingStories(t *testing.T) {
 	c := newsblur.NewClient("test-token")
-	c.WithCache(t.TempDir(), time.Hour)
+	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	// Manifest references hashes but only one is cached
 	manifest := json.RawMessage(`{"starred_story_hashes":["cached","missing"]}`)

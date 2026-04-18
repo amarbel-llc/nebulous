@@ -9,7 +9,9 @@ import (
 func testClientWithCache(t *testing.T) *Client {
 	t.Helper()
 	c := NewClient("test-token")
-	c.WithCache(t.TempDir(), time.Hour)
+	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+		t.Fatal(err)
+	}
 	return c
 }
 

@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
+	"github.com/friedenberg/nebulous/internal/blobstore"
 	"github.com/friedenberg/nebulous/internal/newsblur"
 	"github.com/friedenberg/nebulous/internal/tools"
 )
@@ -30,7 +32,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN  NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN          NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_BLOB_READ_CMD  External command to read a blob (maneater#8 contract). Pair with WRITE_CMD.\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_BLOB_WRITE_CMD External command to write a blob (maneater#8 contract). Pair with READ_CMD.\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -68,7 +72,10 @@ func main() {
 		corpusFlags.IntVar(&limit, "limit", 0, "maximum number of keys to emit (0 = all)")
 		corpusFlags.Parse(flag.Args()[1:])
 
-		client := newsblur.NewCacheOnlyClient(defaultCacheDir())
+		client, err := buildCacheOnlyClient()
+		if err != nil {
+			log.Fatalf("corpus-list: %v", err)
+		}
 		if err := tools.CorpusList(client, os.Stdout, limit); err != nil {
 			log.Fatalf("corpus-list: %v", err)
 		}
@@ -79,7 +86,10 @@ func main() {
 		if flag.NArg() < 2 {
 			log.Fatal("corpus-read: missing key argument")
 		}
-		client := newsblur.NewCacheOnlyClient(defaultCacheDir())
+		client, err := buildCacheOnlyClient()
+		if err != nil {
+			log.Fatalf("corpus-read: %v", err)
+		}
 		if err := tools.CorpusRead(client, flag.Arg(1), os.Stdout); err != nil {
 			log.Fatalf("corpus-read: %v", err)
 		}
@@ -93,8 +103,8 @@ func main() {
 		}
 
 		client := newsblur.NewClient(token)
-		if cd := defaultCacheDir(); cd != "" {
-			client.WithCache(cd, 1*time.Hour)
+		if err := attachCache(client, 1*time.Hour); err != nil {
+			log.Fatalf("fetch: cache setup: %v", err)
 		}
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -112,8 +122,8 @@ func main() {
 	}
 
 	client := newsblur.NewClient(token)
-	if cd := defaultCacheDir(); cd != "" {
-		client.WithCache(cd, 1*time.Hour)
+	if err := attachCache(client, 1*time.Hour); err != nil {
+		log.Fatalf("cache setup: %v", err)
 	}
 
 	app, resources := tools.RegisterAll(client)
@@ -150,9 +160,51 @@ func main() {
 
 func defaultCacheDir() string {
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "nebulous", "responses")
+		return filepath.Join(home, ".cache", "nebulous", "store")
 	}
 	return ""
+}
+
+// buildStore constructs the blob store based on environment variables. If
+// both NEBULOUS_BLOB_READ_CMD and NEBULOUS_BLOB_WRITE_CMD are set, returns
+// an ExternalCommandStore. Otherwise returns nil so the caller can fall
+// back to the default FilesystemStore.
+func buildStore() (blobstore.Store, error) {
+	readCmd := strings.TrimSpace(os.Getenv("NEBULOUS_BLOB_READ_CMD"))
+	writeCmd := strings.TrimSpace(os.Getenv("NEBULOUS_BLOB_WRITE_CMD"))
+	if readCmd == "" && writeCmd == "" {
+		return nil, nil
+	}
+	if readCmd == "" || writeCmd == "" {
+		return nil, fmt.Errorf("NEBULOUS_BLOB_READ_CMD and NEBULOUS_BLOB_WRITE_CMD must be set together")
+	}
+	return blobstore.NewExternalCommandStore(strings.Fields(readCmd), strings.Fields(writeCmd))
+}
+
+// attachCache attaches the client's response cache using the default cache
+// directory and the store selected by environment.
+func attachCache(client *newsblur.Client, ttl time.Duration) error {
+	dir := defaultCacheDir()
+	if dir == "" {
+		return nil // no HOME; run without cache
+	}
+	store, err := buildStore()
+	if err != nil {
+		return err
+	}
+	return client.WithCache(dir, ttl, store)
+}
+
+func buildCacheOnlyClient() (*newsblur.Client, error) {
+	dir := defaultCacheDir()
+	if dir == "" {
+		return nil, fmt.Errorf("cannot resolve default cache directory (set HOME)")
+	}
+	store, err := buildStore()
+	if err != nil {
+		return nil, err
+	}
+	return newsblur.NewCacheOnlyClient(dir, store)
 }
 
 func fetchAll(ctx context.Context, client *newsblur.Client) error {

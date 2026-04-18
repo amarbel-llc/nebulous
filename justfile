@@ -17,7 +17,7 @@ test-go *args:
 install-dev: build-nix
   ./result/bin/nebulous install-mcp
 
-cache-dir := env("HOME") / ".cache/nebulous/responses"
+cache-dir := env("HOME") / ".cache/nebulous/store"
 
 backup-cache:
   cp -r {{cache-dir}} {{cache-dir}}.bak
@@ -27,6 +27,12 @@ restore-cache:
   rm -rf {{cache-dir}}
   mv {{cache-dir}}.bak {{cache-dir}}
   @echo "Restored from backup"
+
+# One-shot migration from the legacy ~/.cache/nebulous/responses layout
+# to the new ~/.cache/nebulous/store layout. Not built into the prod binary.
+# [group: migration]
+migrate-cache *args:
+  go run ./cmd/migrate-cache {{args}}
 
 fetch: build
   ./build/debug/nebulous fetch

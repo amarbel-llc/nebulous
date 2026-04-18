@@ -11,7 +11,10 @@ import (
 
 func testCacheOnlyClient(t *testing.T) *newsblur.Client {
 	t.Helper()
-	c := newsblur.NewCacheOnlyClient(t.TempDir())
+	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	manifest := json.RawMessage(`{"starred_story_hashes":["rich","stub","missing"]}`)
 	if err := c.PutCachedStarredStoryHashes(manifest); err != nil {
@@ -94,10 +97,13 @@ func TestCorpusListWithLimit(t *testing.T) {
 }
 
 func TestCorpusListNoManifest(t *testing.T) {
-	c := newsblur.NewCacheOnlyClient(t.TempDir())
+	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var buf bytes.Buffer
 
-	err := CorpusList(c, &buf, 0)
+	err = CorpusList(c, &buf, 0)
 	if err == nil {
 		t.Fatal("expected error when no manifest cached")
 	}
@@ -177,7 +183,10 @@ func TestCorpusReadOriginalTextFallback(t *testing.T) {
 }
 
 func TestCorpusReadNoAuthor(t *testing.T) {
-	c := newsblur.NewCacheOnlyClient(t.TempDir())
+	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	richContent := "<p>" + strings.Repeat("Content without any author attribution in the metadata. ", 10) + "</p>"
 	story := json.RawMessage(`{

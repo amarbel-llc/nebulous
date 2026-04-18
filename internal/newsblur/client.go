@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/friedenberg/nebulous/internal/blobstore"
 )
 
 const DefaultBaseURL = "https://www.newsblur.com"
@@ -66,14 +68,21 @@ func NewClient(token string) *Client {
 // NewCacheOnlyClient creates a client that reads exclusively from the local
 // persistent cache. It has no auth token or HTTP client — any attempt to make
 // API calls will fail. Used by offline subcommands (corpus-list, corpus-read).
-func NewCacheOnlyClient(cacheDir string) *Client {
+func NewCacheOnlyClient(cacheDir string, store blobstore.Store) (*Client, error) {
 	c := &Client{}
-	c.WithCache(cacheDir, 0)
-	return c
+	if err := c.WithCache(cacheDir, 0, store); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
-func (c *Client) WithCache(dir string, ttl time.Duration) {
-	c.cache = &responseCache{dir: dir, ttl: ttl}
+func (c *Client) WithCache(dir string, ttl time.Duration, store blobstore.Store) error {
+	rc, err := newResponseCache(dir, ttl, store)
+	if err != nil {
+		return err
+	}
+	c.cache = rc
+	return nil
 }
 
 func (c *Client) get(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
@@ -158,7 +167,7 @@ func (c *Client) PutCachedStarredStory(hash string, raw json.RawMessage) error {
 	if c.cache == nil {
 		return nil
 	}
-	return c.cache.put(c.starredStoryCacheKey(hash), raw)
+	return c.cache.putImmutable(c.starredStoryCacheKey(hash), raw)
 }
 
 func (c *Client) CachedStarredStoryHashes() (json.RawMessage, bool) {
@@ -173,7 +182,7 @@ func (c *Client) PutCachedStarredStoryHashes(raw json.RawMessage) error {
 		return nil
 	}
 	key := c.cache.cacheKey("/reader/starred_story_hashes", nil)
-	return c.cache.put(key, raw)
+	return c.cache.putImmutable(key, raw)
 }
 
 func (c *Client) InvalidateStarredStoryHashManifest() {
@@ -206,7 +215,7 @@ func (c *Client) PutCachedOriginalText(storyHash string, raw json.RawMessage) er
 	if c.cache == nil {
 		return nil
 	}
-	return c.cache.put(c.originalTextCacheKey(storyHash), raw)
+	return c.cache.putImmutable(c.originalTextCacheKey(storyHash), raw)
 }
 
 func (c *Client) post(ctx context.Context, path string, form url.Values) (json.RawMessage, error) {
