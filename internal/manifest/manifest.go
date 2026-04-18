@@ -1,9 +1,14 @@
-package blobstore
+// Package manifest holds the persistent cache manifest that maps nebulous's
+// logical cache keys (SHA256 of URL+params) to opaque blob digests. Blob
+// storage itself lives in madder; this package is only the key→digest
+// index.
+package manifest
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -65,6 +70,15 @@ func (m *Manifest) Lookup(key string) (ManifestEntry, bool) {
 	defer m.mu.Unlock()
 	e, ok := m.entries[key]
 	return e, ok
+}
+
+// All returns a snapshot of every entry. Use for bulk operations (migration,
+// audits); the returned map is a copy and safe to iterate without holding the
+// manifest lock.
+func (m *Manifest) All() map[string]ManifestEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return maps.Clone(m.entries)
 }
 
 func (m *Manifest) Record(key string, entry ManifestEntry) error {

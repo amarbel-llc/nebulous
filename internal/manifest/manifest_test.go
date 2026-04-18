@@ -1,4 +1,4 @@
-package blobstore
+package manifest
 
 import (
 	"encoding/json"

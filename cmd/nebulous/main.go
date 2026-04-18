@@ -10,12 +10,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
-	"github.com/friedenberg/nebulous/internal/blobstore"
+	"github.com/friedenberg/nebulous/internal/madder"
 	"github.com/friedenberg/nebulous/internal/newsblur"
 	"github.com/friedenberg/nebulous/internal/tools"
 )
@@ -32,9 +31,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN          NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n")
-		fmt.Fprintf(os.Stderr, "  NEBULOUS_BLOB_READ_CMD  External command to read a blob (maneater#8 contract). Pair with WRITE_CMD.\n")
-		fmt.Fprintf(os.Stderr, "  NEBULOUS_BLOB_WRITE_CMD External command to write a blob (maneater#8 contract). Pair with READ_CMD.\n\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN   NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n")
+		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME    honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -72,7 +70,10 @@ func main() {
 		corpusFlags.IntVar(&limit, "limit", 0, "maximum number of keys to emit (0 = all)")
 		corpusFlags.Parse(flag.Args()[1:])
 
-		client, err := buildCacheOnlyClient()
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+
+		client, err := buildCacheOnlyClient(ctx)
 		if err != nil {
 			log.Fatalf("corpus-list: %v", err)
 		}
@@ -86,7 +87,11 @@ func main() {
 		if flag.NArg() < 2 {
 			log.Fatal("corpus-read: missing key argument")
 		}
-		client, err := buildCacheOnlyClient()
+
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+
+		client, err := buildCacheOnlyClient(ctx)
 		if err != nil {
 			log.Fatalf("corpus-read: %v", err)
 		}
@@ -102,13 +107,13 @@ func main() {
 			log.Fatal("NEWSBLUR_TOKEN environment variable is required")
 		}
 
-		client := newsblur.NewClient(token)
-		if err := attachCache(client, 1*time.Hour); err != nil {
-			log.Fatalf("fetch: cache setup: %v", err)
-		}
-
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
+
+		client := newsblur.NewClient(token)
+		if err := attachCache(ctx, client, 1*time.Hour); err != nil {
+			log.Fatalf("fetch: cache setup: %v", err)
+		}
 
 		if err := fetchAll(ctx, client); err != nil {
 			log.Fatalf("fetch: %v", err)
@@ -121,8 +126,11 @@ func main() {
 		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	client := newsblur.NewClient(token)
-	if err := attachCache(client, 1*time.Hour); err != nil {
+	if err := attachCache(ctx, client, 1*time.Hour); err != nil {
 		log.Fatalf("cache setup: %v", err)
 	}
 
@@ -133,9 +141,6 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 
 	t := transport.NewStdio(os.Stdin, os.Stdout)
 
@@ -158,53 +163,52 @@ func main() {
 	}
 }
 
-func defaultCacheDir() string {
+// defaultManifestPath resolves the nebulous manifest location under XDG
+// conventions. Returns "" if no home can be resolved (run without cache).
+func defaultManifestPath() string {
+	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
+		return filepath.Join(x, "nebulous", "manifest.json")
+	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "nebulous", "store")
+		return filepath.Join(home, ".local", "share", "nebulous", "manifest.json")
 	}
 	return ""
 }
 
-// buildStore constructs the blob store based on environment variables. If
-// both NEBULOUS_BLOB_READ_CMD and NEBULOUS_BLOB_WRITE_CMD are set, returns
-// an ExternalCommandStore. Otherwise returns nil so the caller can fall
-// back to the default FilesystemStore.
-func buildStore() (blobstore.Store, error) {
-	readCmd := strings.TrimSpace(os.Getenv("NEBULOUS_BLOB_READ_CMD"))
-	writeCmd := strings.TrimSpace(os.Getenv("NEBULOUS_BLOB_WRITE_CMD"))
-	if readCmd == "" && writeCmd == "" {
-		return nil, nil
+// buildBlobSink returns an initialized madder-backed sink bound to ctx. ctx
+// governs the lifetime of every madder process invocation.
+func buildBlobSink(ctx context.Context) (*madder.Store, error) {
+	store := madder.NewStore(ctx)
+	if err := store.Init(); err != nil {
+		return nil, fmt.Errorf("madder init: %w", err)
 	}
-	if readCmd == "" || writeCmd == "" {
-		return nil, fmt.Errorf("NEBULOUS_BLOB_READ_CMD and NEBULOUS_BLOB_WRITE_CMD must be set together")
-	}
-	return blobstore.NewExternalCommandStore(strings.Fields(readCmd), strings.Fields(writeCmd))
+	return store, nil
 }
 
-// attachCache attaches the client's response cache using the default cache
-// directory and the store selected by environment.
-func attachCache(client *newsblur.Client, ttl time.Duration) error {
-	dir := defaultCacheDir()
-	if dir == "" {
-		return nil // no HOME; run without cache
+// attachCache wires a madder-backed response cache onto client. ctx bounds
+// the lifetime of madder invocations initiated via the cache.
+func attachCache(ctx context.Context, client *newsblur.Client, ttl time.Duration) error {
+	manifestPath := defaultManifestPath()
+	if manifestPath == "" {
+		return nil // no HOME/XDG_DATA_HOME; run without cache
 	}
-	store, err := buildStore()
+	sink, err := buildBlobSink(ctx)
 	if err != nil {
 		return err
 	}
-	return client.WithCache(dir, ttl, store)
+	return client.WithCache(manifestPath, ttl, sink)
 }
 
-func buildCacheOnlyClient() (*newsblur.Client, error) {
-	dir := defaultCacheDir()
-	if dir == "" {
-		return nil, fmt.Errorf("cannot resolve default cache directory (set HOME)")
+func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
+	manifestPath := defaultManifestPath()
+	if manifestPath == "" {
+		return nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
 	}
-	store, err := buildStore()
+	sink, err := buildBlobSink(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return newsblur.NewCacheOnlyClient(dir, store)
+	return newsblur.NewCacheOnlyClient(manifestPath, sink)
 }
 
 func fetchAll(ctx context.Context, client *newsblur.Client) error {

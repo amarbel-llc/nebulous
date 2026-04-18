@@ -9,6 +9,18 @@
       url = "github:amarbel-llc/gomod2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    madder = {
+      url = "github:amarbel-llc/madder";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
+    bob = {
+      url = "github:amarbel-llc/bob";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -18,6 +30,8 @@
       utils,
       gomod2nix,
       nixpkgs-master,
+      madder,
+      bob,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -33,6 +47,8 @@
 
         version = "0.1.0";
 
+        madderPkg = madder.packages.${system}.default;
+
         nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
           inherit version;
@@ -41,6 +57,10 @@
           go = pkgs-master.go_1_26;
 
           subPackages = [ "cmd/nebulous" ];
+
+          ldflags = [
+            "-X github.com/friedenberg/nebulous/internal/madder.Bin=${madderPkg}/bin/madder"
+          ];
 
           postInstall = ''
             $out/bin/nebulous generate-plugin $out
@@ -74,7 +94,13 @@
             pkgs.bats
             pkgs.shellcheck
             pkgs.shfmt
+            madderPkg
+            bob.packages.${system}.batman
           ];
+
+          shellHook = ''
+            export BATS_LIB_PATH=${bob.packages.${system}.batman}/share/bats
+          '';
         };
       }
     );

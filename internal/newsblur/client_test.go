@@ -2,6 +2,7 @@ package newsblur
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -9,7 +10,7 @@ import (
 func testClientWithCache(t *testing.T) *Client {
 	t.Helper()
 	c := NewClient("test-token")
-	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+	if err := c.WithCache(filepath.Join(t.TempDir(), "manifest.json"), time.Hour, newMemSink()); err != nil {
 		t.Fatal(err)
 	}
 	return c

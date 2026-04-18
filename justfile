@@ -3,16 +3,22 @@ default: build test
 
 build: build-go build-nix
 
-test: test-go
+test: test-go test-bats
 
 build-go tag="debug":
   go build {{if tag == "release" { "-ldflags='-s -w'" } else { "'-gcflags=all=-N -l'" } }} -o build/{{tag}}/nebulous ./cmd/nebulous
+  go build {{if tag == "release" { "-ldflags='-s -w'" } else { "'-gcflags=all=-N -l'" } }} -o build/{{tag}}/migrate-cache ./cmd/migrate-cache
 
 build-nix:
   nix build --show-trace
 
 test-go *args:
   go test {{args}} ./...
+
+# [group: test]
+test-bats *args: build-go
+  MIGRATE_CACHE_BIN="$(pwd)/build/debug/migrate-cache" \
+    nix develop -c bats {{args}} zz-tests_bats/
 
 install-dev: build-nix
   ./result/bin/nebulous install-mcp

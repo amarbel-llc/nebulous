@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 
 func testCacheOnlyClient(t *testing.T) *newsblur.Client {
 	t.Helper()
-	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	c, err := newsblur.NewCacheOnlyClient(filepath.Join(t.TempDir(), "manifest.json"), newMemSink())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestCorpusListWithLimit(t *testing.T) {
 }
 
 func TestCorpusListNoManifest(t *testing.T) {
-	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	c, err := newsblur.NewCacheOnlyClient(filepath.Join(t.TempDir(), "manifest.json"), newMemSink())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestCorpusReadOriginalTextFallback(t *testing.T) {
 }
 
 func TestCorpusReadNoAuthor(t *testing.T) {
-	c, err := newsblur.NewCacheOnlyClient(t.TempDir(), nil)
+	c, err := newsblur.NewCacheOnlyClient(filepath.Join(t.TempDir(), "manifest.json"), newMemSink())
 	if err != nil {
 		t.Fatal(err)
 	}

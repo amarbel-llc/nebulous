@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -148,7 +149,7 @@ func TestParseStarredHashes(t *testing.T) {
 func testClientWithCachedStories(t *testing.T) *newsblur.Client {
 	t.Helper()
 	c := newsblur.NewClient("test-token")
-	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+	if err := c.WithCache(filepath.Join(t.TempDir(), "manifest.json"), time.Hour, newMemSink()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +271,7 @@ func TestRawStoryByHash(t *testing.T) {
 
 func TestBuildEmptyManifest(t *testing.T) {
 	c := newsblur.NewClient("test-token")
-	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+	if err := c.WithCache(filepath.Join(t.TempDir(), "manifest.json"), time.Hour, newMemSink()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -286,7 +287,7 @@ func TestBuildEmptyManifest(t *testing.T) {
 
 func TestBuildSkipsMissingStories(t *testing.T) {
 	c := newsblur.NewClient("test-token")
-	if err := c.WithCache(t.TempDir(), time.Hour, nil); err != nil {
+	if err := c.WithCache(filepath.Join(t.TempDir(), "manifest.json"), time.Hour, newMemSink()); err != nil {
 		t.Fatal(err)
 	}
 

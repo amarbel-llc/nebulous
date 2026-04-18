@@ -2,38 +2,44 @@ package newsblur
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
-	"path/filepath"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/blobstore"
+	"github.com/friedenberg/nebulous/internal/manifest"
 )
 
-// responseCache maps logical keys (SHA256 of URL+params) to content blobs via
-// a persistent Manifest. The actual bytes live in a pluggable blobstore.Store
-// (filesystem by default, or an external command per amarbel-llc/maneater#8).
+// BlobSink is the operational surface nebulous needs from its blob backend.
+// Implemented by *madder.Store in production and by test fakes in unit tests.
+type BlobSink interface {
+	Read(id string, dst io.Writer) (bool, error)
+	Write(src io.Reader) (id string, err error)
+}
+
+// responseCache maps logical keys (SHA256 of URL+params) to content blobs
+// through a persistent Manifest. Blob bytes live in a BlobSink; the manifest
+// lives at a caller-provided path (nebulous-owned meta directory).
 type responseCache struct {
-	manifest *blobstore.Manifest
-	store    blobstore.Store
+	manifest *manifest.Manifest
+	sink     BlobSink
 	ttl      time.Duration
 }
 
-func newResponseCache(dir string, ttl time.Duration, store blobstore.Store) (*responseCache, error) {
-	if dir == "" {
-		return nil, fmt.Errorf("cache: dir must not be empty")
+func newResponseCache(manifestPath string, ttl time.Duration, sink BlobSink) (*responseCache, error) {
+	if manifestPath == "" {
+		return nil, fmt.Errorf("cache: manifest path must not be empty")
 	}
-	m, err := blobstore.NewManifest(filepath.Join(dir, "manifest.json"))
+	if sink == nil {
+		return nil, fmt.Errorf("cache: blob sink must not be nil")
+	}
+	m, err := manifest.NewManifest(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("cache: load manifest: %w", err)
 	}
-	if store == nil {
-		store = blobstore.NewFilesystemStore(dir)
-	}
-	return &responseCache{manifest: m, store: store, ttl: ttl}, nil
+	return &responseCache{manifest: m, sink: sink, ttl: ttl}, nil
 }
 
 func (c *responseCache) cacheKey(path string, params url.Values) string {
@@ -68,7 +74,7 @@ func (c *responseCache) getNoTTL(key string) (json.RawMessage, bool) {
 
 func (c *responseCache) readBlob(digest string) (json.RawMessage, bool) {
 	var buf bytes.Buffer
-	ok, err := c.store.Read(context.Background(), digest, &buf)
+	ok, err := c.sink.Read(digest, &buf)
 	if err != nil || !ok {
 		return nil, false
 	}
@@ -95,11 +101,11 @@ func (c *responseCache) putImmutable(key string, body json.RawMessage) error {
 }
 
 func (c *responseCache) write(key string, body json.RawMessage, immutable bool) error {
-	digest, err := c.store.Write(context.Background(), bytes.NewReader(body))
+	digest, err := c.sink.Write(bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("cache write: %w", err)
 	}
-	return c.manifest.Record(key, blobstore.ManifestEntry{
+	return c.manifest.Record(key, manifest.ManifestEntry{
 		Digest:    digest,
 		WrittenAt: time.Now(),
 		Immutable: immutable,

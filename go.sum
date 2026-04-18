@@ -1,5 +1,7 @@
-github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.4 h1:Xyq57MegLHgS/UU/IYWZUdQ4oiMA3Ggr7fY4w0N0zVM=
-github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.4/go.mod h1:l/5fqg8ZEzjVxK8OqdiN9vxsz1gVUGQaYd6rgFIOU7I=
+github.com/amarbel-llc/bob/packages/tap-dancer/go v0.1.0 h1:+8QbL84Q9IVcKUPm0DJ4emTwXndujB86ATqyNCem+KQ=
+github.com/amarbel-llc/bob/packages/tap-dancer/go v0.1.0/go.mod h1:f/eBRNyz3TVY+bB5bnNmYioJEgNrmwbvscFq29VFyXc=
+github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.5 h1:GaGJmhzTbCNLWS+YbEqr4YKv6rmIWrKfM67OiQeIIqQ=
+github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.5/go.mod h1:4QNwpEtQWg+aF++9BpxQq93cnj6puQfsARZ0Z4fHIHk=
 github.com/go-quicktest/qt v1.101.0 h1:O1K29Txy5P2OK0dGo59b7b0LR6wKfIhttaAhHUyn7eI=
 github.com/go-quicktest/qt v1.101.0/go.mod h1:14Bz/f7NwaXPtdYEgzsx46kqSxVwTbzVZsDC26tQJow=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

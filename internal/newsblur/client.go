@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/friedenberg/nebulous/internal/blobstore"
 )
 
 const DefaultBaseURL = "https://www.newsblur.com"
@@ -68,16 +66,16 @@ func NewClient(token string) *Client {
 // NewCacheOnlyClient creates a client that reads exclusively from the local
 // persistent cache. It has no auth token or HTTP client — any attempt to make
 // API calls will fail. Used by offline subcommands (corpus-list, corpus-read).
-func NewCacheOnlyClient(cacheDir string, store blobstore.Store) (*Client, error) {
+func NewCacheOnlyClient(manifestPath string, sink BlobSink) (*Client, error) {
 	c := &Client{}
-	if err := c.WithCache(cacheDir, 0, store); err != nil {
+	if err := c.WithCache(manifestPath, 0, sink); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *Client) WithCache(dir string, ttl time.Duration, store blobstore.Store) error {
-	rc, err := newResponseCache(dir, ttl, store)
+func (c *Client) WithCache(manifestPath string, ttl time.Duration, sink BlobSink) error {
+	rc, err := newResponseCache(manifestPath, ttl, sink)
 	if err != nil {
 		return err
 	}

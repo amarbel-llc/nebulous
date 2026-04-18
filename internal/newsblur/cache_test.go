@@ -1,17 +1,58 @@
 package newsblur
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/url"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/friedenberg/nebulous/internal/blobstore"
 )
+
+// memSink is an in-memory BlobSink for unit tests. The id scheme mirrors
+// madder's blech32-like convention (`<family>-<payload>`) so tests that care
+// about the format-prefix shape can inspect returned ids meaningfully.
+type memSink struct {
+	mu    sync.Mutex
+	blobs map[string][]byte
+}
+
+func newMemSink() *memSink { return &memSink{blobs: map[string][]byte{}} }
+
+func (s *memSink) Read(id string, dst io.Writer) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.blobs[id]
+	if !ok {
+		return false, nil
+	}
+	if _, err := dst.Write(b); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *memSink) Write(src io.Reader) (string, error) {
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, src); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	id := fmt.Sprintf("sha256test-%s", hex.EncodeToString(sum[:]))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blobs[id] = buf.Bytes()
+	return id, nil
+}
 
 func newTestCache(t *testing.T, ttl time.Duration) *responseCache {
 	t.Helper()
-	c, err := newResponseCache(t.TempDir(), ttl, nil)
+	c, err := newResponseCache(filepath.Join(t.TempDir(), "manifest.json"), ttl, newMemSink())
 	if err != nil {
 		t.Fatalf("newResponseCache: %v", err)
 	}
@@ -173,9 +214,16 @@ func TestCacheHasMissing(t *testing.T) {
 	}
 }
 
-func TestCacheReloadPersists(t *testing.T) {
-	dir := t.TempDir()
-	c1, err := newResponseCache(dir, time.Hour, nil)
+func TestCacheReloadPersistsManifest(t *testing.T) {
+	// The manifest survives across restarts; the sink is ephemeral in the
+	// test. A reloaded cache pointing at the same manifest file + a sink
+	// holding the same blobs should surface the entry. This mirrors the
+	// production reality where madder's tree persists independently of
+	// nebulous's manifest.
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	sink := newMemSink()
+
+	c1, err := newResponseCache(manifestPath, time.Hour, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +233,7 @@ func TestCacheReloadPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c2, err := newResponseCache(dir, time.Hour, nil)
+	c2, err := newResponseCache(manifestPath, time.Hour, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,31 +246,14 @@ func TestCacheReloadPersists(t *testing.T) {
 	}
 }
 
-func TestNewResponseCacheEmptyDir(t *testing.T) {
-	if _, err := newResponseCache("", time.Hour, nil); err == nil {
-		t.Error("expected error for empty dir")
+func TestNewResponseCacheEmptyPath(t *testing.T) {
+	if _, err := newResponseCache("", time.Hour, newMemSink()); err == nil {
+		t.Error("expected error for empty manifest path")
 	}
 }
 
-func TestCacheWithCustomStore(t *testing.T) {
-	// Ensure the caller can inject a Store; the FilesystemStore default
-	// should behave identically to explicit injection.
-	dir := t.TempDir()
-	store := blobstore.NewFilesystemStore(dir)
-	c, err := newResponseCache(dir, time.Hour, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := c.cacheKey("/test", nil)
-	body := json.RawMessage(`{"injected":true}`)
-	if err := c.put(key, body); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := c.get(key)
-	if !ok {
-		t.Fatal("get returned false")
-	}
-	if string(got) != string(body) {
-		t.Errorf("got %s, want %s", got, body)
+func TestNewResponseCacheNilSink(t *testing.T) {
+	if _, err := newResponseCache(filepath.Join(t.TempDir(), "m.json"), time.Hour, nil); err == nil {
+		t.Error("expected error for nil sink")
 	}
 }
