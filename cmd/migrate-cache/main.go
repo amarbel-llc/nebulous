@@ -101,13 +101,19 @@ func buildStore(newDir string) (blobstore.Store, error) {
 }
 
 // migrate walks legacyDir, writing each SHA256-named file as a blob and
-// recording a manifest entry marked immutable. Returns counts.
+// recording a manifest entry marked immutable. Manifest entries are
+// accumulated in memory and written in a single batch at the end to avoid
+// the O(n^2) cost of per-entry saves.
 func migrate(ctx context.Context, legacyDir string, store blobstore.Store, m *blobstore.Manifest, dryRun bool) (migrated, skipped int, err error) {
-	entries, err := os.ReadDir(legacyDir)
+	dirEntries, err := os.ReadDir(legacyDir)
 	if err != nil {
 		return 0, 0, fmt.Errorf("reading legacy dir: %w", err)
 	}
-	for _, e := range entries {
+	log.Printf("found %d entries in %s", len(dirEntries), legacyDir)
+
+	batch := make(map[string]blobstore.ManifestEntry, len(dirEntries))
+	start := time.Now()
+	for _, e := range dirEntries {
 		if e.IsDir() {
 			skipped++
 			continue
@@ -145,20 +151,29 @@ func migrate(ctx context.Context, legacyDir string, store blobstore.Store, m *bl
 			continue
 		}
 
-		if err := m.Record(name, blobstore.ManifestEntry{
+		batch[name] = blobstore.ManifestEntry{
 			Digest:    digest,
 			WrittenAt: info.ModTime(),
 			Immutable: true,
-		}); err != nil {
-			log.Printf("[skip] %s: manifest record: %v", name, err)
-			skipped++
-			continue
 		}
 		migrated++
 		if migrated%500 == 0 {
-			log.Printf("[progress] migrated %d entries", migrated)
+			elapsed := time.Since(start)
+			rate := float64(migrated) / elapsed.Seconds()
+			log.Printf("[progress] migrated %d entries in %s (%.0f/s)", migrated, elapsed.Round(time.Millisecond), rate)
 		}
 	}
+
+	if dryRun {
+		return migrated, skipped, nil
+	}
+
+	log.Printf("writing manifest with %d entries...", len(batch))
+	saveStart := time.Now()
+	if err := m.RecordBatch(batch); err != nil {
+		return migrated, skipped, fmt.Errorf("record batch: %w", err)
+	}
+	log.Printf("manifest saved in %s", time.Since(saveStart).Round(time.Millisecond))
 	return migrated, skipped, nil
 }
 

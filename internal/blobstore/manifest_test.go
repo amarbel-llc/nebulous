@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,6 +85,192 @@ func TestManifestLookupMissing(t *testing.T) {
 	}
 	if _, ok := m.Lookup("nope"); ok {
 		t.Error("Lookup returned ok for missing key")
+	}
+}
+
+func TestManifestRecordBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().Round(time.Second)
+	batch := map[string]ManifestEntry{
+		"k1": {Digest: "d1", WrittenAt: when, Immutable: true},
+		"k2": {Digest: "d2", WrittenAt: when},
+		"k3": {Digest: "d3", WrittenAt: when},
+	}
+	if err := m.RecordBatch(batch); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+
+	for k, want := range batch {
+		got, ok := m.Lookup(k)
+		if !ok {
+			t.Errorf("Lookup(%s) missing", k)
+			continue
+		}
+		if got.Digest != want.Digest || got.Immutable != want.Immutable {
+			t.Errorf("Lookup(%s) = %+v, want %+v", k, got, want)
+		}
+	}
+
+	// Empty batch is a no-op and must not error.
+	if err := m.RecordBatch(nil); err != nil {
+		t.Errorf("RecordBatch(nil): %v", err)
+	}
+
+	// Reload and verify.
+	m2, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range batch {
+		if _, ok := m2.Lookup(k); !ok {
+			t.Errorf("reloaded manifest missing %s", k)
+		}
+	}
+}
+
+func TestManifestRecordBatchLarge(t *testing.T) {
+	// Repro for observed migration bug: batch of 55k entries resulted in
+	// only ~50k entries persisted. Either saveLocked silently dropped
+	// data or RecordBatch did.
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 55000
+	batch := make(map[string]ManifestEntry, n)
+	when := time.Now()
+	for i := 0; i < n; i++ {
+		// Use a 64-char hex-like key to mirror real migration input.
+		key := fmt.Sprintf("%064x", i)
+		batch[key] = ManifestEntry{
+			Digest:    fmt.Sprintf("%064x", i),
+			WrittenAt: when,
+			Immutable: true,
+		}
+	}
+	if err := m.RecordBatch(batch); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+
+	// Reload from disk; count entries.
+	m2, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2.mu.Lock()
+	got := len(m2.entries)
+	m2.mu.Unlock()
+	if got != n {
+		t.Fatalf("reloaded manifest has %d entries, want %d (lost %d)", got, n, n-got)
+	}
+}
+
+func TestManifestRecordBatchRealKeys(t *testing.T) {
+	// Reads the legacy (pre-migration) dir if present and tries RecordBatch
+	// with the exact same keys. Skips if the dir doesn't exist (CI, etc.).
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home")
+	}
+	legacy := filepath.Join(home, ".cache", "nebulous", "responses.migrated-20260418-130055")
+	if _, err := os.Stat(legacy); err != nil {
+		t.Skipf("legacy dir not present: %v", err)
+	}
+	entries, err := os.ReadDir(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("read %d entries from legacy", len(entries))
+
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := make(map[string]ManifestEntry, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) != 64 {
+			continue
+		}
+		batch[name] = ManifestEntry{
+			Digest:    name, // fake digest; irrelevant for the count test
+			WrittenAt: time.Now(),
+			Immutable: true,
+		}
+	}
+	t.Logf("batch has %d entries", len(batch))
+	if err := m.RecordBatch(batch); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+
+	// Reload and count.
+	m2, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2.mu.Lock()
+	got := len(m2.entries)
+	m2.mu.Unlock()
+	if got != len(batch) {
+		t.Fatalf("reloaded %d entries, batch had %d (lost %d)", got, len(batch), len(batch)-got)
+	}
+}
+
+func TestManifestRecordBatchRealPath(t *testing.T) {
+	// Write to the same filesystem as the real cache to rule out a
+	// filesystem/quota-specific issue seen during migration.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home")
+	}
+	cacheDir := filepath.Join(home, ".cache", "nebulous")
+	if _, err := os.Stat(cacheDir); err != nil {
+		t.Skipf("no cache dir: %v", err)
+	}
+	testDir, err := os.MkdirTemp(cacheDir, "manifest-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(testDir) })
+
+	path := filepath.Join(testDir, "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 55000
+	batch := make(map[string]ManifestEntry, n)
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("%064x", i)
+		batch[key] = ManifestEntry{Digest: key, WrittenAt: time.Now(), Immutable: true}
+	}
+	if err := m.RecordBatch(batch); err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("manifest file size: %d bytes", info.Size())
+
+	m2, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2.mu.Lock()
+	got := len(m2.entries)
+	m2.mu.Unlock()
+	if got != n {
+		t.Fatalf("reloaded %d entries, want %d", got, n)
 	}
 }
 

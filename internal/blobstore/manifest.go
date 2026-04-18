@@ -74,6 +74,21 @@ func (m *Manifest) Record(key string, entry ManifestEntry) error {
 	return m.saveLocked()
 }
 
+// RecordBatch merges the given entries into the manifest and saves once.
+// Use this for bulk operations (e.g. migration) to avoid the O(n^2) write
+// pattern of calling Record in a loop.
+func (m *Manifest) RecordBatch(entries map[string]ManifestEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, v := range entries {
+		m.entries[k] = v
+	}
+	return m.saveLocked()
+}
+
 func (m *Manifest) Delete(key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
