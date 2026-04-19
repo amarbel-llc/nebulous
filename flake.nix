@@ -15,6 +15,12 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    chrest = {
+      url = "github:amarbel-llc/chrest";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -37,6 +43,7 @@
       gomod2nix,
       nixpkgs-master,
       madder,
+      chrest,
       bob,
       purse-first,
     }:
@@ -55,6 +62,7 @@
         version = "0.1.0";
 
         madderPkg = madder.packages.${system}.default;
+        chrestPkg = chrest.packages.${system}.default;
 
         nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
@@ -84,6 +92,7 @@
         packages = {
           default = nebulous;
           inherit nebulous;
+          chrest = chrestPkg;
         };
 
         devShells.default = pkgs-master.mkShell {
@@ -102,6 +111,7 @@
             pkgs.shellcheck
             pkgs.shfmt
             madderPkg
+            chrestPkg
             purse-first.packages.${system}.dagnabit
             bob.packages.${system}.batman
           ];
