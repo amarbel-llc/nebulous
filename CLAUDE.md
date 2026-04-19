@@ -32,11 +32,13 @@ subcommands `generate-plugin`, `hook`, and `install-mcp` do not require a token.
 ## Architecture
 
     cmd/nebulous/main.go          Entry point: parses args, creates client, starts MCP server
-    internal/newsblur/             HTTP client wrapping NewsBlur REST API
+    internal/0/madder/             `madder` CLI wrapper for blob store shell-outs
+    internal/0/manifest/           SHA256 manifest tracking (leaf package)
+    internal/alfa/newsblur/        HTTP client wrapping NewsBlur REST API
       client.go                    Client struct, request helpers, cache access
       cache.go                     SHA256-keyed persistent store (~/.cache/nebulous/responses/)
       feeds.go, stories.go, ...    One file per API domain
-    internal/tools/                MCP tool registration + handlers
+    internal/bravo/tools/          MCP tool registration + handlers
       registry.go                  RegisterAll() → *command.App + ResourceProvider
       feeds.go                     feed_query tool (word search over feeds)
       story_store.go               Flat story store with typed records and word index

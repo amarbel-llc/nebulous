@@ -12,6 +12,12 @@ build-go tag="debug":
 build-nix:
   nix build --show-trace
 
+# Regenerate pkgs/ facades from internal/ packages via dagnabit.
+# No-op until a source file contains `//go:generate dagnabit export`.
+# [group: build]
+generate-facades:
+  dagnabit export
+
 test-go *args:
   go test {{args}} ./...
 

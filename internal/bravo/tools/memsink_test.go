@@ -10,8 +10,8 @@ import (
 )
 
 // memSink is an in-memory newsblur.BlobSink for tests. Mirrors the helper in
-// internal/newsblur/cache_test.go; kept local here to avoid a shared testing
-// package.
+// internal/alfa/newsblur/cache_test.go; kept local here to avoid a shared
+// testing package.
 type memSink struct {
 	mu    sync.Mutex
 	blobs map[string][]byte

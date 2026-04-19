@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
 
 func TestStoryStoreParseRecord(t *testing.T) {

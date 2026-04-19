@@ -22,7 +22,7 @@ import (
 
 // Bin is the path to the madder executable. Set at build time via:
 //
-//	-ldflags "-X github.com/friedenberg/nebulous/internal/madder.Bin=<path>"
+//	-ldflags "-X github.com/friedenberg/nebulous/internal/0/madder.Bin=<path>"
 //
 // When unset, resolves via $PATH.
 var Bin = "madder"

@@ -7,7 +7,7 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
 
 func registerSubscriptionCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {

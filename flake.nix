@@ -21,6 +21,12 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    purse-first = {
+      url = "github:amarbel-llc/purse-first";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -32,6 +38,7 @@
       nixpkgs-master,
       madder,
       bob,
+      purse-first,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -59,7 +66,7 @@
           subPackages = [ "cmd/nebulous" ];
 
           ldflags = [
-            "-X github.com/friedenberg/nebulous/internal/madder.Bin=${madderPkg}/bin/madder"
+            "-X github.com/friedenberg/nebulous/internal/0/madder.Bin=${madderPkg}/bin/madder"
           ];
 
           postInstall = ''
@@ -95,6 +102,7 @@
             pkgs.shellcheck
             pkgs.shfmt
             madderPkg
+            purse-first.packages.${system}.dagnabit
             bob.packages.${system}.batman
           ];
 

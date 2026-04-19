@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/manifest"
+	"github.com/friedenberg/nebulous/internal/0/manifest"
 )
 
 // BlobSink is the operational surface nebulous needs from its blob backend.

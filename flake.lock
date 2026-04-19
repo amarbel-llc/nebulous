@@ -231,6 +231,21 @@
         "url": "https://flakehub.com/f/ipetkov/crane/0"
       }
     },
+    "crane_9": {
+      "locked": {
+        "lastModified": 1773857772,
+        "narHash": "sha256-5xsK26KRHf0WytBtsBnQYC/lTWDhQuT57HJ7SzuqZcM=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "b556d7bbae5ff86e378451511873dfd07e4504cd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
     "fenix": {
       "inputs": {
         "nixpkgs": [
@@ -592,6 +607,31 @@
       },
       "original": {
         "owner": "nix-community",
+        "repo": "gomod2nix",
+        "type": "github"
+      }
+    },
+    "gomod2nix_11": {
+      "inputs": {
+        "flake-utils": [
+          "purse-first",
+          "utils"
+        ],
+        "nixpkgs": [
+          "purse-first",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1775655738,
+        "narHash": "sha256-fK9KNU9oNugFyGu8uqv1OM4anYFVcIeYVntuaUFx4Y0=",
+        "owner": "amarbel-llc",
+        "repo": "gomod2nix",
+        "rev": "c721288259a04d29966f38d5baa3d3b30bf8fe08",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
         "repo": "gomod2nix",
         "type": "github"
       }
@@ -1135,6 +1175,35 @@
         "type": "github"
       }
     },
+    "purse-first_5": {
+      "inputs": {
+        "crane": "crane_9",
+        "gomod2nix": "gomod2nix_11",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "rust-overlay": "rust-overlay_8",
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1776527448,
+        "narHash": "sha256-aEpPFa0j+D4YMzSCKmnlXjOflHFM+4DLZx0UZGjlV8g=",
+        "owner": "amarbel-llc",
+        "repo": "purse-first",
+        "rev": "3ed4437dbc65dd0699abe9135f4c210030af9d9b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
+        "repo": "purse-first",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "bob": "bob",
@@ -1142,6 +1211,7 @@
         "madder": "madder",
         "nixpkgs": "nixpkgs_9",
         "nixpkgs-master": "nixpkgs-master_5",
+        "purse-first": "purse-first_5",
         "utils": "utils_4"
       }
     },
@@ -1362,6 +1432,27 @@
         "owner": "oxalica",
         "repo": "rust-overlay",
         "rev": "055977c30249484010750e03074c744dcdaa0d23",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "rust-overlay_8": {
+      "inputs": {
+        "nixpkgs": [
+          "purse-first",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773975983,
+        "narHash": "sha256-zrRVwdfhDdohANqEhzY/ydeza6EXEi8AG6cyMRNYT9Q=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "cc80954a95f6f356c303ed9f08d0b63ca86216ac",
         "type": "github"
       },
       "original": {

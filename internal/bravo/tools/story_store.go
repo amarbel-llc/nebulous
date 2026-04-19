@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
 
 type storyRecord struct {

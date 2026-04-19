@@ -14,9 +14,9 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
-	"github.com/friedenberg/nebulous/internal/madder"
-	"github.com/friedenberg/nebulous/internal/newsblur"
-	"github.com/friedenberg/nebulous/internal/tools"
+	"github.com/friedenberg/nebulous/internal/0/madder"
+	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
 
 func main() {
