@@ -48,10 +48,10 @@ function capture_batch_split_false_produces_rfc_shape { # @test
   assert_success
 
   # One JSON object per § Capturer Protocol Batch Output.
-  assert_equal "$(echo "$output" | jq -r '.schema')"        'web-capture-archive/v1'
+  assert_equal "$(echo "$output" | jq -r '.schema')" 'web-capture-archive/v1'
   assert_equal "$(echo "$output" | jq -r '.capturer.name')" 'chrest'
-  assert_equal "$(echo "$output" | jq    '.errors | length')" '0'
-  assert_equal "$(echo "$output" | jq    '.captures | length')" '3'
+  assert_equal "$(echo "$output" | jq '.errors | length')" '0'
+  assert_equal "$(echo "$output" | jq '.captures | length')" '3'
 
   # Every capture has a spec + payload (split=false so no envelope).
   local missing_payload
@@ -100,5 +100,5 @@ JSON
     "\"$bin\" capture-batch < \"$BATS_TEST_TMPDIR/bad-batch.json\" 2>/dev/null"
 
   # RFC § Batch Input: MUST exit non-zero without writing batch output.
-  [[ "$status" -ne 0 ]] || fail "expected non-zero exit for unknown schema, got $status"
+  [[ $status -ne 0 ]] || fail "expected non-zero exit for unknown schema, got $status"
 }
