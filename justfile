@@ -24,6 +24,7 @@ test-go *args:
 # [group: test]
 test-bats *args: build-go
   MIGRATE_CACHE_BIN="$(pwd)/build/debug/migrate-cache" \
+  NEBULOUS_BIN="$(pwd)/build/debug/nebulous" \
     nix develop -c bats {{args}} zz-tests_bats/
 
 install-dev: build-nix
