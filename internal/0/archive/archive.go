@@ -15,9 +15,11 @@ package archive
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,6 +69,21 @@ type Record struct {
 	CapturedAt string    `json:"captured_at"`
 	Captures   []Capture `json:"captures"`
 	Errors     []Error   `json:"errors"`
+
+	// Previous is the markl ID of the prior record for this
+	// (subject, policy) tuple, stored by WriteWithHistory into a
+	// content-addressed blob store. Nil when no prior record exists.
+	// Forms a linked-list history that can be traversed by
+	// repeatedly fetching the referenced blob and re-decoding.
+	Previous *string `json:"previous,omitempty"`
+}
+
+// Writer abstracts a content-addressed blob store. Used by
+// WriteWithHistory to stash prior records before overwriting.
+// internal/0/madder.Store satisfies this interface via its CLI
+// wrapper — this package intentionally does not import madder.
+type Writer interface {
+	Write(ctx context.Context, src io.Reader) (id string, err error)
 }
 
 // FormatTimestamp returns t formatted as a `captured_at` field value:
@@ -234,4 +251,36 @@ func Read(path string) (*Record, error) {
 // MAY ignore and construct their own.
 func DefaultPath(dataRoot, subject, policyID string) string {
 	return filepath.Join(dataRoot, "archives", subject, policyID+".json")
+}
+
+// WriteWithHistory is Write plus linked-list history. If path already
+// exists, the current contents are piped through w to obtain a markl
+// ID, r.Previous is set to that ID, and r is then written atomically
+// over path. If path does not exist, r.Previous is left unchanged
+// (typically nil in fresh callers).
+//
+// Atomicity is the same as Write: tempfile in the same directory,
+// fsync, rename. If any step after the writer invocation fails, the
+// existing file is left unchanged — the prior copy is already stored
+// in w, so no history is lost.
+func WriteWithHistory(ctx context.Context, path string, r *Record, w Writer) error {
+	if w == nil {
+		return errors.New("archive: writer is required")
+	}
+
+	priorBytes, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		id, werr := w.Write(ctx, bytes.NewReader(priorBytes))
+		if werr != nil {
+			return fmt.Errorf("archive: store prior record: %w", werr)
+		}
+		r.Previous = &id
+	case errors.Is(err, os.ErrNotExist):
+		// No prior record; leave Previous untouched.
+	default:
+		return fmt.Errorf("archive: read prior %s: %w", path, err)
+	}
+
+	return Write(path, r)
 }

@@ -1,13 +1,41 @@
 package archive
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+// stubWriter captures input and returns a deterministic markl id.
+// Used to exercise WriteWithHistory without pulling in madder.
+type stubWriter struct {
+	captured [][]byte
+}
+
+func (w *stubWriter) Write(ctx context.Context, src io.Reader) (string, error) {
+	buf, err := io.ReadAll(src)
+	if err != nil {
+		return "", err
+	}
+	w.captured = append(w.captured, buf)
+	return "blake2b256-prior-" + strconv.Itoa(len(w.captured)), nil
+}
+
+// failingWriter simulates a writer-side outage on demand.
+type failingWriter struct{ err error }
+
+func (w *failingWriter) Write(ctx context.Context, src io.Reader) (string, error) {
+	_, _ = io.Copy(io.Discard, src)
+	return "", w.err
+}
 
 func truePtr() *bool { b := true; return &b }
 
@@ -302,5 +330,90 @@ func TestDefaultPath(t *testing.T) {
 	want := filepath.Join("/var/data", "archives", "story-42", "starred-default.json")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWriteWithHistory_noPriorFileLeavesPreviousNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r.json")
+	sw := &stubWriter{}
+
+	if err := WriteWithHistory(context.Background(), path, sampleRecord(), sw); err != nil {
+		t.Fatalf("WriteWithHistory: %v", err)
+	}
+	if len(sw.captured) != 0 {
+		t.Errorf("writer should not be called when no prior file exists: got %d captures", len(sw.captured))
+	}
+
+	r, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if r.Previous != nil {
+		t.Errorf("Previous should be nil for first write, got %q", *r.Previous)
+	}
+}
+
+func TestWriteWithHistory_priorFileWritesToStoreAndSetsPrevious(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r.json")
+	sw := &stubWriter{}
+
+	// First write: establish a prior.
+	first := sampleRecord()
+	if err := WriteWithHistory(context.Background(), path, first, sw); err != nil {
+		t.Fatalf("first WriteWithHistory: %v", err)
+	}
+
+	// Second write: prior file gets piped through sw and Previous is set.
+	second := sampleRecord()
+	second.Subject = "different-subject-2"
+	if err := WriteWithHistory(context.Background(), path, second, sw); err != nil {
+		t.Fatalf("second WriteWithHistory: %v", err)
+	}
+
+	if len(sw.captured) != 1 {
+		t.Fatalf("expected exactly 1 prior write, got %d", len(sw.captured))
+	}
+	if !bytes.Contains(sw.captured[0], []byte("6327282:5d1cf5")) {
+		t.Errorf("prior bytes should contain the first record's subject, got: %s", sw.captured[0])
+	}
+
+	reloaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if reloaded.Previous == nil || *reloaded.Previous != "blake2b256-prior-1" {
+		t.Errorf("Previous: got %v, want blake2b256-prior-1", reloaded.Previous)
+	}
+}
+
+func TestWriteWithHistory_writerFailsLeavesPathUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "r.json")
+
+	// Establish a prior record via plain Write so we know the exact
+	// bytes that should remain on disk after the failed history call.
+	orig := sampleRecord()
+	if err := Write(path, orig); err != nil {
+		t.Fatal(err)
+	}
+	origBytes, _ := os.ReadFile(path)
+
+	fw := &failingWriter{err: errors.New("simulated store outage")}
+	second := sampleRecord()
+	second.Subject = "should-not-be-written"
+
+	err := WriteWithHistory(context.Background(), path, second, fw)
+	if err == nil {
+		t.Fatal("expected error from failing writer, got nil")
+	}
+	if !strings.Contains(err.Error(), "simulated store outage") {
+		t.Errorf("error should wrap writer err, got %v", err)
+	}
+
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(origBytes, after) {
+		t.Errorf("file should be unchanged when writer fails")
 	}
 }
