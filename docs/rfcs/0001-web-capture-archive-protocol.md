@@ -685,6 +685,51 @@ MUST go through the same atomic write path.
 Archive records MAY be serialized with any whitespace (pretty-printed or
 compact); they are not content-addressed and need not be canonicalized.
 
+#### Error Kind Taxonomy
+
+Error `kind` strings surfaced by the archive pipeline appear at three
+distinct sites, each owned by a different component. This section
+enumerates the orchestrator-owned kinds and points to the capturer for
+the rest, so programmatic consumers (alerting, retry logic, dashboards)
+have a single place to look.
+
+**Orchestrator-owned.** Top-level job failures surface as
+`Report.Failed[].Kind` entries in the orchestrator's run report. These
+are NOT persisted in an archive record — a failed job never writes one
+— but they are the kinds a CLI caller sees when a run produces failures
+rather than artifacts.
+
+| Kind                     | Site                    | Meaning                                                                                                                                 |
+|--------------------------|-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `policy-load-failed`     | pre-job (Report.Failed) | Policy file missing, malformed, or failed validation; no jobs were attempted.                                                           |
+| `story-resolve-failed`   | per-job (Report.Failed) | A story selector was supplied but the story is not in the local newsblur store.                                                         |
+| `template-expand-failed` | per-job (Report.Failed) | The policy's `url` template referenced a field unavailable in the template context.                                                     |
+| `capturer-failed`        | per-job (Report.Failed) | The capturer subprocess exited non-zero or returned malformed batch output. Message embeds a capturer-invocation kind (see below).      |
+| `archive-write-failed`   | per-job (Report.Failed) | The atomic rename into the archive root failed, or a prior record could not be stored in the history blob store.                        |
+
+**Capturer-invocation kinds** appear embedded in `capturer-failed`
+messages when the orchestrator could not interpret the capturer's batch
+output. These describe protocol-level failures between orchestrator and
+capturer, not per-capture or per-URL failures:
+
+| Kind             | Meaning                                                                      |
+|------------------|------------------------------------------------------------------------------|
+| `nonzero-exit`   | Capturer process exited non-zero.                                            |
+| `empty-stdout`   | Capturer exited zero but wrote no output.                                    |
+| `bad-json`       | Capturer stdout was not a single valid JSON document.                        |
+| `trailing-data`  | Capturer output contained content after the JSON document.                   |
+| `bad-shape`      | Capturer output decoded but failed structural validation (wrong `schema`, missing required fields, etc.). |
+
+**Capturer-owned** kinds land directly in the archive record:
+
+- `captures[].error.kind` — per-capture failures owned by the capturer
+  and versioned with it. This RFC deliberately does not duplicate the
+  list, since new kinds may appear across capturer versions; the
+  authoritative enumeration lives in the capturer's documentation.
+- `errors[].kind` — batch-level failures, also capturer-owned. See
+  [§ Capturer Protocol](#capturer-protocol) for the distinction between
+  batch-level and per-capture errors.
+
 ### Policy Format (nebulous.toml)
 
 The policy file is a user-authored TOML document describing a named set of
