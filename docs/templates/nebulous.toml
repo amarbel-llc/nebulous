@@ -1,0 +1,23 @@
+# Starter nebulous.toml.
+#
+# Copied by `just archive-init` to $XDG_CONFIG_HOME/nebulous/nebulous.toml
+# when no policy exists there. Edit freely; the path is the one
+# `nebulous archive` reads by default.
+#
+# Schema reference: docs/rfcs/0001-web-capture-archive-protocol.md § Policy Format.
+
+[[policy]]
+id        = "default"
+url       = "{{.Story.Permalink}}"
+isolation = "fresh"
+
+[[policy.capture]]
+name    = "text"
+format  = "text"
+browser = "firefox"
+
+[[policy.capture]]
+name    = "pdf"
+format  = "pdf"
+browser = "firefox"
+options = { background = true }

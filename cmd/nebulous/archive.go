@@ -114,6 +114,9 @@ func newArchiveDeps(ctx context.Context) (orchestrator.Deps, error) {
 			// -format=json is a subcommand flag (single dash) and must
 			// come after `write`; the positional `<store-id>` switches
 			// the active store for this write; `-` reads from stdin.
+			//
+			// madder.Bin is absolute when ldflags-injected (flake build
+			// and `just build-go`); defaults to "madder" otherwise.
 			madder.Bin, "write", "-format=json", "nebulous", "-",
 		},
 	}, nil

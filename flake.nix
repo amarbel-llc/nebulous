@@ -93,6 +93,7 @@
           default = nebulous;
           inherit nebulous;
           chrest = chrestPkg;
+          madder = madderPkg;
         };
 
         devShells.default = pkgs-master.mkShell {

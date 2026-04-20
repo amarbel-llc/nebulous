@@ -6,8 +6,27 @@ build: build-go build-nix
 test: test-go test-bats
 
 build-go tag="debug":
-  go build {{if tag == "release" { "-ldflags='-s -w'" } else { "'-gcflags=all=-N -l'" } }} -o build/{{tag}}/nebulous ./cmd/nebulous
-  go build {{if tag == "release" { "-ldflags='-s -w'" } else { "'-gcflags=all=-N -l'" } }} -o build/{{tag}}/migrate-cache ./cmd/migrate-cache
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Resolve the flake-pinned madder so its absolute path is
+  # ldflags-injected into internal/0/madder.Bin — mirrors what
+  # the Nix build does in flake.nix. Without this, debug builds
+  # of `nebulous archive` would invoke `madder` via PATH, where
+  # older user-profile madders can shadow the devShell's.
+  madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
+  extra_ldflags=""
+  if [ -n "$madder_path" ]; then
+    extra_ldflags="-X github.com/friedenberg/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
+  fi
+  base_ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
+  ldflags="$base_ldflags $extra_ldflags"
+  gcflags="{{if tag == "release" { "" } else { "all=-N -l" } }}"
+  gcflags_arg=()
+  if [ -n "$gcflags" ]; then gcflags_arg=(-gcflags "$gcflags"); fi
+  ldflags_arg=()
+  if [ -n "$(echo $ldflags)" ]; then ldflags_arg=(-ldflags "$ldflags"); fi
+  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous       ./cmd/nebulous
+  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/migrate-cache  ./cmd/migrate-cache
 
 build-nix:
   nix build --show-trace
@@ -62,6 +81,49 @@ test-corpus: build
 test-corpus-search query="microplastics":
   maneater index
   maneater search "{{query}}"
+
+# Drop a starter nebulous.toml at the XDG-default policy path if one
+# does not already exist. The starter captures text + PDF per story,
+# split=false (no envelope), via the firefox backend.
+# [group: archive]
+archive-init:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  dir="${XDG_CONFIG_HOME:-$HOME/.config}/nebulous"
+  path="$dir/nebulous.toml"
+  if [ -f "$path" ]; then
+    echo "archive-init: policy already exists at $path (not overwriting)"
+    exit 0
+  fi
+  mkdir -p "$dir"
+  cp ./docs/templates/nebulous.toml "$path"
+  echo "archive-init: wrote $path"
+
+# Archive a single story or URL via the prod XDG data + config paths.
+# Forwards all args to `nebulous archive`, so typical usage is:
+#   just archive --story=6327282:5d1cf5
+#   just archive --url=https://example.com/
+# [group: archive]
+archive *args: build-go
+  ./build/debug/nebulous archive {{args}}
+
+# Archive the N most recent starred stories. Defaults to 5.
+# Failures on individual stories are logged but don't abort the batch,
+# so transient chrest/madder hiccups don't take down the whole run.
+# [group: archive]
+archive-recent n="5": build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  policy="${XDG_CONFIG_HOME:-$HOME/.config}/nebulous/nebulous.toml"
+  if [ ! -f "$policy" ]; then
+    echo "archive-recent: no policy at $policy — run \`just archive-init\` first" >&2
+    exit 1
+  fi
+  ./build/debug/nebulous corpus-list -limit {{n}} | while IFS= read -r id; do
+    echo "=== $id ==="
+    ./build/debug/nebulous archive --story="$id" || echo "=== $id failed (continuing) ==="
+    echo
+  done
 
 # Archive comparison test
 # Compares monolith (static fetch) vs single-file-cli (headless browser)
