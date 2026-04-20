@@ -43,7 +43,7 @@ run_list() {
 function archive_list_empty_root_is_exit_zero { # @test
   run_list
   assert_success
-  [[ -z "$output" ]] || fail "expected empty output, got: $output"
+  [[ -z $output ]] || fail "expected empty output, got: $output"
 }
 
 function archive_list_jsonl_emits_one_line_per_record { # @test
@@ -58,14 +58,14 @@ function archive_list_jsonl_emits_one_line_per_record { # @test
 
   # Each line is a JSON object with the projection fields.
   echo "$output" | while IFS= read -r line; do
-    echo "$line" | jq -e '.subject and .policy_id and .url and .captured_at and (.captures_ok | type == "number") and (.captures_total | type == "number") and .path' >/dev/null \
-      || fail "line missing projection field: $line"
+    echo "$line" | jq -e '.subject and .policy_id and .url and .captured_at and (.captures_ok | type == "number") and (.captures_total | type == "number") and .path' >/dev/null ||
+      fail "line missing projection field: $line"
   done
 
   # Both URL subjects appear.
   local subjects
   subjects=$(echo "$output" | jq -r '.subject' | sort | tr '\n' ' ')
-  [[ "$subjects" == *"url:sha256-"* ]] || fail "expected url:* subjects, got: $subjects"
+  [[ $subjects == *"url:sha256-"* ]] || fail "expected url:* subjects, got: $subjects"
 }
 
 function archive_list_table_has_header_and_rows { # @test
@@ -73,10 +73,10 @@ function archive_list_table_has_header_and_rows { # @test
   run_list --format=table
   assert_success
 
-  echo "$output" | head -1 | grep -q 'SUBJECT' \
-    || fail "table missing SUBJECT header: $output"
-  echo "$output" | head -1 | grep -q 'CAPTURES' \
-    || fail "table missing CAPTURES header: $output"
+  echo "$output" | head -1 | grep -q 'SUBJECT' ||
+    fail "table missing SUBJECT header: $output"
+  echo "$output" | head -1 | grep -q 'CAPTURES' ||
+    fail "table missing CAPTURES header: $output"
 
   # Header + two data rows.
   local line_count
@@ -100,7 +100,7 @@ function archive_list_subject_prefix_filters { # @test
   run_list --format=jsonl "story:"
   assert_success
   # No story records were seeded → zero lines.
-  [[ -z "$output" ]] || fail "story: prefix should match zero records, got: $output"
+  [[ -z $output ]] || fail "story: prefix should match zero records, got: $output"
 }
 
 function archive_list_rejects_unknown_format { # @test
