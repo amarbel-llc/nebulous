@@ -78,7 +78,7 @@ func stubDeps(policies []policy.Policy, out capturer.BatchOutput) Deps {
 func TestRun_happyPath_singlePolicySingleSubject(t *testing.T) {
 	dir := t.TempDir()
 	args := Args{
-		StoryID:     "6327282:5d1cf5",
+		StoryIDs:    []string{"6327282:5d1cf5"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}
@@ -124,7 +124,7 @@ func TestRun_happyPath_singlePolicySingleSubject(t *testing.T) {
 func TestRun_pathIsUnderByStoryForStorySubject(t *testing.T) {
 	dir := t.TempDir()
 	args := Args{
-		StoryID:     "abc",
+		StoryIDs:    []string{"abc"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}
@@ -141,7 +141,7 @@ func TestRun_pathIsUnderByStoryForStorySubject(t *testing.T) {
 func TestRun_pathIsUnderByURLForURLSubject(t *testing.T) {
 	dir := t.TempDir()
 	args := Args{
-		URL:         "https://example.com/canonical",
+		URLs:        []string{"https://example.com/canonical"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}
@@ -179,8 +179,8 @@ func (e *stubErr) Error() string { return e.msg }
 func TestRun_dualSubjectProducesTwoRecords(t *testing.T) {
 	dir := t.TempDir()
 	args := Args{
-		StoryID:     "6327282:5d1cf5",
-		URL:         "https://example.com/canonical",
+		StoryIDs:    []string{"6327282:5d1cf5"},
+		URLs:        []string{"https://example.com/canonical"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}
@@ -237,7 +237,7 @@ func TestRun_threeConsecutiveFailuresBailOut(t *testing.T) {
 	}
 
 	args := Args{
-		StoryID:     "abc",
+		StoryIDs:    []string{"abc"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}
@@ -269,7 +269,7 @@ func TestRun_interspersedSuccessesResetCounter(t *testing.T) {
 	}
 
 	args := Args{
-		StoryID:     "abc",
+		StoryIDs:    []string{"abc"},
 		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
 		ArchiveRoot: filepath.Join(dir, "archives"),
 	}

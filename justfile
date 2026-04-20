@@ -114,17 +114,20 @@ archive-init:
   cp ./docs/templates/nebulous.toml "$path"
   echo "archive-init: wrote $path"
 
-# Archive a single story or URL via the prod XDG data + config paths.
+# Archive one or more stories / URLs via the prod XDG data + config paths.
 # Forwards all args to `nebulous archive-capture`, so typical usage is:
-#   just archive --story=6327282:5d1cf5
-#   just archive --url=https://example.com/
+#   just archive 6327282:5d1cf5
+#   just archive https://example.com/
+#   echo 6327282:5d1cf5 | just archive -
 # [group: archive]
 archive *args: build-go
   ./build/debug/nebulous archive-capture {{args}}
 
 # Archive the N most recent starred stories. Defaults to 5.
-# Failures on individual stories are logged but don't abort the batch,
-# so transient chrest/madder hiccups don't take down the whole run.
+# Streams story IDs into `archive-capture -`, which processes them
+# in one invocation — the orchestrator's circuit breaker handles
+# transient failures (bails after 3 consecutive; one flaky
+# chrest/madder won't poison the whole run).
 # [group: archive]
 archive-recent n="5": build-go
   #!/usr/bin/env bash
@@ -134,11 +137,7 @@ archive-recent n="5": build-go
     echo "archive-recent: no policy at $policy — run \`just archive-init\` first" >&2
     exit 1
   fi
-  ./build/debug/nebulous corpus-list -limit {{n}} | while IFS= read -r id; do
-    echo "=== $id ==="
-    ./build/debug/nebulous archive-capture --story="$id" || echo "=== $id failed (continuing) ==="
-    echo
-  done
+  ./build/debug/nebulous corpus-list -limit {{n}} | ./build/debug/nebulous archive-capture -
 
 # Archive comparison test
 # Compares monolith (static fetch) vs single-file-cli (headless browser)

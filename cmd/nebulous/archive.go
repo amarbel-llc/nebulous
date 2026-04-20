@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -20,50 +22,136 @@ import (
 )
 
 // archiveMain is the `nebulous archive-capture` subcommand entry
-// point. Parses flags, wires a production orchestrator.Deps, calls
-// Run, emits the Report in the TTY-appropriate format, returns the
-// orchestrator's exit code.
+// point. Parses flags + positional targets, wires a production
+// orchestrator.Deps, calls Run, emits the Report in the TTY-
+// appropriate format, returns the orchestrator's exit code.
+//
+// Targets are positional args: story IDs (shape `<feed>:<hash>`) or
+// URLs (contain `://`). A single `-` positional reads one target per
+// line from stdin; mixing `-` with other positionals is rejected.
 func archiveMain(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("archive-capture", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	var (
-		storyID     = fs.String("story", "", "story id (e.g. 6327282:5d1cf5); mutually valid with --url")
-		url         = fs.String("url", "", "url to capture; mutually valid with --story")
 		policyPath  = fs.String("policy", defaultPolicyPath(), "path to nebulous.toml")
 		archiveRoot = fs.String("archive-root", defaultArchiveRoot(), "directory for archive records")
 	)
 
 	if err := fs.Parse(args); err != nil {
-		// ContinueOnError already printed the error.
 		return 3
 	}
-	if *storyID == "" && *url == "" {
-		fmt.Fprintln(os.Stderr, "archive: at least one of --story or --url is required")
+
+	positional := fs.Args()
+	storyIDs, urls, err := resolveTargets(positional, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "archive-capture: %v\n", err)
 		return 3
 	}
 
 	deps, err := newArchiveDeps(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "archive: %v\n", err)
+		fmt.Fprintf(os.Stderr, "archive-capture: %v\n", err)
 		return 3
 	}
 
 	report := orchestrator.Run(ctx, orchestrator.Args{
-		StoryID:     *storyID,
-		URL:         *url,
+		StoryIDs:    storyIDs,
+		URLs:        urls,
 		PolicyPath:  *policyPath,
 		ArchiveRoot: *archiveRoot,
 	}, deps)
 
 	tty := term.IsTerminal(int(os.Stdout.Fd()))
 	if err := orchestrator.EmitReport(os.Stdout, report, tty); err != nil {
-		fmt.Fprintf(os.Stderr, "archive: emit report: %v\n", err)
+		fmt.Fprintf(os.Stderr, "archive-capture: emit report: %v\n", err)
 		// Prefer the orchestrator's exit code over the emit error —
 		// the archive work either succeeded or failed independently
 		// of how we rendered the report.
 	}
 	return report.ExitCode()
+}
+
+// resolveTargets parses positional args into classified story IDs
+// and URLs. A single `-` positional reads one target per line from
+// stdin; mixing `-` with other positionals is rejected. Returns
+// (nil, nil, err) for an empty target list — callers treat "no
+// targets supplied" as an error, but "stdin produced zero non-blank
+// lines" as a successful no-op.
+func resolveTargets(positional []string, stdin io.Reader) (storyIDs, urls []string, err error) {
+	if len(positional) == 0 {
+		return nil, nil, fmt.Errorf("no targets supplied (pass story IDs or URLs as positional args, or `-` to read from stdin)")
+	}
+
+	var raw []string
+	stdinRequested := false
+	for _, p := range positional {
+		if p == "-" {
+			if len(positional) > 1 {
+				return nil, nil, fmt.Errorf("`-` (stdin) cannot be mixed with other positional targets")
+			}
+			stdinRequested = true
+			break
+		}
+		raw = append(raw, p)
+	}
+
+	if stdinRequested {
+		sc := bufio.NewScanner(stdin)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			raw = append(raw, line)
+		}
+		if err := sc.Err(); err != nil {
+			return nil, nil, fmt.Errorf("read stdin: %w", err)
+		}
+		// Empty stdin is a successful no-op: return empty slices and
+		// let the orchestrator produce an empty report.
+		if len(raw) == 0 {
+			return nil, nil, nil
+		}
+	}
+
+	for _, t := range raw {
+		switch classifyTarget(t) {
+		case targetURL:
+			urls = append(urls, t)
+		case targetStoryID:
+			storyIDs = append(storyIDs, t)
+		default:
+			return nil, nil, fmt.Errorf("not a story ID or URL: %q", t)
+		}
+	}
+	return storyIDs, urls, nil
+}
+
+type targetKind int
+
+const (
+	targetInvalid targetKind = iota
+	targetStoryID
+	targetURL
+)
+
+// classifyTarget decides whether t is a URL, a story ID, or
+// neither. URLs contain `://` (any scheme). Story IDs match the
+// NewsBlur shape `<feed>:<hash>`: one colon, nonempty on both
+// sides, no whitespace.
+func classifyTarget(t string) targetKind {
+	if strings.Contains(t, "://") {
+		return targetURL
+	}
+	if strings.ContainsAny(t, " \t") {
+		return targetInvalid
+	}
+	colon := strings.Index(t, ":")
+	if colon <= 0 || colon == len(t)-1 {
+		return targetInvalid
+	}
+	return targetStoryID
 }
 
 // newArchiveDeps builds an orchestrator.Deps wired with real

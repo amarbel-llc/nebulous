@@ -32,16 +32,15 @@ import (
 
 // Args is the public input to Run.
 type Args struct {
-	// StoryID identifies a nebulous story to archive. When set, the
-	// orchestrator resolves its permalink from the local newsblur
-	// cache and uses story:<StoryID> as the subject label.
-	StoryID string
+	// StoryIDs are nebulous story identifiers to archive. For each,
+	// the orchestrator resolves its permalink from the local newsblur
+	// cache and uses story:<id> as the subject label.
+	StoryIDs []string
 
-	// URL is a concrete URL to archive. When set alongside StoryID,
-	// the orchestrator runs both (producing two archive records per
-	// policy); when set alone, url:<sha256-of-URL>[:16] becomes the
-	// subject label.
-	URL string
+	// URLs are concrete URLs to archive. Each becomes a subject with
+	// label url:sha256-<first-8-bytes>. Mixing StoryIDs and URLs in
+	// one Run produces one archive record per (subject, policy) pair.
+	URLs []string
 
 	// PolicyPath is the path to nebulous.toml. Defaults to
 	// $XDG_CONFIG_HOME/nebulous/nebulous.toml at the CLI layer.
@@ -143,15 +142,15 @@ func run(ctx context.Context, args Args, d Deps) Report {
 	return report
 }
 
-// buildSubjects emits one subject per selector flag. Both supplied
-// means two subjects; orchestrator iterates captures for every
-// (policy, subject) pair.
+// buildSubjects emits one subject per input target. Order is
+// StoryIDs first (in input order), then URLs (in input order);
+// orchestrator iterates captures for every (policy, subject) pair.
 func buildSubjects(args Args, d Deps) []subject {
-	var subs []subject
-	if args.StoryID != "" {
-		s, err := d.ResolveStory(args.StoryID)
+	subs := make([]subject, 0, len(args.StoryIDs)+len(args.URLs))
+	for _, id := range args.StoryIDs {
+		s, err := d.ResolveStory(id)
 		sub := subject{
-			label: "story:" + args.StoryID,
+			label: "story:" + id,
 			url:   s.Permalink,
 			story: s,
 		}
@@ -160,14 +159,14 @@ func buildSubjects(args Args, d Deps) []subject {
 		}
 		subs = append(subs, sub)
 	}
-	if args.URL != "" {
-		h := sha256.Sum256([]byte(args.URL))
+	for _, u := range args.URLs {
+		h := sha256.Sum256([]byte(u))
 		subs = append(subs, subject{
 			label: "url:sha256-" + hex.EncodeToString(h[:8]),
-			url:   args.URL,
+			url:   u,
 			story: policy.Story{
 				Hash:      hex.EncodeToString(h[:]),
-				Permalink: args.URL,
+				Permalink: u,
 			},
 		})
 	}
