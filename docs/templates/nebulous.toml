@@ -7,17 +7,17 @@
 # Schema reference: docs/rfcs/0001-web-capture-archive-protocol.md § Policy Format.
 
 [[policy]]
-id        = "default"
-url       = "{{.Story.Permalink}}"
+id = "default"
+url = "{{.Story.Permalink}}"
 isolation = "fresh"
 
 [[policy.capture]]
-name    = "text"
-format  = "text"
+name = "text"
+format = "text"
 browser = "firefox"
 
 [[policy.capture]]
-name    = "pdf"
-format  = "pdf"
+name = "pdf"
+format = "pdf"
 browser = "firefox"
 options = { background = true }

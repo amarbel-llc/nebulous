@@ -51,7 +51,7 @@ function orchestrator_url_mode_produces_record_file { # @test
 
   local pth
   pth=$(echo "$output" | jq -r '.written[0].path')
-  [[ -f "$pth" ]] || fail "record file not at $pth"
+  [[ -f $pth ]] || fail "record file not at $pth"
 
   # The record's schema + policy_id came through correctly.
   assert_equal "$(jq -r '.schema' "$pth")" 'web-capture-archive.record/v1'
@@ -74,7 +74,7 @@ function orchestrator_rejects_missing_targets { # @test
   run "$bin" archive-capture \
     --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
     --archive-root="$BATS_TEST_TMPDIR/archives"
-  [[ "$status" -eq 3 ]] || fail "expected exit 3 (no targets), got $status"
+  [[ $status -eq 3 ]] || fail "expected exit 3 (no targets), got $status"
 }
 
 function orchestrator_rejects_unclassifiable_positional { # @test
@@ -83,7 +83,7 @@ function orchestrator_rejects_unclassifiable_positional { # @test
     --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
     --archive-root="$BATS_TEST_TMPDIR/archives" \
     "not-a-url-or-story"
-  [[ "$status" -eq 3 ]] || fail "expected exit 3 (unclassifiable target), got $status"
+  [[ $status -eq 3 ]] || fail "expected exit 3 (unclassifiable target), got $status"
 }
 
 function orchestrator_rejects_missing_policy_file { # @test
@@ -95,7 +95,7 @@ function orchestrator_rejects_missing_policy_file { # @test
 
   # Policy-load failure is a pre-job error → Report has one Failed
   # entry with kind=policy-load-failed, ExitCode=1 (mixed, no writes).
-  [[ "$status" -eq 1 ]] || fail "expected exit 1 (policy-load failed), got $status"
+  [[ $status -eq 1 ]] || fail "expected exit 1 (policy-load failed), got $status"
   assert_equal "$(echo "$output" | jq '.failed | length')" '1'
   assert_equal "$(echo "$output" | jq -r '.failed[0].kind')" 'policy-load-failed'
 }
