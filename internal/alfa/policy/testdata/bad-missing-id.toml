@@ -1,0 +1,6 @@
+[[policy]]
+url = "{{.Story.Permalink}}"
+
+[[policy.capture]]
+name   = "text"
+format = "text"

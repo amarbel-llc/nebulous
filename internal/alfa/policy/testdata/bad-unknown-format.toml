@@ -1,0 +1,7 @@
+[[policy]]
+id  = "bad"
+url = "{{.Story.Permalink}}"
+
+[[policy.capture]]
+name   = "weird"
+format = "pictgif"
