@@ -309,4 +309,3 @@ func toArchiveArtifactRef(a *capturer.ArtifactRef) *archive.ArtifactRef {
 		Normalized: a.Normalized,
 	}
 }
-
