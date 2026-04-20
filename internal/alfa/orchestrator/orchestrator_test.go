@@ -53,8 +53,8 @@ func successBatchOutput() capturer.BatchOutput {
 // stubDeps wires a minimally-viable deps: all success, fixed time,
 // nop history writer, real archive.WriteWithHistory so we actually
 // exercise the atomic write path to tmpDir.
-func stubDeps(policies []policy.Policy, out capturer.BatchOutput) deps {
-	return deps{
+func stubDeps(policies []policy.Policy, out capturer.BatchOutput) Deps {
+	return Deps{
 		LoadPolicies: func(string) ([]policy.Policy, error) {
 			return policies, nil
 		},

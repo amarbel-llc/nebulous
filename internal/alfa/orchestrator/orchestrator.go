@@ -90,12 +90,13 @@ func (r Report) ExitCode() int {
 	return 0
 }
 
-// Run is the public composition entry point. Production use.
-// Invariant violations inside orchestrator composition panic;
-// expected failures (bad flags, capturer spawn, write errors)
+// Run is the public composition entry point. The caller (CLI layer)
+// supplies a Deps with every field populated — Run does not construct
+// defaults. Invariant violations inside orchestrator composition
+// panic; expected failures (bad policy, capturer spawn, write errors)
 // become Report entries.
-func Run(ctx context.Context, args Args) Report {
-	return run(ctx, args, defaultDeps())
+func Run(ctx context.Context, args Args, d Deps) Report {
+	return run(ctx, args, d)
 }
 
 // subject is the internal per-subject job source: the subject label
@@ -111,8 +112,10 @@ type subject struct {
 }
 
 // run is the unexported composition function. Shared between Run()
-// (production) and tests (stub deps).
-func run(ctx context.Context, args Args, d deps) Report {
+// (production) and tests (stub deps). Kept separate from Run only to
+// keep the public entry-point signature stable if we later want a
+// wrapper with, e.g., default-value fallbacks.
+func run(ctx context.Context, args Args, d Deps) Report {
 	policies, err := d.LoadPolicies(args.PolicyPath)
 	if err != nil {
 		return Report{Failed: []JobFailure{{Kind: "policy-load-failed", Message: err.Error()}}}
@@ -143,7 +146,7 @@ func run(ctx context.Context, args Args, d deps) Report {
 // buildSubjects emits one subject per selector flag. Both supplied
 // means two subjects; orchestrator iterates captures for every
 // (policy, subject) pair.
-func buildSubjects(args Args, d deps) []subject {
+func buildSubjects(args Args, d Deps) []subject {
 	var subs []subject
 	if args.StoryID != "" {
 		s, err := d.ResolveStory(args.StoryID)
@@ -173,7 +176,7 @@ func buildSubjects(args Args, d deps) []subject {
 
 // runOneJob handles one (policy, subject) archive attempt. Returns
 // true on success, false on failure. Appends to report accordingly.
-func runOneJob(ctx context.Context, report *Report, d deps, args Args, subj subject, pol policy.Policy) bool {
+func runOneJob(ctx context.Context, report *Report, d Deps, args Args, subj subject, pol policy.Policy) bool {
 	if subj.err != "" {
 		report.Failed = append(report.Failed, JobFailure{
 			PolicyID: pol.ID, Subject: subj.label,
@@ -229,7 +232,7 @@ func recordPath(root, label, policyID string) string {
 
 // buildBatchInput translates a resolved (URL, Policy) pair into the
 // capturer's BatchInput schema. Mechanical struct-to-struct mapping.
-func buildBatchInput(url string, pol policy.Policy, d deps) capturer.BatchInput {
+func buildBatchInput(url string, pol policy.Policy, d Deps) capturer.BatchInput {
 	captures := make([]capturer.CaptureRequest, 0, len(pol.Captures))
 	for _, c := range pol.Captures {
 		var splitPtr *bool
@@ -307,14 +310,3 @@ func toArchiveArtifactRef(a *capturer.ArtifactRef) *archive.ArtifactRef {
 	}
 }
 
-// defaultDeps wires production implementations. The story resolver
-// and history store are wired at the CLI layer (cmd/nebulous) so
-// the orchestrator package does not pull in newsblur or madder.
-// Tests call run() directly with their own stubs.
-func defaultDeps() deps {
-	// Placeholder: cmd/nebulous will supply a complete deps struct.
-	// If Run() is called without CLI wiring, it panics on the first
-	// missing dep — that's acceptable because Run() is not the
-	// testable surface; run() is.
-	return deps{}
-}

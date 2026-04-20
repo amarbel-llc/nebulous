@@ -10,11 +10,16 @@ import (
 	"github.com/friedenberg/nebulous/internal/alfa/policy"
 )
 
-// deps is the orchestrator's dependency injection seam. Production
-// Run wires real implementations; tests substitute stubs to keep
-// the orchestrator logic hermetically testable — no network, no
-// browser, no real madder.
-type deps struct {
+// Deps is the orchestrator's dependency injection seam. The CLI
+// layer constructs a Deps (real newsblur resolver, real chrest
+// subprocess, real madder history store) and hands it to Run.
+// Tests substitute stubs.
+//
+// All fields are required — Run does not supply defaults. A
+// zero-valued field will cause a nil-deref panic on first use,
+// which is the intended "invariant violation" semantics per the
+// design.
+type Deps struct {
 	LoadPolicies func(path string) ([]policy.Policy, error)
 	ResolveStory func(id string) (policy.Story, error)
 	RunCapturer  func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error)
