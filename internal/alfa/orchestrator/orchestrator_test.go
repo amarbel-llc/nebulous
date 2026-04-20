@@ -173,3 +173,37 @@ func TestRun_policyLoadFailureIsPreJobError(t *testing.T) {
 type stubErr struct{ msg string }
 
 func (e *stubErr) Error() string { return e.msg }
+
+func TestRun_dualSubjectProducesTwoRecords(t *testing.T) {
+	dir := t.TempDir()
+	args := Args{
+		StoryID:     "6327282:5d1cf5",
+		URL:         "https://example.com/canonical",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+
+	if len(rep.Failed) != 0 {
+		t.Errorf("unexpected failures: %+v", rep.Failed)
+	}
+	if len(rep.Written) != 2 {
+		t.Fatalf("written: got %d, want 2", len(rep.Written))
+	}
+
+	var storySeen, urlSeen bool
+	for _, w := range rep.Written {
+		if strings.HasPrefix(w.Subject, "story:") {
+			storySeen = true
+		}
+		if strings.HasPrefix(w.Subject, "url:") {
+			urlSeen = true
+		}
+	}
+	if !storySeen {
+		t.Error("expected a story:* subject in Written")
+	}
+	if !urlSeen {
+		t.Error("expected a url:* subject in Written")
+	}
+}
