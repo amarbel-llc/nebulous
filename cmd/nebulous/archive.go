@@ -36,6 +36,7 @@ func archiveMain(ctx context.Context, args []string) int {
 	var (
 		policyPath  = fs.String("policy", defaultPolicyPath(), "path to nebulous.toml")
 		archiveRoot = fs.String("archive-root", defaultArchiveRoot(), "directory for archive records")
+		jobs        = fs.Int("jobs", 1, "worker-pool size for concurrent captures (1 = serial)")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -60,6 +61,7 @@ func archiveMain(ctx context.Context, args []string) int {
 		URLs:        urls,
 		PolicyPath:  *policyPath,
 		ArchiveRoot: *archiveRoot,
+		Jobs:        *jobs,
 	}, deps)
 
 	tty := term.IsTerminal(int(os.Stdout.Fd()))

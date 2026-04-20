@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -288,4 +290,179 @@ func TestRun_interspersedSuccessesResetCounter(t *testing.T) {
 	if len(rep.Written) != 2 {
 		t.Errorf("written count: got %d, want 2", len(rep.Written))
 	}
+}
+
+// TestRun_parallelJobsObserveConcurrency verifies that Jobs=N
+// actually dispatches up to N workers in parallel. Uses an
+// in-flight counter in the stubbed RunCapturer to measure the peak.
+func TestRun_parallelJobsObserveConcurrency(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(manyPolicies(6), successBatchOutput())
+
+	var inFlight, peak atomic.Int32
+	d.RunCapturer = func(ctx context.Context, _ capturer.BatchInput) (capturer.BatchOutput, error) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		// Small sleep so workers actually overlap in time.
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		inFlight.Add(-1)
+		return successBatchOutput(), nil
+	}
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+		Jobs:        3,
+	}
+	rep := run(context.Background(), args, d)
+
+	if len(rep.Written) != 6 {
+		t.Errorf("written: got %d, want 6", len(rep.Written))
+	}
+	if p := peak.Load(); p < 2 {
+		t.Errorf("peak in-flight: got %d, want >= 2 (parallelism didn't happen)", p)
+	}
+	if p := peak.Load(); p > 3 {
+		t.Errorf("peak in-flight: got %d, want <= Jobs=3 (over-subscribed)", p)
+	}
+}
+
+// TestRun_reportSortedBySubjectThenPolicy verifies that Written is
+// sorted by (Subject, PolicyID) regardless of the input order, so
+// output is deterministic under workers.
+func TestRun_reportSortedBySubjectThenPolicy(t *testing.T) {
+	dir := t.TempDir()
+	// Three subjects submitted in reverse-alphabetical order.
+	args := Args{
+		StoryIDs:    []string{"z-last", "a-first", "m-middle"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+
+	if len(rep.Written) != 3 {
+		t.Fatalf("written: got %d, want 3", len(rep.Written))
+	}
+	got := []string{
+		rep.Written[0].Subject,
+		rep.Written[1].Subject,
+		rep.Written[2].Subject,
+	}
+	want := []string{"story:a-first", "story:m-middle", "story:z-last"}
+	if !equalSlice(got, want) {
+		t.Errorf("subject order: got %v, want %v", got, want)
+	}
+}
+
+// TestRun_reportSortWithinSameSubjectByPolicyID verifies the
+// tie-break is policy ID when the subject is identical.
+func TestRun_reportSortWithinSameSubjectByPolicyID(t *testing.T) {
+	dir := t.TempDir()
+	// Four policies in reverse alphabetical order — buildSubjects +
+	// sortReport should produce them sorted by PolicyID per subject.
+	pols := []policy.Policy{
+		{ID: "zebra", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
+		{ID: "apple", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
+		{ID: "mango", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
+	}
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, stubDeps(pols, successBatchOutput()))
+
+	if len(rep.Written) != 3 {
+		t.Fatalf("written: got %d, want 3", len(rep.Written))
+	}
+	var got []string
+	for _, w := range rep.Written {
+		got = append(got, w.PolicyID)
+	}
+	want := []string{"apple", "mango", "zebra"}
+	if !equalSlice(got, want) {
+		t.Errorf("policy order: got %v, want %v", got, want)
+	}
+	// Sanity: sort.StringsAreSorted would fail if our sortReport regressed.
+	if !sort.StringsAreSorted(got) {
+		t.Errorf("policy IDs not sorted: %v", got)
+	}
+}
+
+// TestRun_windowBailoutUnderWorkers verifies the window-based
+// bailout fires when the last 3 completed jobs all failed, even
+// when workers submit in nondeterministic order.
+func TestRun_windowBailoutUnderWorkers(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(manyPolicies(5), capturer.BatchOutput{})
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		return capturer.BatchOutput{}, errors.New("simulated failure")
+	}
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+		Jobs:        2,
+	}
+	rep := run(context.Background(), args, d)
+
+	if !rep.BailedOut {
+		t.Errorf("expected BailedOut=true")
+	}
+	if rep.ExitCode() != 2 {
+		t.Errorf("exit code: got %d, want 2", rep.ExitCode())
+	}
+	// With all jobs failing, the consumer bails after the 3rd
+	// completed failure. Post-bail results are drained without
+	// appending, so Failed is exactly 3 regardless of Jobs.
+	if len(rep.Failed) != 3 {
+		t.Errorf("failed count: got %d, want 3", len(rep.Failed))
+	}
+}
+
+// TestRun_jobsZeroMeansSerial verifies that the zero-value (Jobs=0)
+// behaves identically to Jobs=1.
+func TestRun_jobsZeroMeansSerial(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(singlePolicySingleCapture(), successBatchOutput())
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+		Jobs:        0,
+	}
+	rep := run(context.Background(), args, d)
+
+	if len(rep.Written) != 1 {
+		t.Errorf("written: got %d, want 1", len(rep.Written))
+	}
+	if rep.BailedOut {
+		t.Error("should not bail with one successful job")
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

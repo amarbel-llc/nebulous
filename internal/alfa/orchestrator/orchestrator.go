@@ -22,7 +22,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/friedenberg/nebulous/internal/0/archive"
@@ -49,6 +51,16 @@ type Args struct {
 	// ArchiveRoot is the directory under which archive records land.
 	// Defaults to $XDG_DATA_HOME/nebulous/archives at the CLI layer.
 	ArchiveRoot string
+
+	// Jobs is the worker-pool size for (subject, policy) job
+	// execution. Values < 2 run serially (current behavior). Values
+	// >= 2 dispatch N workers concurrently; per-worker state uses
+	// the same Deps instance, so Deps implementations MUST be
+	// goroutine-safe. chrest invocations are subprocess-isolated
+	// (each `capture-batch` launches its own browser + profile) and
+	// madder blob writes are content-addressed and safe to race per
+	// madder ADR-0002.
+	Jobs int
 }
 
 // Job records one successful (policy, subject) archive result.
@@ -110,10 +122,32 @@ type subject struct {
 	err   string
 }
 
+// jobUnit is one (subject, policy) pair fed into the worker pool.
+type jobUnit struct {
+	subj subject
+	pol  policy.Policy
+}
+
+// jobResult is runOneJob's return value, carrying either a Job
+// (success) or a JobFailure (error). Kept as a value type so worker
+// goroutines never touch shared Report state.
+type jobResult struct {
+	ok      bool
+	job     Job
+	failure JobFailure
+}
+
 // run is the unexported composition function. Shared between Run()
 // (production) and tests (stub deps). Kept separate from Run only to
 // keep the public entry-point signature stable if we later want a
 // wrapper with, e.g., default-value fallbacks.
+//
+// Execution is a fan-out over (subject × policy) jobs via a worker
+// pool of size args.Jobs (minimum 1). Bailout uses a "last-3-
+// completed all failed" sliding window — order-insensitive so it
+// survives non-deterministic completion under workers. Report is
+// sorted by (subject, policy_id) before return so output is
+// deterministic regardless of worker scheduling.
 func run(ctx context.Context, args Args, d Deps) Report {
 	policies, err := d.LoadPolicies(args.PolicyPath)
 	if err != nil {
@@ -122,24 +156,126 @@ func run(ctx context.Context, args Args, d Deps) Report {
 
 	subjects := buildSubjects(args, d)
 
-	var report Report
-	consecutive := 0
-
+	jobs := make([]jobUnit, 0, len(subjects)*len(policies))
 	for _, subj := range subjects {
 		for _, pol := range policies {
-			ok := runOneJob(ctx, &report, d, args, subj, pol)
-			if ok {
-				consecutive = 0
-			} else {
-				consecutive++
-				if consecutive >= 3 {
-					report.BailedOut = true
-					return report
-				}
-			}
+			jobs = append(jobs, jobUnit{subj: subj, pol: pol})
 		}
 	}
+
+	report := runJobs(ctx, args, d, jobs)
+	sortReport(&report)
 	return report
+}
+
+// runJobs fans jobs out over args.Jobs workers and collects results
+// into a Report, honoring the window-based bailout. Returns an
+// unsorted Report — callers sort before emitting.
+func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
+	if len(jobs) == 0 {
+		return Report{}
+	}
+
+	nworkers := args.Jobs
+	if nworkers < 1 {
+		nworkers = 1
+	}
+	if nworkers > len(jobs) {
+		nworkers = len(jobs)
+	}
+
+	// Cancelable sub-context so we can stop in-flight workers on bail.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobCh := make(chan jobUnit)
+	resCh := make(chan jobResult, len(jobs))
+
+	// Feeder: push jobs onto jobCh until exhausted or cancelled.
+	go func() {
+		defer close(jobCh)
+		for _, j := range jobs {
+			select {
+			case <-runCtx.Done():
+				return
+			case jobCh <- j:
+			}
+		}
+	}()
+
+	// Workers.
+	var wg sync.WaitGroup
+	for i := 0; i < nworkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobCh {
+				resCh <- runOneJob(runCtx, d, args, j.subj, j.pol)
+			}
+		}()
+	}
+
+	// Close resCh once all workers are done.
+	go func() {
+		wg.Wait()
+		close(resCh)
+	}()
+
+	// Consume results in completion order. Window-based bailout: if
+	// the last 3 completed jobs all failed, we stop building the
+	// report and cancel in-flight workers. Results that arrive
+	// after bailout are drained without mutating the report so the
+	// Report shape reflects state-at-bail, not cancellation noise.
+	var report Report
+	var window [3]bool
+	windowLen := 0
+	bailed := false
+
+	for r := range resCh {
+		if bailed {
+			continue
+		}
+		if r.ok {
+			report.Written = append(report.Written, r.job)
+		} else {
+			report.Failed = append(report.Failed, r.failure)
+		}
+
+		if windowLen < 3 {
+			window[windowLen] = !r.ok
+			windowLen++
+		} else {
+			window[0] = window[1]
+			window[1] = window[2]
+			window[2] = !r.ok
+		}
+
+		if windowLen == 3 && window[0] && window[1] && window[2] {
+			report.BailedOut = true
+			bailed = true
+			cancel()
+		}
+	}
+
+	return report
+}
+
+// sortReport orders report.Written and report.Failed by
+// (subject, policy_id) so output is deterministic regardless of
+// worker completion order.
+func sortReport(r *Report) {
+	sort.Slice(r.Written, func(i, j int) bool {
+		if r.Written[i].Subject != r.Written[j].Subject {
+			return r.Written[i].Subject < r.Written[j].Subject
+		}
+		return r.Written[i].PolicyID < r.Written[j].PolicyID
+	})
+	sort.Slice(r.Failed, func(i, j int) bool {
+		if r.Failed[i].Subject != r.Failed[j].Subject {
+			return r.Failed[i].Subject < r.Failed[j].Subject
+		}
+		return r.Failed[i].PolicyID < r.Failed[j].PolicyID
+	})
 }
 
 // buildSubjects emits one subject per input target. Order is
@@ -174,48 +310,40 @@ func buildSubjects(args Args, d Deps) []subject {
 }
 
 // runOneJob handles one (policy, subject) archive attempt. Returns
-// true on success, false on failure. Appends to report accordingly.
-func runOneJob(ctx context.Context, report *Report, d Deps, args Args, subj subject, pol policy.Policy) bool {
-	if subj.err != "" {
-		report.Failed = append(report.Failed, JobFailure{
+// a jobResult by value so it can be called from worker goroutines
+// without touching shared Report state.
+func runOneJob(ctx context.Context, d Deps, args Args, subj subject, pol policy.Policy) jobResult {
+	fail := func(kind, message string) jobResult {
+		return jobResult{failure: JobFailure{
 			PolicyID: pol.ID, Subject: subj.label,
-			Kind: "story-resolve-failed", Message: subj.err,
-		})
-		return false
+			Kind: kind, Message: message,
+		}}
+	}
+
+	if subj.err != "" {
+		return fail("story-resolve-failed", subj.err)
 	}
 
 	url, err := policy.ExpandURL(pol.URL, policy.TemplateContext{Story: subj.story})
 	if err != nil {
-		report.Failed = append(report.Failed, JobFailure{
-			PolicyID: pol.ID, Subject: subj.label,
-			Kind: "template-expand-failed", Message: err.Error(),
-		})
-		return false
+		return fail("template-expand-failed", err.Error())
 	}
 
 	out, err := d.RunCapturer(ctx, buildBatchInput(url, pol, d))
 	if err != nil {
-		report.Failed = append(report.Failed, JobFailure{
-			PolicyID: pol.ID, Subject: subj.label,
-			Kind: "capturer-failed", Message: err.Error(),
-		})
-		return false
+		return fail("capturer-failed", err.Error())
 	}
 
 	record := assembleRecord(subj, url, pol, out, d.TimeNow())
 	path := recordPath(args.ArchiveRoot, subj.label, pol.ID)
 	if err := d.WriteArchive(ctx, path, record, d.HistoryStore); err != nil {
-		report.Failed = append(report.Failed, JobFailure{
-			PolicyID: pol.ID, Subject: subj.label,
-			Kind: "archive-write-failed", Message: err.Error(),
-		})
-		return false
+		return fail("archive-write-failed", err.Error())
 	}
 
-	report.Written = append(report.Written, Job{
-		PolicyID: pol.ID, Subject: subj.label, Path: path,
-	})
-	return true
+	return jobResult{
+		ok:  true,
+		job: Job{PolicyID: pol.ID, Subject: subj.label, Path: path},
+	}
 }
 
 func recordPath(root, label, policyID string) string {

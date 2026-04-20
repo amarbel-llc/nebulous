@@ -69,6 +69,30 @@ function orchestrator_stdin_batch_produces_records_per_target { # @test
   assert_equal "$(echo "$output" | jq '.failed | length')" '0'
 }
 
+function orchestrator_parallel_jobs_flag_runs_all_targets { # @test
+  # Three URLs with --jobs=2 — workers dispatch two in parallel,
+  # all three complete. Report is sorted by subject so order is
+  # deterministic regardless of worker completion order.
+  local bin="${NEBULOUS_BIN:-nebulous}"
+  run timeout --preserve-status 180s "$bin" archive-capture \
+    --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
+    --archive-root="$BATS_TEST_TMPDIR/archives" \
+    --jobs=2 \
+    https://example.com/alpha https://example.com/bravo https://example.com/charlie
+  assert_success
+
+  assert_equal "$(echo "$output" | jq -r '.bailed_out')" 'false'
+  assert_equal "$(echo "$output" | jq '.written | length')" '3'
+  assert_equal "$(echo "$output" | jq '.failed | length')" '0'
+
+  # Deterministic ordering: url:sha256-* entries come out sorted.
+  local subjects
+  subjects=$(echo "$output" | jq -r '.written[].subject')
+  local sorted
+  sorted=$(echo "$subjects" | sort)
+  [[ "$subjects" == "$sorted" ]] || fail "written entries not sorted: $subjects"
+}
+
 function orchestrator_rejects_missing_targets { # @test
   local bin="${NEBULOUS_BIN:-nebulous}"
   run "$bin" archive-capture \
