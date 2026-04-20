@@ -75,6 +75,7 @@
 
           ldflags = [
             "-X github.com/friedenberg/nebulous/internal/0/madder.Bin=${madderPkg}/bin/madder"
+            "-X github.com/friedenberg/nebulous/internal/alfa/capturer.Bin=${chrestPkg}/bin/chrest"
           ];
 
           postInstall = ''

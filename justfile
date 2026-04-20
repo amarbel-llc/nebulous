@@ -8,15 +8,20 @@ test: test-go test-bats
 build-go tag="debug":
   #!/usr/bin/env bash
   set -euo pipefail
-  # Resolve the flake-pinned madder so its absolute path is
-  # ldflags-injected into internal/0/madder.Bin — mirrors what
-  # the Nix build does in flake.nix. Without this, debug builds
-  # of `nebulous archive` would invoke `madder` via PATH, where
-  # older user-profile madders can shadow the devShell's.
+  # Resolve the flake-pinned madder and chrest so their absolute
+  # paths are ldflags-injected into internal/0/madder.Bin and
+  # internal/alfa/capturer.Bin — mirrors what the Nix build does
+  # in flake.nix. Without this, debug builds of `nebulous archive`
+  # would invoke madder/chrest via PATH, where older user-profile
+  # binaries can shadow the devShell's.
   madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
+  chrest_path=$(nix build --no-link --print-out-paths .#chrest 2>/dev/null || true)
   extra_ldflags=""
   if [ -n "$madder_path" ]; then
-    extra_ldflags="-X github.com/friedenberg/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
+    extra_ldflags="$extra_ldflags -X github.com/friedenberg/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
+  fi
+  if [ -n "$chrest_path" ]; then
+    extra_ldflags="$extra_ldflags -X github.com/friedenberg/nebulous/internal/alfa/capturer.Bin=$chrest_path/bin/chrest"
   fi
   base_ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
   ldflags="$base_ldflags $extra_ldflags"
@@ -30,6 +35,16 @@ build-go tag="debug":
 
 build-nix:
   nix build --show-trace
+
+# Verify flake-pinned binary paths are ldflags-injected into the debug build.
+# [group: debug]
+debug-inject-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== madder ==="
+  strings build/debug/nebulous | grep -m1 '/nix/store/.*madder.*/bin/madder' || echo "MISSING"
+  echo "=== chrest ==="
+  strings build/debug/nebulous | grep -m1 '/nix/store/.*chrest.*/bin/chrest' || echo "MISSING"
 
 # Regenerate pkgs/ facades from internal/ packages via dagnabit.
 # No-op until a source file contains `//go:generate dagnabit export`.
