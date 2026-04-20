@@ -1,5 +1,5 @@
 // Package orchestrator composes the RFC 0001 substrate (policy,
-// capturer, archive) into the `nebulous archive` pipeline.
+// capturer, archive) into the `nebulous archive-capture` pipeline.
 //
 // Design: docs/plans/2026-04-19-orchestrator-design.md
 // Plan:   docs/plans/2026-04-19-orchestrator-implementation.md

@@ -2,7 +2,7 @@
 #
 # Copied by `just archive-init` to $XDG_CONFIG_HOME/nebulous/nebulous.toml
 # when no policy exists there. Edit freely; the path is the one
-# `nebulous archive` reads by default.
+# `nebulous archive-capture` reads by default.
 #
 # Schema reference: docs/rfcs/0001-web-capture-archive-protocol.md § Policy Format.
 

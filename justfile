@@ -11,7 +11,7 @@ build-go tag="debug":
   # Resolve the flake-pinned madder and chrest so their absolute
   # paths are ldflags-injected into internal/0/madder.Bin and
   # internal/alfa/capturer.Bin — mirrors what the Nix build does
-  # in flake.nix. Without this, debug builds of `nebulous archive`
+  # in flake.nix. Without this, debug builds of `nebulous archive-capture`
   # would invoke madder/chrest via PATH, where older user-profile
   # binaries can shadow the devShell's.
   madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
@@ -115,12 +115,12 @@ archive-init:
   echo "archive-init: wrote $path"
 
 # Archive a single story or URL via the prod XDG data + config paths.
-# Forwards all args to `nebulous archive`, so typical usage is:
+# Forwards all args to `nebulous archive-capture`, so typical usage is:
 #   just archive --story=6327282:5d1cf5
 #   just archive --url=https://example.com/
 # [group: archive]
 archive *args: build-go
-  ./build/debug/nebulous archive {{args}}
+  ./build/debug/nebulous archive-capture {{args}}
 
 # Archive the N most recent starred stories. Defaults to 5.
 # Failures on individual stories are logged but don't abort the batch,
@@ -136,7 +136,7 @@ archive-recent n="5": build-go
   fi
   ./build/debug/nebulous corpus-list -limit {{n}} | while IFS= read -r id; do
     echo "=== $id ==="
-    ./build/debug/nebulous archive --story="$id" || echo "=== $id failed (continuing) ==="
+    ./build/debug/nebulous archive-capture --story="$id" || echo "=== $id failed (continuing) ==="
     echo
   done
 

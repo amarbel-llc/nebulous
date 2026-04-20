@@ -22,7 +22,7 @@ TOML
 
 run_archive() {
   local bin="${NEBULOUS_BIN:-nebulous}"
-  run timeout --preserve-status 120s "$bin" archive "$@" \
+  run timeout --preserve-status 120s "$bin" archive-capture "$@" \
     --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
     --archive-root="$BATS_TEST_TMPDIR/archives"
 }
@@ -49,7 +49,7 @@ function orchestrator_url_mode_produces_record_file { # @test
 
 function orchestrator_rejects_missing_selector { # @test
   local bin="${NEBULOUS_BIN:-nebulous}"
-  run "$bin" archive \
+  run "$bin" archive-capture \
     --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
     --archive-root="$BATS_TEST_TMPDIR/archives"
   [[ "$status" -eq 3 ]] || fail "expected exit 3 (no selector), got $status"
@@ -57,7 +57,7 @@ function orchestrator_rejects_missing_selector { # @test
 
 function orchestrator_rejects_missing_policy_file { # @test
   local bin="${NEBULOUS_BIN:-nebulous}"
-  run "$bin" archive \
+  run "$bin" archive-capture \
     --url=https://example.com/ \
     --policy="$BATS_TEST_TMPDIR/does-not-exist.toml" \
     --archive-root="$BATS_TEST_TMPDIR/archives"

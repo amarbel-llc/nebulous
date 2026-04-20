@@ -19,12 +19,12 @@ import (
 	"github.com/friedenberg/nebulous/internal/alfa/policy"
 )
 
-// archiveMain is the `nebulous archive` subcommand entry point.
-// Parses flags, wires a production orchestrator.Deps, calls Run,
-// emits the Report in the TTY-appropriate format, returns the
+// archiveMain is the `nebulous archive-capture` subcommand entry
+// point. Parses flags, wires a production orchestrator.Deps, calls
+// Run, emits the Report in the TTY-appropriate format, returns the
 // orchestrator's exit code.
 func archiveMain(ctx context.Context, args []string) int {
-	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
+	fs := flag.NewFlagSet("archive-capture", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	var (
