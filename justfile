@@ -46,6 +46,12 @@ debug-inject-check:
   echo "=== chrest ==="
   strings build/debug/nebulous | grep -m1 '/nix/store/.*chrest.*/bin/chrest' || echo "MISSING"
 
+# Bump a single flake input's pin in flake.lock. Example:
+#   just debug-flake-update-input madder
+# [group: debug]
+debug-flake-update-input input:
+  nix flake update --flake . {{input}}
+
 # Regenerate pkgs/ facades from internal/ packages via dagnabit.
 # No-op until a source file contains `//go:generate dagnabit export`.
 # [group: build]
