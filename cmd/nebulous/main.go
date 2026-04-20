@@ -30,7 +30,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous fetch                Progressively cache feeds, starred stories, and original text\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n")
-		fmt.Fprintf(os.Stderr, "  nebulous archive-capture [--story=ID | --url=URL]  Archive a URL via RFC 0001 capture pipeline\n\n")
+		fmt.Fprintf(os.Stderr, "  nebulous archive-capture [TARGET...]  Archive stories / URLs via RFC 0001 capture pipeline\n")
+		fmt.Fprintf(os.Stderr, "  nebulous archive-list [PREFIX]        List archived records (--format=auto|table|jsonl)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN   NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME    honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n\n")
@@ -69,6 +70,10 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 		os.Exit(archiveMain(ctx, flag.Args()[1:]))
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "archive-list" {
+		os.Exit(archiveListMain(flag.Args()[1:]))
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "corpus-list" {
