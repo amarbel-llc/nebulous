@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -205,5 +207,85 @@ func TestRun_dualSubjectProducesTwoRecords(t *testing.T) {
 	}
 	if !urlSeen {
 		t.Error("expected a url:* subject in Written")
+	}
+}
+
+// manyPolicies returns N policies each with one text capture,
+// suitable for driving the circuit breaker across multiple jobs.
+func manyPolicies(n int) []policy.Policy {
+	out := make([]policy.Policy, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, policy.Policy{
+			ID:        fmt.Sprintf("p%d", i),
+			URL:       "{{.Story.Permalink}}",
+			Isolation: "fresh",
+			Captures: []policy.Capture{{
+				Name:    "text",
+				Format:  "text",
+				Browser: "firefox",
+			}},
+		})
+	}
+	return out
+}
+
+func TestRun_threeConsecutiveFailuresBailOut(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(manyPolicies(5), capturer.BatchOutput{})
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		return capturer.BatchOutput{}, errors.New("simulated capturer failure")
+	}
+
+	args := Args{
+		StoryID:     "abc",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, d)
+
+	if !rep.BailedOut {
+		t.Errorf("expected BailedOut=true")
+	}
+	if len(rep.Failed) != 3 {
+		t.Errorf("expected exactly 3 failures before bail, got %d: %+v", len(rep.Failed), rep.Failed)
+	}
+	if rep.ExitCode() != 2 {
+		t.Errorf("exit code: got %d, want 2", rep.ExitCode())
+	}
+}
+
+func TestRun_interspersedSuccessesResetCounter(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(manyPolicies(5), successBatchOutput())
+
+	// Pattern: fail, ok, fail, ok, fail. No 3-in-a-row; no bail.
+	calls := 0
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		calls++
+		if calls%2 == 1 {
+			return capturer.BatchOutput{}, errors.New("simulated")
+		}
+		return successBatchOutput(), nil
+	}
+
+	args := Args{
+		StoryID:     "abc",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, d)
+
+	if rep.BailedOut {
+		t.Errorf("should not bail out with interspersed successes")
+	}
+	if rep.ExitCode() != 1 {
+		t.Errorf("exit code: got %d, want 1 (mixed ok+fail)", rep.ExitCode())
+	}
+	// Expect 3 failures (jobs 1, 3, 5) and 2 successes (jobs 2, 4).
+	if len(rep.Failed) != 3 {
+		t.Errorf("failed count: got %d, want 3", len(rep.Failed))
+	}
+	if len(rep.Written) != 2 {
+		t.Errorf("written count: got %d, want 2", len(rep.Written))
 	}
 }
