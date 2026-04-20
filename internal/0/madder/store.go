@@ -117,9 +117,10 @@ func (s *Store) Read(id string, dst io.Writer) (bool, error) {
 
 // Write consumes src and returns the markl-id madder assigned to the blob.
 func (s *Store) Write(src io.Reader) (string, error) {
-	// First positional switches to the nebulous store; subsequent args are
-	// paths, with "-" indicating stdin.
-	cmd := s.command("write", s.storeId, "-")
+	// -format=json is explicit so this works regardless of whether stdout
+	// is a pipe or a tty. The store-id positional switches to the nebulous
+	// store; subsequent args are paths, with "-" indicating stdin.
+	cmd := s.command("write", "-format=json", s.storeId, "-")
 	cmd.Stdin = src
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

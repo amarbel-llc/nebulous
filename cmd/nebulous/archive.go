@@ -110,7 +110,11 @@ func newArchiveDeps(ctx context.Context) (orchestrator.Deps, error) {
 		TimeNow:      time.Now,
 		HistoryStore: madderWriter{store: store},
 		WriterCmd: []string{
-			madder.Bin, "--format=json", "write", "--store", "nebulous",
+			// Madder syntax: `madder write -format=json <store-id> -`.
+			// -format=json is a subcommand flag (single dash) and must
+			// come after `write`; the positional `<store-id>` switches
+			// the active store for this write; `-` reads from stdin.
+			madder.Bin, "write", "-format=json", "nebulous", "-",
 		},
 	}, nil
 }
