@@ -1,0 +1,175 @@
+package orchestrator
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/friedenberg/nebulous/internal/0/archive"
+	"github.com/friedenberg/nebulous/internal/alfa/capturer"
+	"github.com/friedenberg/nebulous/internal/alfa/policy"
+)
+
+// fixedTime returns a deterministic timestamp so archive records
+// don't churn across test runs.
+func fixedTime() time.Time {
+	return time.Date(2026, 4, 19, 12, 0, 0, 412_000_000, time.UTC)
+}
+
+// singlePolicySingleCapture is the minimal valid policy set: one
+// policy with one text capture, split=false.
+func singlePolicySingleCapture() []policy.Policy {
+	return []policy.Policy{{
+		ID:        "p1",
+		URL:       "{{.Story.Permalink}}",
+		Isolation: "fresh",
+		Captures: []policy.Capture{{
+			Name:    "text",
+			Format:  "text",
+			Browser: "firefox",
+		}},
+	}}
+}
+
+// successBatchOutput is the canned capturer response for a single
+// text capture that succeeded (split=false → no envelope).
+func successBatchOutput() capturer.BatchOutput {
+	return capturer.BatchOutput{
+		Schema:   capturer.Schema,
+		Capturer: capturer.CapturerInfo{Name: "stub", Version: "0"},
+		Errors:   []capturer.ErrorEntry{},
+		Captures: []capturer.CaptureResult{{
+			Name:    "text",
+			Spec:    &capturer.ArtifactRef{ID: "blake2b256-s", Size: 10, MediaType: "application/vnd.web-capture-archive.spec+json"},
+			Payload: &capturer.ArtifactRef{ID: "blake2b256-p", Size: 20, MediaType: "text/plain; charset=utf-8"},
+		}},
+	}
+}
+
+// stubDeps wires a minimally-viable deps: all success, fixed time,
+// nop history writer, real archive.WriteWithHistory so we actually
+// exercise the atomic write path to tmpDir.
+func stubDeps(policies []policy.Policy, out capturer.BatchOutput) deps {
+	return deps{
+		LoadPolicies: func(string) ([]policy.Policy, error) {
+			return policies, nil
+		},
+		ResolveStory: func(id string) (policy.Story, error) {
+			return policy.Story{
+				Hash:      id,
+				Permalink: "https://example.com/" + id,
+				Title:     "stubbed",
+			}, nil
+		},
+		RunCapturer: func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+			return out, nil
+		},
+		WriteArchive: archive.WriteWithHistory,
+		TimeNow:      fixedTime,
+		HistoryStore: nopHistory{},
+		WriterCmd:    []string{"/bin/true"},
+	}
+}
+
+func TestRun_happyPath_singlePolicySingleSubject(t *testing.T) {
+	dir := t.TempDir()
+	args := Args{
+		StoryID:     "6327282:5d1cf5",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+
+	if len(rep.Failed) != 0 {
+		t.Errorf("unexpected failures: %+v", rep.Failed)
+	}
+	if len(rep.Written) != 1 {
+		t.Fatalf("written: got %d, want 1", len(rep.Written))
+	}
+	if rep.Written[0].PolicyID != "p1" {
+		t.Errorf("policy id: got %q", rep.Written[0].PolicyID)
+	}
+	if rep.Written[0].Subject != "story:6327282:5d1cf5" {
+		t.Errorf("subject: got %q", rep.Written[0].Subject)
+	}
+	if rep.ExitCode() != 0 {
+		t.Errorf("exit: got %d, want 0", rep.ExitCode())
+	}
+
+	// Verify the archive record actually landed on disk with the
+	// expected shape.
+	got, err := archive.Read(rep.Written[0].Path)
+	if err != nil {
+		t.Fatalf("read written record: %v", err)
+	}
+	if got.Subject != "story:6327282:5d1cf5" {
+		t.Errorf("persisted subject: got %q", got.Subject)
+	}
+	if got.PolicyID != "p1" {
+		t.Errorf("persisted policy_id: got %q", got.PolicyID)
+	}
+	if len(got.Captures) != 1 {
+		t.Fatalf("persisted captures: got %d", len(got.Captures))
+	}
+	if got.Captures[0].Payload == nil {
+		t.Error("persisted payload should be present")
+	}
+}
+
+func TestRun_pathIsUnderByStoryForStorySubject(t *testing.T) {
+	dir := t.TempDir()
+	args := Args{
+		StoryID:     "abc",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+	if len(rep.Written) != 1 {
+		t.Fatalf("written: %d", len(rep.Written))
+	}
+	wantPrefix := filepath.Join(dir, "archives", "by-story", "abc")
+	if !strings.HasPrefix(rep.Written[0].Path, wantPrefix) {
+		t.Errorf("path should be under %q, got %q", wantPrefix, rep.Written[0].Path)
+	}
+}
+
+func TestRun_pathIsUnderByURLForURLSubject(t *testing.T) {
+	dir := t.TempDir()
+	args := Args{
+		URL:         "https://example.com/canonical",
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+	}
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+	if len(rep.Written) != 1 {
+		t.Fatalf("written: %d", len(rep.Written))
+	}
+	if !strings.Contains(rep.Written[0].Path, filepath.Join("archives", "by-url")) {
+		t.Errorf("path should contain archives/by-url/, got %q", rep.Written[0].Path)
+	}
+}
+
+func TestRun_policyLoadFailureIsPreJobError(t *testing.T) {
+	d := stubDeps(singlePolicySingleCapture(), successBatchOutput())
+	d.LoadPolicies = func(string) ([]policy.Policy, error) {
+		return nil, &stubErr{msg: "bad toml"}
+	}
+
+	rep := run(context.Background(), Args{}, d)
+	if len(rep.Written) != 0 {
+		t.Errorf("no writes expected, got %d", len(rep.Written))
+	}
+	if len(rep.Failed) != 1 {
+		t.Fatalf("want 1 pre-job failure, got %+v", rep.Failed)
+	}
+	if rep.Failed[0].Kind != "policy-load-failed" {
+		t.Errorf("kind: got %q", rep.Failed[0].Kind)
+	}
+}
+
+type stubErr struct{ msg string }
+
+func (e *stubErr) Error() string { return e.msg }
