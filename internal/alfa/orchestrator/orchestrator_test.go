@@ -370,12 +370,18 @@ func TestRun_reportSortWithinSameSubjectByPolicyID(t *testing.T) {
 	// Four policies in reverse alphabetical order — buildSubjects +
 	// sortReport should produce them sorted by PolicyID per subject.
 	pols := []policy.Policy{
-		{ID: "zebra", URL: "{{.Story.Permalink}}", Isolation: "fresh",
-			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
-		{ID: "apple", URL: "{{.Story.Permalink}}", Isolation: "fresh",
-			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
-		{ID: "mango", URL: "{{.Story.Permalink}}", Isolation: "fresh",
-			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}}},
+		{
+			ID: "zebra", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}},
+		},
+		{
+			ID: "apple", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}},
+		},
+		{
+			ID: "mango", URL: "{{.Story.Permalink}}", Isolation: "fresh",
+			Captures: []policy.Capture{{Name: "text", Format: "text", Browser: "firefox"}},
+		},
 	}
 	args := Args{
 		StoryIDs:    []string{"abc"},

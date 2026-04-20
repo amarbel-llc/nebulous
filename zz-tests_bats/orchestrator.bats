@@ -90,7 +90,7 @@ function orchestrator_parallel_jobs_flag_runs_all_targets { # @test
   subjects=$(echo "$output" | jq -r '.written[].subject')
   local sorted
   sorted=$(echo "$subjects" | sort)
-  [[ "$subjects" == "$sorted" ]] || fail "written entries not sorted: $subjects"
+  [[ $subjects == "$sorted" ]] || fail "written entries not sorted: $subjects"
 }
 
 function orchestrator_rejects_missing_targets { # @test
