@@ -4,6 +4,14 @@
 # when no policy exists there. Edit freely; the path is the one
 # `nebulous archive-capture` reads by default.
 #
+# Default captures the full set of Firefox-compatible formats.
+#
+# Not included:
+# - a11y             — Chrome-only (not supported on Firefox/BiDi per chrest)
+# - mhtml            — Chrome-only, and Chrome is currently broken on kernel
+#                       6.17+ (chrest#14)
+# - markdown-selector — needs a per-target CSS selector; no sensible default
+#
 # Schema reference: docs/rfcs/0001-web-capture-archive-protocol.md § Policy Format.
 
 [[policy]]
@@ -21,3 +29,25 @@ name = "pdf"
 format = "pdf"
 browser = "firefox"
 options = { background = true }
+
+[[policy.capture]]
+name = "screenshot"
+format = "screenshot"
+browser = "firefox"
+options = { format = "png", "full-page" = true }
+
+[[policy.capture]]
+name = "html-monolith"
+format = "html-monolith"
+browser = "firefox"
+
+[[policy.capture]]
+name = "markdown-full"
+format = "markdown-full"
+browser = "firefox"
+
+[[policy.capture]]
+name = "markdown-reader"
+format = "markdown-reader"
+browser = "firefox"
+options = { reader_engine = "readability" }
