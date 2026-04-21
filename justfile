@@ -129,13 +129,22 @@ archive-init:
 archive *args: build-go
   ./build/debug/nebulous archive-capture {{args}}
 
-# Archive the N most recent starred stories. Defaults to 5.
+# Archive the N most recent starred stories. Defaults to 5 targets, 1 job.
 # Streams story IDs into `archive-capture -`, which processes them
 # in one invocation — the orchestrator's circuit breaker handles
 # transient failures (bails after 3 consecutive; one flaky
 # chrest/madder won't poison the whole run).
+#
+# Emits a 30s mtime-based progress tick while running (works whether
+# targets are new or being re-archived), then a per-capture-kind
+# summary after. Use with `jobs=N` for parallel capture.
+#
+# Examples:
+#   just archive-recent
+#   just archive-recent 100
+#   just archive-recent 100 jobs=4
 # [group: archive]
-archive-recent n="5": build-go
+archive-recent n="5" jobs="1": build-go
   #!/usr/bin/env bash
   set -euo pipefail
   policy="${XDG_CONFIG_HOME:-$HOME/.config}/nebulous/nebulous.toml"
@@ -143,7 +152,60 @@ archive-recent n="5": build-go
     echo "archive-recent: no policy at $policy — run \`just archive-init\` first" >&2
     exit 1
   fi
-  ./build/debug/nebulous corpus-list -limit {{n}} | ./build/debug/nebulous archive-capture -
+  command -v jq >/dev/null 2>&1 || { echo "archive-recent: jq is required (available in the nix devshell)" >&2; exit 1; }
+
+  archives="${XDG_DATA_HOME:-$HOME/.local/share}/nebulous/archives"
+  mkdir -p .tmp
+  marker=.tmp/archive-recent.marker
+  log=.tmp/archive-recent.log
+  rm -f "$marker" "$log"
+  touch "$marker"
+  # mtime granularity is a second on most FSes; pad so records written
+  # inside the same second register as -newer than the marker.
+  sleep 1
+
+  echo "archive-recent: capturing up to {{n}} targets with jobs={{jobs}}"
+  t0=$(date +%s)
+
+  # Progress watcher in background. Counts records whose default.json
+  # mtime is newer than the marker, which catches both new and
+  # overwritten records (a bare file-count baseline breaks on re-archive).
+  (
+    while :; do
+      sleep 30
+      seen=$(find "$archives" -name default.json -newer "$marker" 2>/dev/null | wc -l)
+      elapsed=$(( ( $(date +%s) - t0 ) / 60 ))
+      printf '  [+%dm] records touched: %d/%s\n' "$elapsed" "$seen" "{{n}}" >&2
+    done
+  ) &
+  watch_pid=$!
+  trap 'kill "$watch_pid" 2>/dev/null || true' EXIT
+
+  ./build/debug/nebulous corpus-list -limit {{n}} \
+    | ./build/debug/nebulous archive-capture --jobs={{jobs}} - \
+    > "$log" 2>&1
+  rc=$?
+
+  kill "$watch_pid" 2>/dev/null || true
+  elapsed=$(( $(date +%s) - t0 ))
+
+  printf '\narchive-recent summary (%ds, orchestrator exit=%d):\n' "$elapsed" "$rc"
+  find "$archives" -name default.json -newer "$marker" -print0 2>/dev/null \
+    | xargs -0 -r jq -s '{
+        records:      length,
+        fully_ok:     [.[] | select(all(.captures[]?; .error == null))] | length,
+        fully_failed: [.[] | select((.captures | length) > 0 and all(.captures[]; .error != null))] | length,
+        partial:      [.[] | select(any(.captures[]?; .error == null) and any(.captures[]?; .error != null))] | length,
+        captures_by_kind:
+          [.[].captures[]? | .error.kind // "ok"]
+          | group_by(.) | map({key: .[0], value: length}) | from_entries
+      }'
+
+  if [ "$rc" -ne 0 ]; then
+    echo '--- orchestrator log (tail) ---'
+    tail -n 40 "$log"
+  fi
+  exit "$rc"
 
 # Archive comparison test
 # Compares monolith (static fetch) vs single-file-cli (headless browser)
