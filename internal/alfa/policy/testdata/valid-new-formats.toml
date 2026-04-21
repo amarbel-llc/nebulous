@@ -1,0 +1,26 @@
+[[policy]]
+id = "new-formats"
+url = "{{.Story.Permalink}}"
+isolation = "fresh"
+
+[[policy.capture]]
+name = "html-monolith"
+format = "html-monolith"
+browser = "firefox"
+
+[[policy.capture]]
+name = "markdown-full"
+format = "markdown-full"
+browser = "firefox"
+
+[[policy.capture]]
+name = "markdown-reader"
+format = "markdown-reader"
+browser = "firefox"
+options = { reader_engine = "readability" }
+
+[[policy.capture]]
+name = "markdown-selector"
+format = "markdown-selector"
+browser = "firefox"
+options = { selector = "article" }

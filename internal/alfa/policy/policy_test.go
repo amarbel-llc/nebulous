@@ -41,6 +41,29 @@ func TestLoadAll_rejectsMissingID(t *testing.T) {
 	}
 }
 
+func TestLoadAll_acceptsNewFormats(t *testing.T) {
+	policies, err := LoadAll(filepath.Join("testdata", "valid-new-formats.toml"))
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected 1 policy, got %d", len(policies))
+	}
+	got := make([]string, len(policies[0].Captures))
+	for i, c := range policies[0].Captures {
+		got[i] = c.Format
+	}
+	want := []string{"html-monolith", "markdown-full", "markdown-reader", "markdown-selector"}
+	if len(got) != len(want) {
+		t.Fatalf("captures: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("captures[%d].Format: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestLoadAll_rejectsUnknownFormat(t *testing.T) {
 	_, err := LoadAll(filepath.Join("testdata", "bad-unknown-format.toml"))
 	if err == nil {

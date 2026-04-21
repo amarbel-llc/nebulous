@@ -29,7 +29,9 @@ SH
     { "name": "screenshot", "format": "screenshot",
       "options": { "format": "png", "full-page": true } },
     { "name": "pdf",        "format": "pdf",
-      "options": { "background": true, "landscape": false } }
+      "options": { "background": true, "landscape": false } },
+    { "name": "markdown-reader", "format": "markdown-reader",
+      "options": { "reader_engine": "readability" } }
   ]
 }
 JSON
@@ -51,7 +53,7 @@ function capture_batch_split_false_produces_rfc_shape { # @test
   assert_equal "$(echo "$output" | jq -r '.schema')" 'web-capture-archive/v1'
   assert_equal "$(echo "$output" | jq -r '.capturer.name')" 'chrest'
   assert_equal "$(echo "$output" | jq '.errors | length')" '0'
-  assert_equal "$(echo "$output" | jq '.captures | length')" '3'
+  assert_equal "$(echo "$output" | jq '.captures | length')" '4'
 
   # Every capture has a spec + payload (split=false so no envelope).
   local missing_payload
@@ -76,9 +78,10 @@ function capture_batch_media_types_per_format { # @test
   run_capture_batch
   assert_success
 
-  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="text")       | .payload.media_type')" 'text/plain; charset=utf-8'
-  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="screenshot") | .payload.media_type')" 'image/png'
-  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="pdf")        | .payload.media_type')" 'application/pdf'
+  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="text")            | .payload.media_type')" 'text/plain; charset=utf-8'
+  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="screenshot")      | .payload.media_type')" 'image/png'
+  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="pdf")             | .payload.media_type')" 'application/pdf'
+  assert_equal "$(echo "$output" | jq -r '.captures[] | select(.name=="markdown-reader") | .payload.media_type')" 'text/markdown; charset=utf-8'
 
   local spec_media
   spec_media=$(echo "$output" | jq -r '.captures[0].spec.media_type')

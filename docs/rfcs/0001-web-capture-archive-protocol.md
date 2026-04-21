@@ -10,8 +10,9 @@ date: 2026-04-19
 This document specifies a protocol for preserving web page content in a
 content-addressed blob store. An *orchestrator* drives a *capturer* to fetch
 a URL in zero or more formats (PDF, screenshot, MHTML, rendered text,
-accessibility tree), and the capturer streams each result through a generic
-*writer* into a content-addressed store. Every capture produces three
+HTML archive, markdown, accessibility tree), and the capturer streams each
+result through a generic *writer* into a content-addressed store. Every
+capture produces three
 content-addressed artifacts — a spec describing the capture configuration
 and environment, an envelope describing per-run transport metadata, and a
 payload containing the captured bytes — plus a plain-JSON archive record
@@ -282,7 +283,7 @@ Input field requirements:
 | `defaults.split`            | boolean | no       | Default `split` value. If omitted, the capturer MUST treat it as `true`. |
 | `captures`                  | array   | yes      | Non-empty list of captures to perform, in order. |
 | `captures[].name`           | string  | yes      | Orchestrator-supplied label. MUST be unique within the batch. MUST NOT be included in the spec artifact (see [§ Capture Spec Artifact](#capture-spec-artifact)). |
-| `captures[].format`         | string  | yes      | Capture format. MUST be one of: `text`, `pdf`, `screenshot`, `mhtml`, `a11y`. |
+| `captures[].format`         | string  | yes      | Capture format. MUST be one of: `text`, `pdf`, `screenshot`, `mhtml`, `a11y`, `html-monolith`, `markdown-full`, `markdown-reader`, `markdown-selector`. |
 | `captures[].options`        | object  | no       | Format-specific options. Passed through to the browser driver; see [§ Payload Artifact](#payload-artifact). |
 | `captures[].browser`        | string  | no       | Overrides `defaults.browser`. |
 | `captures[].isolation`      | string  | no       | Overrides `defaults.isolation`. |
@@ -546,13 +547,17 @@ as-captured.
 
 Media types per format:
 
-| Format       | Media type            |
-|--------------|-----------------------|
-| `text`       | `text/plain; charset=utf-8` |
-| `pdf`        | `application/pdf`     |
-| `screenshot` | `image/png` or `image/jpeg` |
-| `mhtml`      | `multipart/related`   |
-| `a11y`       | `application/json`    |
+| Format              | Media type                     |
+|---------------------|--------------------------------|
+| `text`              | `text/plain; charset=utf-8`    |
+| `pdf`               | `application/pdf`              |
+| `screenshot`        | `image/png` or `image/jpeg`    |
+| `mhtml`             | `multipart/related`            |
+| `a11y`              | `application/json`             |
+| `html-monolith`     | `text/html; charset=utf-8`     |
+| `markdown-full`     | `text/markdown; charset=utf-8` |
+| `markdown-reader`   | `text/markdown; charset=utf-8` |
+| `markdown-selector` | `text/markdown; charset=utf-8` |
 
 ##### text
 
@@ -603,6 +608,50 @@ The original boundary and removed headers MUST be recorded in
 
 The accessibility tree MUST be JCS-canonicalized per [RFC 8785][rfc-8785]
 when `split` is true.
+
+##### html-monolith
+
+No byte-stability normalization rules are defined for this format in this
+revision of the RFC. A conforming capturer MUST reject `split = true` for
+`html-monolith` — e.g. by emitting a per-capture error with an
+implementation-defined code (chrest currently returns `not-implemented`).
+A future RFC revision MAY define normalization rules.
+
+##### markdown-full
+
+No byte-stability normalization rules are defined for this format in this
+revision of the RFC. A conforming capturer MUST reject `split = true` for
+`markdown-full` — e.g. by emitting a per-capture error with an
+implementation-defined code (chrest currently returns `not-implemented`).
+A future RFC revision MAY define normalization rules.
+
+##### markdown-reader
+
+No byte-stability normalization rules are defined for this format in this
+revision of the RFC. A conforming capturer MUST reject `split = true` for
+`markdown-reader` — e.g. by emitting a per-capture error with an
+implementation-defined code (chrest currently returns `not-implemented`).
+A future RFC revision MAY define normalization rules.
+
+The capture's `options` object MAY include an optional `reader_engine`
+string. Defined values: `"readability"` (default) selects a Readability-style
+article extractor; `"browser"` is reserved for a future engine and a
+conforming capturer MAY reject it as not-yet-implemented. The option is a
+format-specific passthrough — the capturer interprets it; no schema-level
+enforcement is imposed by this RFC.
+
+##### markdown-selector
+
+No byte-stability normalization rules are defined for this format in this
+revision of the RFC. A conforming capturer MUST reject `split = true` for
+`markdown-selector` — e.g. by emitting a per-capture error with an
+implementation-defined code (chrest currently returns `not-implemented`).
+A future RFC revision MAY define normalization rules.
+
+The capture's `options` object MUST include a `selector` string — a CSS
+selector scoping the conversion to a single element (the first match wins).
+A conforming capturer MUST reject a `markdown-selector` capture that
+omits or empty-strings the `selector` option.
 
 ### Archive Record Format
 
@@ -790,7 +839,7 @@ Field requirements:
 | `policy.isolation`              | no       | Default browser isolation. MUST be one of: `fresh`, `session`, `shared`. If omitted, the orchestrator MUST treat it as `fresh`. |
 | `capture[]`                     | yes      | At least one entry REQUIRED. |
 | `capture[].name`                | yes      | Capture label. MUST be unique within the policy. MUST match `^[a-zA-Z0-9._-]+$`. |
-| `capture[].format`              | yes      | Capture format. MUST be one of: `text`, `pdf`, `screenshot`, `mhtml`, `a11y`. |
+| `capture[].format`              | yes      | Capture format. MUST be one of: `text`, `pdf`, `screenshot`, `mhtml`, `a11y`, `html-monolith`, `markdown-full`, `markdown-reader`, `markdown-selector`. |
 | `capture[].browser`             | no       | Browser backend. MUST be one of: `chrome`, `firefox`. |
 | `capture[].options`             | no       | Format-specific options passed to the capturer. |
 | `capture[].split`               | no       | Whether to emit an envelope artifact and normalize the payload. Default: `true`. |

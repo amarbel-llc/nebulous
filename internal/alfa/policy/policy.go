@@ -13,6 +13,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"text/template"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -95,10 +97,29 @@ func applyDefaults(p *Policy) {
 }
 
 var (
-	allowedFormats    = map[string]bool{"text": true, "pdf": true, "screenshot": true, "mhtml": true, "a11y": true}
+	allowedFormats = map[string]bool{
+		"text":              true,
+		"pdf":               true,
+		"screenshot":        true,
+		"mhtml":             true,
+		"a11y":              true,
+		"html-monolith":     true,
+		"markdown-full":     true,
+		"markdown-reader":   true,
+		"markdown-selector": true,
+	}
 	allowedBrowsers   = map[string]bool{"firefox": true, "chrome": true}
 	allowedIsolations = map[string]bool{"fresh": true, "session": true, "shared": true}
 )
+
+func allowedFormatsDisplay() string {
+	keys := make([]string, 0, len(allowedFormats))
+	for k := range allowedFormats {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return "{" + strings.Join(keys, ", ") + "}"
+}
 
 func validate(pols []Policy) error {
 	seen := make(map[string]bool, len(pols))
@@ -130,7 +151,7 @@ func validate(pols []Policy) error {
 			}
 			captureNames[c.Name] = true
 			if !allowedFormats[c.Format] {
-				return fmt.Errorf("policies[%d].capture[%d].format %q not in {text, pdf, screenshot, mhtml, a11y}", i, j, c.Format)
+				return fmt.Errorf("policies[%d].capture[%d].format %q not in %s", i, j, c.Format, allowedFormatsDisplay())
 			}
 			if !allowedBrowsers[c.Browser] {
 				return fmt.Errorf("policies[%d].capture[%d].browser %q not in {firefox, chrome}", i, j, c.Browser)
