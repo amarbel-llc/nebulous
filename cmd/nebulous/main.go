@@ -23,7 +23,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "nebulous — a NewsBlur MCP server\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  nebulous [flags]              Start MCP server\n")
+		fmt.Fprintf(os.Stderr, "  nebulous serve mcp            Start MCP server over stdio\n")
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
@@ -33,7 +33,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous archive-capture [TARGET...]  Archive stories / URLs via RFC 0001 capture pipeline\n")
 		fmt.Fprintf(os.Stderr, "  nebulous archive-list [PREFIX]        List archived records (--format=auto|table|jsonl)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN   NewsBlur session cookie (required except corpus-*/generate-plugin/hook/install-mcp)\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN   NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME    honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
@@ -133,6 +133,41 @@ func main() {
 		return
 	}
 
+	if flag.NArg() >= 1 && flag.Arg(0) == "serve" {
+		serveArgs := flag.Args()[1:]
+		if len(serveArgs) == 0 {
+			fmt.Fprintf(os.Stderr, "nebulous: serve: missing subcommand (expected 'mcp')\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+		switch serveArgs[0] {
+		case "mcp":
+			if len(serveArgs) > 1 {
+				fmt.Fprintf(os.Stderr, "nebulous: serve mcp: unexpected arguments: %v\n", serveArgs[1:])
+				flag.Usage()
+				os.Exit(1)
+			}
+			serveMCP()
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "nebulous: serve: unknown subcommand %q\n", serveArgs[0])
+			flag.Usage()
+			os.Exit(1)
+		}
+	}
+
+	if flag.NArg() == 0 {
+		flag.Usage()
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "nebulous: unknown command %q\n", flag.Arg(0))
+	flag.Usage()
+	os.Exit(1)
+}
+
+// serveMCP starts the MCP server over stdio. Requires NEWSBLUR_TOKEN.
+func serveMCP() {
 	token := os.Getenv("NEWSBLUR_TOKEN")
 	if token == "" {
 		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
@@ -147,12 +182,6 @@ func main() {
 	}
 
 	app, resources := tools.RegisterAll(client)
-
-	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "nebulous: unexpected arguments: %v\n", flag.Args())
-		flag.Usage()
-		os.Exit(1)
-	}
 
 	t := transport.NewStdio(os.Stdin, os.Stdout)
 

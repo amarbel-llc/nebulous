@@ -26,6 +26,7 @@ func (m *mutationLock) call(fn func() (json.RawMessage, error)) (json.RawMessage
 func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider) {
 	app := command.NewApp("nebulous", "NewsBlur MCP server")
 	app.Version = "0.1.0"
+	app.MCPArgs = []string{"serve", "mcp"}
 
 	var feedIdx *feedIndex
 	var storyStr *storyStore
