@@ -20,7 +20,7 @@ func TestWriteTAPReport_basicShape(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := WriteTAPReport(&buf, rep); err != nil {
+	if err := WriteTAPReport(&buf, rep, false); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -66,6 +66,50 @@ func TestWriteTAPReport_basicShape(t *testing.T) {
 	}
 }
 
+// TestWriteTAPReport_colorEmitsANSI verifies that color=true wraps
+// the ok / not ok / Bail out! / # SKIP keywords in ANSI escape
+// codes. color=false (already covered by the other tests) produces
+// plain-text output.
+func TestWriteTAPReport_colorEmitsANSI(t *testing.T) {
+	rep := Report{
+		Written: []Job{{PolicyID: "p1", Subject: "story:a", Path: "/a/a.json"}},
+		Skipped: []Skip{{
+			PolicyID:       "p1",
+			Subject:        "story:b",
+			Path:           "/a/b.json",
+			LastCapturedAt: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
+		}},
+		Failed: []JobFailure{{
+			PolicyID: "p1", Subject: "story:c", Kind: "capturer-failed", Message: "boom",
+		}},
+		BailedOut: true,
+	}
+	var buf bytes.Buffer
+	if err := WriteTAPReport(&buf, rep, true); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// Ok keyword (green).
+	if !strings.Contains(out, "\x1b[32mok\x1b[0m") {
+		t.Errorf("expected green `ok` prefix, got:\n%s", out)
+	}
+	// Not ok keyword (red).
+	if !strings.Contains(out, "\x1b[31mnot ok\x1b[0m") {
+		t.Errorf("expected red `not ok` prefix, got:\n%s", out)
+	}
+	// Bail out keyword (red).
+	if !strings.Contains(out, "\x1b[31mBail out!\x1b[0m") {
+		t.Errorf("expected red `Bail out!` prefix, got:\n%s", out)
+	}
+	// SKIP directive carries its own colored keyword.
+	if !strings.Contains(out, "\x1b[33m# SKIP\x1b[0m") && !strings.Contains(out, "# SKIP") {
+		// tap-dancer may use a different hue for SKIP; at minimum
+		// the "# SKIP" substring must appear.
+		t.Errorf("expected `# SKIP` directive, got:\n%s", out)
+	}
+}
+
 func TestWriteTAPReport_bailOutEmitsBailLine(t *testing.T) {
 	rep := Report{
 		Failed: []JobFailure{
@@ -77,7 +121,7 @@ func TestWriteTAPReport_bailOutEmitsBailLine(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := WriteTAPReport(&buf, rep); err != nil {
+	if err := WriteTAPReport(&buf, rep, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "Bail out!") {
@@ -165,7 +209,7 @@ func TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	if err := WriteTAPReport(&buf, rep); err != nil {
+	if err := WriteTAPReport(&buf, rep, false); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

@@ -50,7 +50,8 @@ func archiveMain(ctx context.Context, args []string) int {
 		return 3
 	}
 
-	effectiveFormat, err := resolveCaptureFormat(*format, term.IsTerminal(int(os.Stdout.Fd())))
+	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	effectiveFormat, err := resolveCaptureFormat(*format, stdoutIsTTY)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "archive-capture: %v\n", err)
 		return 3
@@ -82,6 +83,10 @@ func archiveMain(ctx context.Context, args []string) int {
 	}
 	if effectiveFormat == "tap" {
 		runArgs.StreamTAP = os.Stdout
+		// Colorize TAP keywords only when stdout is a live terminal.
+		// A `--format=tap` pipe-to-file (e.g. archive-recent's log)
+		// would otherwise get ANSI codes baked into the archived log.
+		runArgs.StreamTAPColor = stdoutIsTTY
 	}
 
 	report := orchestrator.Run(ctx, runArgs, deps)

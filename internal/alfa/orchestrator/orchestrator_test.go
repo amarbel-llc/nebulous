@@ -828,6 +828,50 @@ func TestRun_ttlBailoutIgnoresSkips(t *testing.T) {
 	}
 }
 
+// TestRun_streamsTAPColor verifies that Args.StreamTAPColor=true
+// causes the live TAP stream's `ok` prefix to carry ANSI green
+// escape codes, and that StreamTAPColor=false produces no ANSI
+// sequences (the byte-for-byte default behavior).
+func TestRun_streamsTAPColor(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, tc := range []struct {
+		name       string
+		color      bool
+		wantGreen  bool
+		wantPlainF string // a substring that must exist regardless
+	}{
+		{"color-on", true, true, "ok"},
+		{"color-off", false, false, "ok"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stream bytes.Buffer
+			args := Args{
+				StoryIDs:       []string{"a"},
+				PolicyPath:     filepath.Join(dir, "nebulous.toml"),
+				ArchiveRoot:    filepath.Join(dir, "archives", tc.name),
+				Jobs:           1,
+				StreamTAP:      &stream,
+				StreamTAPColor: tc.color,
+			}
+			_ = run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+			out := stream.String()
+
+			hasGreen := strings.Contains(out, "\x1b[32mok\x1b[0m")
+			if hasGreen != tc.wantGreen {
+				t.Errorf("ANSI-green-ok: got %v, want %v in:\n%s", hasGreen, tc.wantGreen, out)
+			}
+			if !strings.Contains(out, tc.wantPlainF) {
+				t.Errorf("stream missing %q in:\n%s", tc.wantPlainF, out)
+			}
+			// When color is off, no ESC byte should appear at all.
+			if !tc.color && strings.ContainsRune(out, 0x1b) {
+				t.Errorf("color-off stream contains ESC byte; expected plain text:\n%s", out)
+			}
+		})
+	}
+}
+
 // TestRun_streamsBailOutDirective verifies that the circuit breaker
 // tripping also emits a `Bail out!` line on the live stream.
 func TestRun_streamsBailOutDirective(t *testing.T) {

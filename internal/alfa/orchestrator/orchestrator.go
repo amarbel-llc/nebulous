@@ -77,6 +77,14 @@ type Args struct {
 	// programmatic result.
 	StreamTAP io.Writer
 
+	// StreamTAPColor controls whether the streamed TAP output
+	// colorizes the `ok`, `not ok`, `# SKIP`, and `Bail out!`
+	// keywords with ANSI escape codes. Only meaningful when
+	// StreamTAP is non-nil. Callers should enable this only when
+	// StreamTAP is known to be a TTY — ANSI codes in a log file
+	// the user later greps are noise.
+	StreamTAPColor bool
+
 	// TTL, when > 0, enables the "skip recent captures" gate: before
 	// dispatching each (subject, policy) job, the orchestrator reads
 	// the existing archive record (if any) at recordPath() and, when
@@ -243,14 +251,15 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit, now time.Ti
 		nworkers = len(jobs)
 	}
 
-	// Optional live TAP stream. NewWriter emits the `TAP version 14`
-	// header immediately; PlanAhead emits `1..N` before any results.
-	// Both land on args.StreamTAP before the first worker dispatches,
-	// so `tail -f` on a redirected log shows the plan as soon as the
-	// run starts.
+	// Optional live TAP stream. NewColorWriter emits the
+	// `TAP version 14` header immediately; PlanAhead emits `1..N`
+	// before any results. Both land on args.StreamTAP before the
+	// first worker dispatches, so `tail -f` on a redirected log
+	// shows the plan as soon as the run starts. StreamTAPColor=false
+	// is byte-for-byte identical to the old NewWriter output.
 	var stream *tap.Writer
 	if args.StreamTAP != nil {
-		stream = tap.NewWriter(args.StreamTAP)
+		stream = tap.NewColorWriter(args.StreamTAP, args.StreamTAPColor)
 		stream.PlanAhead(len(jobs))
 	}
 
