@@ -512,26 +512,21 @@ func TestRun_streamsTAPAsJobsComplete(t *testing.T) {
 		t.Errorf("no `not ok` expected in all-success run, got:\n%s", out)
 	}
 
-	// Each streamed `ok` carries the policy id + subject. With
-	// Jobs=1 the order matches the StoryIDs input.
-	wantOrder := []string{"p1 story:a", "p1 story:b", "p1 story:c"}
-	for i, want := range wantOrder {
-		needle := fmt.Sprintf("\nok %d - %s\n", i+1, want)
+	// Each streamed `ok` line carries the policy id + subject AND
+	// the written record path inline as a `# path: …` suffix.
+	// With Jobs=1 the completion order matches the StoryIDs input.
+	subjects := []string{"p1 story:a", "p1 story:b", "p1 story:c"}
+	for i, subj := range subjects {
+		needle := fmt.Sprintf("\nok %d - %s # path: %s\n", i+1, subj, rep.Written[i].Path)
 		if !strings.Contains(out, needle) {
 			t.Errorf("stream missing %q in:\n%s", needle, out)
 		}
 	}
 
-	// Every successful test point is followed by a `# path:`
-	// comment pointing at the archive record that was written.
-	if got := strings.Count(out, "\n# path: "); got != 3 {
-		t.Errorf("path comment count in stream: got %d, want 3 (one per ok):\n%s", got, out)
-	}
-	for _, w := range rep.Written {
-		needle := fmt.Sprintf("\n# path: %s\n", w.Path)
-		if !strings.Contains(out, needle) {
-			t.Errorf("stream missing path comment %q in:\n%s", needle, out)
-		}
+	// No standalone `# path:` comment lines — the path lives on
+	// the test-point line itself.
+	if strings.Contains(out, "\n# path: ") {
+		t.Errorf("found standalone `# path:` line; expected inline only:\n%s", out)
 	}
 }
 

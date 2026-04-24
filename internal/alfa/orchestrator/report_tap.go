@@ -28,8 +28,7 @@ func WriteTAPReport(w io.Writer, r Report, color bool) error {
 	tw.PlanAhead(len(r.Written) + len(r.Skipped) + len(r.Failed))
 
 	for _, j := range r.Written {
-		tw.Ok(fmt.Sprintf("%s %s", j.PolicyID, j.Subject))
-		tw.Comment(pathComment(j.Path))
+		tw.Ok(okDescription(j))
 	}
 	for _, s := range r.Skipped {
 		tw.Skip(fmt.Sprintf("%s %s", s.PolicyID, s.Subject), skipReason(s))

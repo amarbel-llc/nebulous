@@ -127,8 +127,9 @@ function orchestrator_rejects_missing_policy_file { # @test
 function orchestrator_format_tap_emits_tap14 { # @test
   # --format=tap forces TAP output even though bats captures a pipe
   # (non-TTY). Expect the streamed header + plan line + one ok line
-  # for the single (subject, policy) pair, followed by a `# path:`
-  # comment pointing at the archive record that was written.
+  # for the single (subject, policy) pair. The archive record path
+  # is appended inline as a `# path: …` suffix on the ok line
+  # itself — no standalone comment line.
   run_archive --format=tap https://example.com/
 
   assert_success
@@ -136,16 +137,20 @@ function orchestrator_format_tap_emits_tap14 { # @test
     fail "first line should be TAP header, got: ${lines[0]}"
   echo "$output" | grep -qE '^1\.\.1$' ||
     fail "expected plan line '1..1' in output:\n$output"
-  echo "$output" | grep -qE '^ok 1' ||
-    fail "expected 'ok 1' line in output:\n$output"
 
-  local path_line
-  path_line=$(echo "$output" | grep -E '^# path: ' || true)
-  [[ -n $path_line ]] ||
-    fail "expected '# path: ...' comment after 'ok 1' in output:\n$output"
-  local path="${path_line#\# path: }"
+  local ok_line
+  ok_line=$(echo "$output" | grep -E '^ok 1' || true)
+  [[ -n $ok_line ]] ||
+    fail "expected 'ok 1' line in output:\n$output"
+  [[ $ok_line == *' # path: '* ]] ||
+    fail "expected '# path:' suffix on ok line, got: $ok_line"
+  local path="${ok_line##* # path: }"
   [[ -f $path ]] ||
-    fail "path comment references nonexistent file: $path"
+    fail "inline path references nonexistent file: $path"
+
+  # The path must NOT appear on its own comment line.
+  ! echo "$output" | grep -qE '^# path: ' ||
+    fail "found standalone '# path:' line; expected inline only:\n$output"
 }
 
 function orchestrator_format_json_explicit_matches_auto { # @test

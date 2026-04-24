@@ -41,17 +41,21 @@ func TestWriteTAPReport_basicShape(t *testing.T) {
 		t.Errorf("not ok count: got %d, want 1", got)
 	}
 
-	// Each `ok` is followed by a `# path: <record-path>` comment so
-	// consumers can locate the written record without a separate
-	// index. Failed entries do not get a path comment.
-	if !strings.Contains(out, "\n# path: /root/by-story/abc/p1.json\n") {
-		t.Errorf("expected `# path:` comment for p1 record:\n%s", out)
+	// Each `ok` line carries the record path inline as a
+	// `# path: …` suffix, not on a separate following line. This
+	// keeps one test point to one line — friendlier for tail/grep
+	// and for TAP parsers that don't expect a comment between a
+	// test point and the next plan/test line.
+	if !strings.Contains(out, "ok 1 - p1 story:abc # path: /root/by-story/abc/p1.json\n") {
+		t.Errorf("expected inline path suffix on p1 `ok` line:\n%s", out)
 	}
-	if !strings.Contains(out, "\n# path: /root/by-story/abc/p2.json\n") {
-		t.Errorf("expected `# path:` comment for p2 record:\n%s", out)
+	if !strings.Contains(out, "ok 2 - p2 story:abc # path: /root/by-story/abc/p2.json\n") {
+		t.Errorf("expected inline path suffix on p2 `ok` line:\n%s", out)
 	}
-	if got := strings.Count(out, "\n# path: "); got != 2 {
-		t.Errorf("path comment count: got %d, want 2 (one per Written)", got)
+	// No standalone `# path:` lines (interstitial comments) must
+	// appear — the path belongs on the test-point line itself.
+	if strings.Contains(out, "\n# path: ") {
+		t.Errorf("found standalone `# path:` line; expected inline only:\n%s", out)
 	}
 
 	// The failing entry's diagnostic details appear in some form.
@@ -219,13 +223,15 @@ func TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed(t *testing.T) {
 	if !strings.Contains(out, "# SKIP") {
 		t.Errorf("expected `# SKIP` directive, got:\n%s", out)
 	}
-	// Only the Written entry gets a `# path:` comment — skips did
-	// not write a new record, and failures have no record at all.
-	if got := strings.Count(out, "\n# path: "); got != 1 {
-		t.Errorf("path comment count: got %d, want 1 (only the Written entry)", got)
+	// Only the Written entry carries a `# path:` suffix — skips
+	// did not write a new record, and failures have no record at
+	// all. The suffix lives on the ok line itself, never on a
+	// standalone comment line.
+	if !strings.Contains(out, "ok 1 - p1 story:a # path: /a/a.json\n") {
+		t.Errorf("expected inline path suffix on the Written `ok` line:\n%s", out)
 	}
-	if !strings.Contains(out, "\n# path: /a/a.json\n") {
-		t.Errorf("expected `# path: /a/a.json` for the Written entry:\n%s", out)
+	if strings.Contains(out, "\n# path: ") {
+		t.Errorf("found standalone `# path:` line; expected inline only:\n%s", out)
 	}
 	// Ordering check: story:a `ok` before story:b `# SKIP` before
 	// story:c `not ok`.

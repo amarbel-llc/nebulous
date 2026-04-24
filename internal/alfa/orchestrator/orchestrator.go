@@ -362,14 +362,13 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit, now time.Ti
 // jobResult. Description and diagnostics shape are kept in sync with
 // the batched writer in report_tap.go so streamed and batched TAP
 // output describe the same job identically. Successful test points
-// are followed by a `# path: <archive-record-path>` comment so
-// consumers tailing the stream can locate the record without
-// cross-referencing a separate index.
+// carry the archive record path inline as a `# path: …` suffix on
+// the `ok` line itself, so consumers see the test verdict and its
+// written artifact on a single line.
 func emitStreamPoint(tw *tap.Writer, r jobResult) {
 	switch r.kind {
 	case resultOK:
-		tw.Ok(fmt.Sprintf("%s %s", r.job.PolicyID, r.job.Subject))
-		tw.Comment(pathComment(r.job.Path))
+		tw.Ok(okDescription(r.job))
 	case resultSkip:
 		tw.Skip(
 			fmt.Sprintf("%s %s", r.skip.PolicyID, r.skip.Subject),
@@ -383,12 +382,16 @@ func emitStreamPoint(tw *tap.Writer, r jobResult) {
 	}
 }
 
-// pathComment renders the post-ok comment body for a written
-// record. Shared between the streamed and batched paths so both
-// emit the same `# path: <path>` line — useful when diffing TTY
-// and pipe outputs of the same run.
-func pathComment(path string) string {
-	return "path: " + path
+// okDescription renders the description passed to tap.Writer.Ok
+// for a successful test point: `<policy> <subject> # path: <path>`.
+// The trailing `# path:` is a free-text comment suffix — TAP-14
+// parsers that only recognize `# SKIP` and `# TODO` directives
+// treat it as part of the description, while humans and tap-dancer
+// itself get a readable pointer to the record on disk.
+// Shared between the streamed and batched paths so both emit
+// byte-for-byte identical ok lines for the same job.
+func okDescription(j Job) string {
+	return fmt.Sprintf("%s %s # path: %s", j.PolicyID, j.Subject, j.Path)
 }
 
 // skipReason renders the human-readable reason shown after `# SKIP`
