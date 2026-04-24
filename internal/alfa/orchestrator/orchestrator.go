@@ -352,11 +352,15 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit, now time.Ti
 // emitStreamPoint writes a single TAP test point for one completed
 // jobResult. Description and diagnostics shape are kept in sync with
 // the batched writer in report_tap.go so streamed and batched TAP
-// output describe the same job identically.
+// output describe the same job identically. Successful test points
+// are followed by a `# path: <archive-record-path>` comment so
+// consumers tailing the stream can locate the record without
+// cross-referencing a separate index.
 func emitStreamPoint(tw *tap.Writer, r jobResult) {
 	switch r.kind {
 	case resultOK:
 		tw.Ok(fmt.Sprintf("%s %s", r.job.PolicyID, r.job.Subject))
+		tw.Comment(pathComment(r.job.Path))
 	case resultSkip:
 		tw.Skip(
 			fmt.Sprintf("%s %s", r.skip.PolicyID, r.skip.Subject),
@@ -368,6 +372,14 @@ func emitStreamPoint(tw *tap.Writer, r jobResult) {
 			"message": r.failure.Message,
 		})
 	}
+}
+
+// pathComment renders the post-ok comment body for a written
+// record. Shared between the streamed and batched paths so both
+// emit the same `# path: <path>` line — useful when diffing TTY
+// and pipe outputs of the same run.
+func pathComment(path string) string {
+	return "path: " + path
 }
 
 // skipReason renders the human-readable reason shown after `# SKIP`

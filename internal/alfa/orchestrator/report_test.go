@@ -11,8 +11,8 @@ import (
 func TestWriteTAPReport_basicShape(t *testing.T) {
 	rep := Report{
 		Written: []Job{
-			{PolicyID: "p1", Subject: "story:abc"},
-			{PolicyID: "p2", Subject: "story:abc"},
+			{PolicyID: "p1", Subject: "story:abc", Path: "/root/by-story/abc/p1.json"},
+			{PolicyID: "p2", Subject: "story:abc", Path: "/root/by-story/abc/p2.json"},
 		},
 		Failed: []JobFailure{
 			{PolicyID: "p1", Subject: "url:sha256-def", Kind: "writer-failed", Message: "permission denied"},
@@ -39,6 +39,19 @@ func TestWriteTAPReport_basicShape(t *testing.T) {
 	}
 	if got := strings.Count(out, "\nnot ok "); got != 1 {
 		t.Errorf("not ok count: got %d, want 1", got)
+	}
+
+	// Each `ok` is followed by a `# path: <record-path>` comment so
+	// consumers can locate the written record without a separate
+	// index. Failed entries do not get a path comment.
+	if !strings.Contains(out, "\n# path: /root/by-story/abc/p1.json\n") {
+		t.Errorf("expected `# path:` comment for p1 record:\n%s", out)
+	}
+	if !strings.Contains(out, "\n# path: /root/by-story/abc/p2.json\n") {
+		t.Errorf("expected `# path:` comment for p2 record:\n%s", out)
+	}
+	if got := strings.Count(out, "\n# path: "); got != 2 {
+		t.Errorf("path comment count: got %d, want 2 (one per Written)", got)
 	}
 
 	// The failing entry's diagnostic details appear in some form.
@@ -140,7 +153,7 @@ func TestWriteJSONReport_bailedOutTrue(t *testing.T) {
 // with the plan line reflecting all three slices.
 func TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed(t *testing.T) {
 	rep := Report{
-		Written: []Job{{PolicyID: "p1", Subject: "story:a"}},
+		Written: []Job{{PolicyID: "p1", Subject: "story:a", Path: "/a/a.json"}},
 		Skipped: []Skip{{
 			PolicyID:       "p1",
 			Subject:        "story:b",
@@ -161,6 +174,14 @@ func TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed(t *testing.T) {
 	}
 	if !strings.Contains(out, "# SKIP") {
 		t.Errorf("expected `# SKIP` directive, got:\n%s", out)
+	}
+	// Only the Written entry gets a `# path:` comment — skips did
+	// not write a new record, and failures have no record at all.
+	if got := strings.Count(out, "\n# path: "); got != 1 {
+		t.Errorf("path comment count: got %d, want 1 (only the Written entry)", got)
+	}
+	if !strings.Contains(out, "\n# path: /a/a.json\n") {
+		t.Errorf("expected `# path: /a/a.json` for the Written entry:\n%s", out)
 	}
 	// Ordering check: story:a `ok` before story:b `# SKIP` before
 	// story:c `not ok`.

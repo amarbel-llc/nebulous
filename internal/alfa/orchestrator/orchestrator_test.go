@@ -521,6 +521,18 @@ func TestRun_streamsTAPAsJobsComplete(t *testing.T) {
 			t.Errorf("stream missing %q in:\n%s", needle, out)
 		}
 	}
+
+	// Every successful test point is followed by a `# path:`
+	// comment pointing at the archive record that was written.
+	if got := strings.Count(out, "\n# path: "); got != 3 {
+		t.Errorf("path comment count in stream: got %d, want 3 (one per ok):\n%s", got, out)
+	}
+	for _, w := range rep.Written {
+		needle := fmt.Sprintf("\n# path: %s\n", w.Path)
+		if !strings.Contains(out, needle) {
+			t.Errorf("stream missing path comment %q in:\n%s", needle, out)
+		}
+	}
 }
 
 // seedPriorRecord writes a minimal valid archive.Record at

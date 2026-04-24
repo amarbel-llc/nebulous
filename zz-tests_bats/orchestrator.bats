@@ -127,7 +127,8 @@ function orchestrator_rejects_missing_policy_file { # @test
 function orchestrator_format_tap_emits_tap14 { # @test
   # --format=tap forces TAP output even though bats captures a pipe
   # (non-TTY). Expect the streamed header + plan line + one ok line
-  # for the single (subject, policy) pair.
+  # for the single (subject, policy) pair, followed by a `# path:`
+  # comment pointing at the archive record that was written.
   run_archive --format=tap https://example.com/
 
   assert_success
@@ -137,6 +138,14 @@ function orchestrator_format_tap_emits_tap14 { # @test
     fail "expected plan line '1..1' in output:\n$output"
   echo "$output" | grep -qE '^ok 1' ||
     fail "expected 'ok 1' line in output:\n$output"
+
+  local path_line
+  path_line=$(echo "$output" | grep -E '^# path: ' || true)
+  [[ -n $path_line ]] ||
+    fail "expected '# path: ...' comment after 'ok 1' in output:\n$output"
+  local path="${path_line#\# path: }"
+  [[ -f $path ]] ||
+    fail "path comment references nonexistent file: $path"
 }
 
 function orchestrator_format_json_explicit_matches_auto { # @test
