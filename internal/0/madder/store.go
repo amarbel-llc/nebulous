@@ -67,13 +67,12 @@ func cacheHome() string {
 // subsequent init on an existing store is reported as an error and
 // swallowed.
 func (s *Store) Init() error {
-	// `madder init -encryption none -lock-internal-files=false <storeId>`
-	// is the non-interactive init shape used by madder's own test suite;
-	// without -encryption, init fails resolving a default hash type.
+	// `madder init -encryption none <storeId>` is the non-interactive init shape
+	// used by madder's own test suite; without -encryption, init fails resolving
+	// a default hash type.
 	cmd := s.command(
 		"init",
 		"-encryption", "none",
-		"-lock-internal-files=false",
 		s.storeId,
 	)
 	var stderr bytes.Buffer
