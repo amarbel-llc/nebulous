@@ -38,9 +38,15 @@ func archiveMain(ctx context.Context, args []string) int {
 		archiveRoot = fs.String("archive-root", defaultArchiveRoot(), "directory for archive records")
 		jobs        = fs.Int("jobs", 1, "worker-pool size for concurrent captures (1 = serial)")
 		format      = fs.String("format", "auto", "output format: tap | json | auto (auto = tap on TTY, json otherwise)")
+		ttl         = fs.Duration("ttl", 0, "skip targets whose prior fully-successful capture is newer than this duration (Go duration, e.g. 24h; 0 disables)")
 	)
 
 	if err := fs.Parse(args); err != nil {
+		return 3
+	}
+
+	if *ttl < 0 {
+		fmt.Fprintf(os.Stderr, "archive-capture: --ttl must not be negative, got %s\n", *ttl)
 		return 3
 	}
 
@@ -72,6 +78,7 @@ func archiveMain(ctx context.Context, args []string) int {
 		PolicyPath:  *policyPath,
 		ArchiveRoot: *archiveRoot,
 		Jobs:        *jobs,
+		TTL:         *ttl,
 	}
 	if effectiveFormat == "tap" {
 		runArgs.StreamTAP = os.Stdout

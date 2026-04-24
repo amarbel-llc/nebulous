@@ -158,3 +158,38 @@ function orchestrator_rejects_unknown_format { # @test
     https://example.com/
   [[ $status -eq 3 ]] || fail "expected exit 3 (unknown format), got $status"
 }
+
+function orchestrator_ttl_skips_recent_fully_successful_second_run { # @test
+  # First run with --ttl=24h writes a record normally (no prior
+  # record exists). Second run with the same TTL should hit the
+  # skip gate: the captured_at is seconds old, well within 24h,
+  # and the first run fully succeeded.
+  run_archive --ttl=24h https://example.com/
+  assert_success
+  assert_equal "$(echo "$output" | jq '.written | length')" '1'
+  assert_equal "$(echo "$output" | jq '.skipped | length')" '0'
+
+  local first_path
+  first_path=$(echo "$output" | jq -r '.written[0].path')
+  [[ -f $first_path ]] || fail "expected record at $first_path after first run"
+  local first_captured_at
+  first_captured_at=$(jq -r '.captured_at' "$first_path")
+
+  run_archive --ttl=24h https://example.com/
+  assert_success
+  assert_equal "$(echo "$output" | jq '.written | length')" '0'
+  assert_equal "$(echo "$output" | jq '.failed | length')" '0'
+  assert_equal "$(echo "$output" | jq '.skipped | length')" '1'
+  assert_equal "$(echo "$output" | jq -r '.skipped[0].path')" "$first_path"
+  assert_equal "$(echo "$output" | jq -r '.skipped[0].last_captured_at')" "$first_captured_at"
+}
+
+function orchestrator_ttl_rejects_negative { # @test
+  local bin="${NEBULOUS_BIN:-nebulous}"
+  run "$bin" archive-capture \
+    --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
+    --archive-root="$BATS_TEST_TMPDIR/archives" \
+    --ttl=-1h \
+    https://example.com/
+  [[ $status -eq 3 ]] || fail "expected exit 3 (negative ttl), got $status"
+}

@@ -76,6 +76,18 @@ type Args struct {
 	// additional live-progress channel, not a replacement for the
 	// programmatic result.
 	StreamTAP io.Writer
+
+	// TTL, when > 0, enables the "skip recent captures" gate: before
+	// dispatching each (subject, policy) job, the orchestrator reads
+	// the existing archive record (if any) at recordPath() and, when
+	// the record's captured_at is within (now - TTL, now] AND the
+	// record has no top-level errors and no per-capture errors, the
+	// job is skipped — the capturer is never invoked and the record
+	// on disk is left untouched. Future timestamps (captured_at > now,
+	// e.g. clock skew) are treated as "no record" and the job runs
+	// normally. Zero value disables the gate entirely and all jobs
+	// run unconditionally.
+	TTL time.Duration
 }
 
 // Job records one successful (policy, subject) archive result.
@@ -93,10 +105,22 @@ type JobFailure struct {
 	Message  string
 }
 
+// Skip records one (policy, subject) job that was not run because a
+// fresh, fully-successful record already existed within Args.TTL.
+// Path is the archive record path that gated the skip;
+// LastCapturedAt is the prior record's captured_at value.
+type Skip struct {
+	PolicyID       string
+	Subject        string
+	Path           string
+	LastCapturedAt time.Time
+}
+
 // Report is the accumulated outcome of a Run.
 type Report struct {
 	Written   []Job
 	Failed    []JobFailure
+	Skipped   []Skip
 	BailedOut bool
 }
 
@@ -143,14 +167,28 @@ type jobUnit struct {
 	pol  policy.Policy
 }
 
-// jobResult is runOneJob's return value, carrying either a Job
-// (success) or a JobFailure (error). Kept as a value type so worker
-// goroutines never touch shared Report state.
+// jobResult is runOneJob's return value. Exactly one of kind's
+// values is meaningful for the corresponding job/failure/skip
+// field. Kept as a value type so worker goroutines never touch
+// shared Report state.
 type jobResult struct {
-	ok      bool
+	kind    jobResultKind
 	job     Job
 	failure JobFailure
+	skip    Skip
 }
+
+// jobResultKind distinguishes the three outcomes a worker can
+// produce. The zero value is resultFail so that an improperly-
+// initialized jobResult surfaces as an error in tests rather than
+// silently counting as a success.
+type jobResultKind int
+
+const (
+	resultFail jobResultKind = iota
+	resultOK
+	resultSkip
+)
 
 // run is the unexported composition function. Shared between Run()
 // (production) and tests (stub deps). Kept separate from Run only to
@@ -178,15 +216,21 @@ func run(ctx context.Context, args Args, d Deps) Report {
 		}
 	}
 
-	report := runJobs(ctx, args, d, jobs)
+	// Capture "now" once at run start so both assembleRecord and the
+	// TTL skip gate see the same instant across every worker — no
+	// race between a TTL check and a sibling worker's clock read.
+	now := d.TimeNow()
+
+	report := runJobs(ctx, args, d, jobs, now)
 	sortReport(&report)
 	return report
 }
 
 // runJobs fans jobs out over args.Jobs workers and collects results
 // into a Report, honoring the window-based bailout. Returns an
-// unsorted Report — callers sort before emitting.
-func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
+// unsorted Report — callers sort before emitting. now is the
+// shared run-start clock used by the TTL gate and record assembly.
+func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit, now time.Time) Report {
 	if len(jobs) == 0 {
 		return Report{}
 	}
@@ -236,7 +280,7 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				resCh <- runOneJob(runCtx, d, args, j.subj, j.pol)
+				resCh <- runOneJob(runCtx, d, args, j.subj, j.pol, now)
 			}
 		}()
 	}
@@ -261,22 +305,35 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 		if bailed {
 			continue
 		}
-		if r.ok {
+		switch r.kind {
+		case resultOK:
 			report.Written = append(report.Written, r.job)
-		} else {
+		case resultFail:
 			report.Failed = append(report.Failed, r.failure)
+		case resultSkip:
+			report.Skipped = append(report.Skipped, r.skip)
 		}
 		if stream != nil {
 			emitStreamPoint(stream, r)
 		}
 
+		// Skips do not advance or reset the circuit-breaker window —
+		// they carry no signal about run health. Treating a skip as
+		// ok would let a pattern like skip/fail/fail/fail avoid
+		// bailing even when every real attempt failed; treating it
+		// as a failure would trip the breaker on an all-skip run.
+		if r.kind == resultSkip {
+			continue
+		}
+
+		failed := r.kind == resultFail
 		if windowLen < 3 {
-			window[windowLen] = !r.ok
+			window[windowLen] = failed
 			windowLen++
 		} else {
 			window[0] = window[1]
 			window[1] = window[2]
-			window[2] = !r.ok
+			window[2] = failed
 		}
 
 		if windowLen == 3 && window[0] && window[1] && window[2] {
@@ -297,14 +354,28 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 // the batched writer in report_tap.go so streamed and batched TAP
 // output describe the same job identically.
 func emitStreamPoint(tw *tap.Writer, r jobResult) {
-	if r.ok {
+	switch r.kind {
+	case resultOK:
 		tw.Ok(fmt.Sprintf("%s %s", r.job.PolicyID, r.job.Subject))
-		return
+	case resultSkip:
+		tw.Skip(
+			fmt.Sprintf("%s %s", r.skip.PolicyID, r.skip.Subject),
+			skipReason(r.skip),
+		)
+	case resultFail:
+		tw.NotOk(fmt.Sprintf("%s %s", r.failure.PolicyID, r.failure.Subject), map[string]string{
+			"kind":    r.failure.Kind,
+			"message": r.failure.Message,
+		})
 	}
-	tw.NotOk(fmt.Sprintf("%s %s", r.failure.PolicyID, r.failure.Subject), map[string]string{
-		"kind":    r.failure.Kind,
-		"message": r.failure.Message,
-	})
+}
+
+// skipReason renders the human-readable reason shown after `# SKIP`
+// on a TAP test point. Shared between the streamed and batched
+// paths so outputs match. Example: "captured 3h14m ago at
+// 2026-04-20T12:00:00.000Z".
+func skipReason(s Skip) string {
+	return fmt.Sprintf("captured at %s", archive.FormatTimestamp(s.LastCapturedAt))
 }
 
 // bailOutReason is the human-readable reason attached to the TAP
@@ -312,8 +383,8 @@ func emitStreamPoint(tw *tap.Writer, r jobResult) {
 // the batched writer so both paths produce the same text.
 const bailOutReason = "3 consecutive archive job failures"
 
-// sortReport orders report.Written and report.Failed by
-// (subject, policy_id) so output is deterministic regardless of
+// sortReport orders report.Written, report.Failed, and report.Skipped
+// by (subject, policy_id) so output is deterministic regardless of
 // worker completion order.
 func sortReport(r *Report) {
 	sort.Slice(r.Written, func(i, j int) bool {
@@ -327,6 +398,12 @@ func sortReport(r *Report) {
 			return r.Failed[i].Subject < r.Failed[j].Subject
 		}
 		return r.Failed[i].PolicyID < r.Failed[j].PolicyID
+	})
+	sort.Slice(r.Skipped, func(i, j int) bool {
+		if r.Skipped[i].Subject != r.Skipped[j].Subject {
+			return r.Skipped[i].Subject < r.Skipped[j].Subject
+		}
+		return r.Skipped[i].PolicyID < r.Skipped[j].PolicyID
 	})
 }
 
@@ -363,10 +440,12 @@ func buildSubjects(args Args, d Deps) []subject {
 
 // runOneJob handles one (policy, subject) archive attempt. Returns
 // a jobResult by value so it can be called from worker goroutines
-// without touching shared Report state.
-func runOneJob(ctx context.Context, d Deps, args Args, subj subject, pol policy.Policy) jobResult {
+// without touching shared Report state. now is the shared run-start
+// clock — used both as the TTL reference and as the new record's
+// captured_at.
+func runOneJob(ctx context.Context, d Deps, args Args, subj subject, pol policy.Policy, now time.Time) jobResult {
 	fail := func(kind, message string) jobResult {
-		return jobResult{failure: JobFailure{
+		return jobResult{kind: resultFail, failure: JobFailure{
 			PolicyID: pol.ID, Subject: subj.label,
 			Kind: kind, Message: message,
 		}}
@@ -374,6 +453,14 @@ func runOneJob(ctx context.Context, d Deps, args Args, subj subject, pol policy.
 
 	if subj.err != "" {
 		return fail("story-resolve-failed", subj.err)
+	}
+
+	path := recordPath(args.ArchiveRoot, subj.label, pol.ID)
+
+	if args.TTL > 0 {
+		if skip, ok := checkTTLSkip(path, pol.ID, subj.label, args.TTL, now); ok {
+			return jobResult{kind: resultSkip, skip: skip}
+		}
 	}
 
 	url, err := policy.ExpandURL(pol.URL, policy.TemplateContext{Story: subj.story})
@@ -386,16 +473,60 @@ func runOneJob(ctx context.Context, d Deps, args Args, subj subject, pol policy.
 		return fail("capturer-failed", err.Error())
 	}
 
-	record := assembleRecord(subj, url, pol, out, d.TimeNow())
-	path := recordPath(args.ArchiveRoot, subj.label, pol.ID)
+	record := assembleRecord(subj, url, pol, out, now)
 	if err := d.WriteArchive(ctx, path, record, d.HistoryStore); err != nil {
 		return fail("archive-write-failed", err.Error())
 	}
 
 	return jobResult{
-		ok:  true,
-		job: Job{PolicyID: pol.ID, Subject: subj.label, Path: path},
+		kind: resultOK,
+		job:  Job{PolicyID: pol.ID, Subject: subj.label, Path: path},
 	}
+}
+
+// checkTTLSkip returns a Skip result when the existing archive
+// record at path was captured within ttl of now AND every capture
+// in the prior record succeeded. Any other outcome — file absent,
+// unreadable, invalid JSON, captured_at in the future, older than
+// ttl, or carrying any error — returns (_, false) so the caller
+// runs the job normally.
+//
+// The "fully successful" check looks at both the top-level Errors
+// slice and each capture's Error field. A partially-failed prior
+// run will not be skipped, so retries of a broken run still
+// execute even inside the TTL window.
+func checkTTLSkip(path, policyID, subjectLabel string, ttl time.Duration, now time.Time) (Skip, bool) {
+	rec, err := archive.Read(path)
+	if err != nil {
+		return Skip{}, false
+	}
+	ts, err := archive.ParseTimestamp(rec.CapturedAt)
+	if err != nil {
+		return Skip{}, false
+	}
+	// Future timestamps (clock skew, restored backup) are treated as
+	// if no record existed — rerun the job rather than perpetuate a
+	// bad timestamp.
+	if ts.After(now) {
+		return Skip{}, false
+	}
+	if now.Sub(ts) > ttl {
+		return Skip{}, false
+	}
+	if len(rec.Errors) > 0 {
+		return Skip{}, false
+	}
+	for _, c := range rec.Captures {
+		if c.Error != nil {
+			return Skip{}, false
+		}
+	}
+	return Skip{
+		PolicyID:       policyID,
+		Subject:        subjectLabel,
+		Path:           path,
+		LastCapturedAt: ts,
+	}, true
 }
 
 func recordPath(root, label, policyID string) string {

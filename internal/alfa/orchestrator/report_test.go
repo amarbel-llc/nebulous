@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteTAPReport_basicShape(t *testing.T) {
@@ -130,5 +131,97 @@ func TestWriteJSONReport_bailedOutTrue(t *testing.T) {
 	}
 	if b, _ := out["bailed_out"].(bool); !b {
 		t.Errorf("bailed_out should be true, got %v", out["bailed_out"])
+	}
+}
+
+// TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed verifies
+// the batched TAP writer produces `# SKIP` test points in the
+// Written → Skipped → Failed ordering documented in the godoc,
+// with the plan line reflecting all three slices.
+func TestWriteTAPReport_emitsSkippedBetweenWrittenAndFailed(t *testing.T) {
+	rep := Report{
+		Written: []Job{{PolicyID: "p1", Subject: "story:a"}},
+		Skipped: []Skip{{
+			PolicyID:       "p1",
+			Subject:        "story:b",
+			Path:           "/a/b.json",
+			LastCapturedAt: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
+		}},
+		Failed: []JobFailure{{
+			PolicyID: "p1", Subject: "story:c", Kind: "capturer-failed", Message: "boom",
+		}},
+	}
+	var buf bytes.Buffer
+	if err := WriteTAPReport(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\n1..3\n") {
+		t.Errorf("plan should be 1..3, got:\n%s", out)
+	}
+	if !strings.Contains(out, "# SKIP") {
+		t.Errorf("expected `# SKIP` directive, got:\n%s", out)
+	}
+	// Ordering check: story:a `ok` before story:b `# SKIP` before
+	// story:c `not ok`.
+	iWritten := strings.Index(out, "story:a")
+	iSkip := strings.Index(out, "story:b")
+	iFail := strings.Index(out, "story:c")
+	if iWritten < 0 || iSkip < 0 || iFail < 0 {
+		t.Fatalf("missing one of the expected subjects in:\n%s", out)
+	}
+	if !(iWritten < iSkip && iSkip < iFail) {
+		t.Errorf("order wrong: written=%d skip=%d fail=%d in:\n%s", iWritten, iSkip, iFail, out)
+	}
+}
+
+// TestWriteJSONReport_includesSkippedShape verifies the JSON shape
+// exposes `skipped` as an array of objects with the expected field
+// names, and that last_captured_at round-trips through the
+// archive timestamp format.
+func TestWriteJSONReport_includesSkippedShape(t *testing.T) {
+	ts := time.Date(2026, 4, 20, 12, 34, 56, 789_000_000, time.UTC)
+	rep := Report{
+		Skipped: []Skip{{
+			PolicyID:       "p1",
+			Subject:        "story:abc",
+			Path:           "/root/by-story/abc/p1.json",
+			LastCapturedAt: ts,
+		}},
+	}
+	var buf bytes.Buffer
+	if err := WriteJSONReport(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	skipped, ok := out["skipped"].([]any)
+	if !ok || len(skipped) != 1 {
+		t.Fatalf("skipped: %+v", out["skipped"])
+	}
+	s := skipped[0].(map[string]any)
+	if s["policy_id"] != "p1" {
+		t.Errorf("policy_id: got %v", s["policy_id"])
+	}
+	if s["subject"] != "story:abc" {
+		t.Errorf("subject: got %v", s["subject"])
+	}
+	if s["path"] != "/root/by-story/abc/p1.json" {
+		t.Errorf("path: got %v", s["path"])
+	}
+	if got, want := s["last_captured_at"], "2026-04-20T12:34:56.789Z"; got != want {
+		t.Errorf("last_captured_at: got %q, want %q", got, want)
+	}
+	// When Skipped is empty, the field still serializes as [] so
+	// jq consumers don't have to handle null.
+	rep2 := Report{}
+	var buf2 bytes.Buffer
+	_ = WriteJSONReport(&buf2, rep2)
+	var out2 map[string]any
+	_ = json.Unmarshal(buf2.Bytes(), &out2)
+	if out2["skipped"] == nil {
+		t.Error("skipped should serialize as [] not null when empty")
 	}
 }

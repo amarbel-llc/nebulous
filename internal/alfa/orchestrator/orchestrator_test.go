@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -519,6 +520,299 @@ func TestRun_streamsTAPAsJobsComplete(t *testing.T) {
 		if !strings.Contains(out, needle) {
 			t.Errorf("stream missing %q in:\n%s", needle, out)
 		}
+	}
+}
+
+// seedPriorRecord writes a minimal valid archive.Record at
+// recordPath(root, "story:"+storyID, policyID). withCaptureError
+// toggles between a fully-successful prior run and one whose single
+// capture carries an Error — used by TTL tests to drive the
+// skip-criterion logic.
+func seedPriorRecord(t *testing.T, root, storyID, policyID string, capturedAt time.Time, withCaptureError bool) string {
+	t.Helper()
+	path := filepath.Join(root, "by-story", storyID, policyID+".json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	c := archive.Capture{Name: "text"}
+	if withCaptureError {
+		c.Error = &archive.Error{Kind: "capturer-failed", Message: "simulated prior failure"}
+	} else {
+		c.Spec = &archive.ArtifactRef{ID: "blake2b256-s", Size: 10, MediaType: "application/vnd.web-capture-archive.spec+json"}
+		c.Payload = &archive.ArtifactRef{ID: "blake2b256-p", Size: 20, MediaType: "text/plain; charset=utf-8"}
+	}
+	rec := &archive.Record{
+		Schema:     archive.Schema,
+		Subject:    "story:" + storyID,
+		URL:        "https://example.com/" + storyID,
+		PolicyID:   policyID,
+		CapturedAt: archive.FormatTimestamp(capturedAt),
+		Captures:   []archive.Capture{c},
+		Errors:     []archive.Error{},
+	}
+	if err := archive.Write(path, rec); err != nil {
+		t.Fatalf("seed prior record: %v", err)
+	}
+	return path
+}
+
+// countingDeps wraps stubDeps with an atomic RunCapturer counter so
+// tests can assert whether the capturer was invoked.
+func countingDeps(policies []policy.Policy, out capturer.BatchOutput, counter *atomic.Int32) Deps {
+	d := stubDeps(policies, out)
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		counter.Add(1)
+		return out, nil
+	}
+	return d
+}
+
+// TestRun_ttlSkipsFreshFullySuccessful verifies that a prior
+// fully-successful record within the TTL window causes the job to
+// skip: no capturer invocation, report.Skipped populated, no
+// Written, no Failed, exit 0.
+func TestRun_ttlSkipsFreshFullySuccessful(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	// Prior record 1h old — well within 24h TTL.
+	capturedAt := fixedTime().Add(-1 * time.Hour)
+	path := seedPriorRecord(t, archiveRoot, "abc", "p1", capturedAt, false)
+
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		TTL:         24 * time.Hour,
+	}
+	rep := run(context.Background(), args, d)
+
+	if n := calls.Load(); n != 0 {
+		t.Errorf("capturer should not have been called, got %d invocations", n)
+	}
+	if len(rep.Written) != 0 {
+		t.Errorf("no writes expected, got %d: %+v", len(rep.Written), rep.Written)
+	}
+	if len(rep.Failed) != 0 {
+		t.Errorf("no failures expected, got %d: %+v", len(rep.Failed), rep.Failed)
+	}
+	if len(rep.Skipped) != 1 {
+		t.Fatalf("skipped: got %d, want 1", len(rep.Skipped))
+	}
+	s := rep.Skipped[0]
+	if s.PolicyID != "p1" {
+		t.Errorf("skipped policy_id: got %q", s.PolicyID)
+	}
+	if s.Subject != "story:abc" {
+		t.Errorf("skipped subject: got %q", s.Subject)
+	}
+	if s.Path != path {
+		t.Errorf("skipped path: got %q, want %q", s.Path, path)
+	}
+	if !s.LastCapturedAt.Equal(capturedAt) {
+		t.Errorf("skipped last_captured_at: got %v, want %v", s.LastCapturedAt, capturedAt)
+	}
+	if rep.ExitCode() != 0 {
+		t.Errorf("exit code: got %d, want 0 (skips are not failures)", rep.ExitCode())
+	}
+}
+
+// TestRun_ttlRunsStaleRecord verifies a prior record older than
+// TTL does NOT skip — the capturer is invoked and the record is
+// overwritten.
+func TestRun_ttlRunsStaleRecord(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	// Prior record 48h old vs. 24h TTL — must run.
+	capturedAt := fixedTime().Add(-48 * time.Hour)
+	seedPriorRecord(t, archiveRoot, "abc", "p1", capturedAt, false)
+
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		TTL:         24 * time.Hour,
+	}
+	rep := run(context.Background(), args, d)
+
+	if n := calls.Load(); n != 1 {
+		t.Errorf("capturer should have been called once, got %d", n)
+	}
+	if len(rep.Skipped) != 0 {
+		t.Errorf("no skips expected, got %d: %+v", len(rep.Skipped), rep.Skipped)
+	}
+	if len(rep.Written) != 1 {
+		t.Fatalf("written: got %d, want 1", len(rep.Written))
+	}
+}
+
+// TestRun_ttlRunsWhenPriorHadCaptureError verifies that a prior
+// record with a per-capture Error (even if within TTL) is treated
+// as a candidate for retry — the capturer is invoked and the
+// record is overwritten.
+func TestRun_ttlRunsWhenPriorHadCaptureError(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	capturedAt := fixedTime().Add(-1 * time.Hour)
+	seedPriorRecord(t, archiveRoot, "abc", "p1", capturedAt, true /* withCaptureError */)
+
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		TTL:         24 * time.Hour,
+	}
+	rep := run(context.Background(), args, d)
+
+	if n := calls.Load(); n != 1 {
+		t.Errorf("capturer should have been called on prior-failure record, got %d", n)
+	}
+	if len(rep.Skipped) != 0 {
+		t.Errorf("no skips expected when prior had capture error, got %+v", rep.Skipped)
+	}
+	if len(rep.Written) != 1 {
+		t.Errorf("expected 1 written, got %d", len(rep.Written))
+	}
+}
+
+// TestRun_ttlRunsWhenFutureTimestamp verifies that a prior record
+// with captured_at > now (clock skew, restored backup) is treated
+// as absent and the job runs normally.
+func TestRun_ttlRunsWhenFutureTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	capturedAt := fixedTime().Add(1 * time.Hour) // future
+	seedPriorRecord(t, archiveRoot, "abc", "p1", capturedAt, false)
+
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		TTL:         24 * time.Hour,
+	}
+	rep := run(context.Background(), args, d)
+
+	if n := calls.Load(); n != 1 {
+		t.Errorf("capturer should have been called on future-timestamp record, got %d", n)
+	}
+	if len(rep.Skipped) != 0 {
+		t.Errorf("no skips expected with future captured_at, got %+v", rep.Skipped)
+	}
+}
+
+// TestRun_ttlZeroDisablesGate verifies that TTL=0 (the default)
+// means the gate is off: even a fresh, fully-successful record is
+// overwritten.
+func TestRun_ttlZeroDisablesGate(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	seedPriorRecord(t, archiveRoot, "abc", "p1", fixedTime().Add(-1*time.Second), false)
+
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		// TTL unset (= 0)
+	}
+	rep := run(context.Background(), args, d)
+
+	if n := calls.Load(); n != 1 {
+		t.Errorf("capturer should have been called when TTL=0, got %d", n)
+	}
+	if len(rep.Skipped) != 0 {
+		t.Errorf("no skips expected with TTL=0, got %+v", rep.Skipped)
+	}
+}
+
+// TestRun_ttlStreamsSkipDirective verifies that StreamTAP receives
+// `ok N - <policy> <subject> # SKIP …` for skipped jobs.
+func TestRun_ttlStreamsSkipDirective(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	capturedAt := fixedTime().Add(-1 * time.Hour)
+	seedPriorRecord(t, archiveRoot, "abc", "p1", capturedAt, false)
+
+	var stream bytes.Buffer
+	var calls atomic.Int32
+	d := countingDeps(singlePolicySingleCapture(), successBatchOutput(), &calls)
+
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		TTL:         24 * time.Hour,
+		StreamTAP:   &stream,
+	}
+	rep := run(context.Background(), args, d)
+
+	if len(rep.Skipped) != 1 {
+		t.Fatalf("skipped: got %d, want 1", len(rep.Skipped))
+	}
+	out := stream.String()
+	if !strings.Contains(out, "# SKIP") {
+		t.Errorf("stream should contain `# SKIP` directive, got:\n%s", out)
+	}
+	if !strings.Contains(out, "p1 story:abc") {
+		t.Errorf("stream should reference the skipped job, got:\n%s", out)
+	}
+}
+
+// TestRun_ttlBailoutIgnoresSkips verifies that skips neither
+// advance nor reset the circuit-breaker window: a skipped job
+// sandwiched between three failures still trips the breaker.
+func TestRun_ttlBailoutIgnoresSkips(t *testing.T) {
+	dir := t.TempDir()
+	archiveRoot := filepath.Join(dir, "archives")
+
+	// Seed a fresh fully-successful record for subject "b" so job
+	// #2 (policy p1 on subject b) will skip. Subjects a, c, d, e
+	// have no prior record so they'll run through the (failing)
+	// capturer.
+	capturedAt := fixedTime().Add(-1 * time.Hour)
+	seedPriorRecord(t, archiveRoot, "b", "p1", capturedAt, false)
+
+	d := stubDeps(singlePolicySingleCapture(), capturer.BatchOutput{})
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		return capturer.BatchOutput{}, errors.New("simulated failure")
+	}
+
+	args := Args{
+		StoryIDs:    []string{"a", "b", "c", "d", "e"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: archiveRoot,
+		Jobs:        1,
+		TTL:         24 * time.Hour,
+	}
+	rep := run(context.Background(), args, d)
+
+	if !rep.BailedOut {
+		t.Errorf("expected BailedOut=true — a sits in fail window, b skips (no window impact), c+d+e fail to trip")
+	}
+	if len(rep.Skipped) != 1 {
+		t.Errorf("skipped count: got %d, want 1", len(rep.Skipped))
+	}
+	if len(rep.Failed) != 3 {
+		t.Errorf("failed count: got %d, want 3", len(rep.Failed))
 	}
 }
 
