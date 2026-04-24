@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +102,57 @@ func archiveMain(ctx context.Context, args []string) int {
 		}
 	}
 	return report.ExitCode()
+}
+
+// archiveNewlyIndexed runs the capture orchestrator against a list
+// of starred-story hashes that became cached during the preceding
+// `nebulous fetch` run. Best-effort relative to fetch — any error
+// building deps or during capture is logged to stderr but does not
+// propagate: an archive hiccup must not mask a successful sync of
+// the primary cache. Skips with a log message when the policy file
+// is absent (a fresh environment with no archive config). TAP
+// progress streams to stdout with color auto-detected from stdout's
+// TTY-ness; fetch's own log.Printf output is on stderr, so the two
+// streams stay interleaved cleanly.
+func archiveNewlyIndexed(ctx context.Context, storyIDs []string, jobs int) {
+	if len(storyIDs) == 0 {
+		return
+	}
+
+	policyPath := defaultPolicyPath()
+	if _, err := os.Stat(policyPath); errors.Is(err, os.ErrNotExist) {
+		log.Printf("[archive] no policy at %s — skipping post-fetch archive pass", policyPath)
+		return
+	} else if err != nil {
+		log.Printf("[archive] stat %s: %v (skipping post-fetch archive pass)", policyPath, err)
+		return
+	}
+
+	deps, err := newArchiveDeps(ctx)
+	if err != nil {
+		log.Printf("[archive] deps: %v (skipping post-fetch archive pass)", err)
+		return
+	}
+
+	if jobs < 1 {
+		jobs = 1
+	}
+	log.Printf("[archive] capturing %d newly-indexed stories (jobs=%d)", len(storyIDs), jobs)
+
+	report := orchestrator.Run(ctx, orchestrator.Args{
+		StoryIDs:       storyIDs,
+		PolicyPath:     policyPath,
+		ArchiveRoot:    defaultArchiveRoot(),
+		Jobs:           jobs,
+		StreamTAP:      os.Stdout,
+		StreamTAPColor: term.IsTerminal(int(os.Stdout.Fd())),
+	}, deps)
+
+	log.Printf("[archive] done: written=%d failed=%d skipped=%d bailed_out=%v",
+		len(report.Written), len(report.Failed), len(report.Skipped), report.BailedOut)
+	for _, f := range report.Failed {
+		log.Printf("[archive] fail: %s %s: %s: %s", f.PolicyID, f.Subject, f.Kind, f.Message)
+	}
 }
 
 // resolveCaptureFormat turns the user-supplied --format value into a

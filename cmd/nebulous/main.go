@@ -27,7 +27,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch                Progressively cache feeds, starred stories, and original text\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch [--archive-jobs=N] [--no-archive]\n")
+		fmt.Fprintf(os.Stderr, "                                Progressively cache feeds, starred stories, and original text;\n")
+		fmt.Fprintf(os.Stderr, "                                archive-capture runs on newly-indexed stories by default\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous archive-capture [TARGET...]  Archive stories / URLs via RFC 0001 capture pipeline\n")
@@ -114,6 +116,11 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "fetch" {
+		fetchFlags := flag.NewFlagSet("fetch", flag.ExitOnError)
+		archiveJobs := fetchFlags.Int("archive-jobs", 1, "worker-pool size for the post-fetch archive pass (1 = serial)")
+		noArchive := fetchFlags.Bool("no-archive", false, "skip the post-fetch archive-capture pass on newly-indexed stories")
+		_ = fetchFlags.Parse(flag.Args()[1:])
+
 		token := os.Getenv("NEWSBLUR_TOKEN")
 		if token == "" {
 			log.Fatal("NEWSBLUR_TOKEN environment variable is required")
@@ -127,8 +134,13 @@ func main() {
 			log.Fatalf("fetch: cache setup: %v", err)
 		}
 
-		if err := fetchAll(ctx, client); err != nil {
+		newlyIndexed, err := fetchAll(ctx, client)
+		if err != nil {
 			log.Fatalf("fetch: %v", err)
+		}
+
+		if !*noArchive && len(newlyIndexed) > 0 {
+			archiveNewlyIndexed(ctx, newlyIndexed, *archiveJobs)
 		}
 		return
 	}
@@ -252,7 +264,13 @@ func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
 	return newsblur.NewCacheOnlyClient(manifestPath, sink)
 }
 
-func fetchAll(ctx context.Context, client *newsblur.Client) error {
+// fetchAll runs all three ingestion phases (feeds, starred stories,
+// original text) and returns the subset of starred-story hashes that
+// were missing from the cache before the run and are present after.
+// The caller uses that list to drive the post-fetch archive pass.
+// Preserves phase-2-fetch order so archive-capture processes stories
+// in the same sequence NewsBlur returned them.
+func fetchAll(ctx context.Context, client *newsblur.Client) ([]string, error) {
 	// Phase 1: Feeds metadata
 	log.Println("[feeds] fetching feed list...")
 	if _, err := client.Feeds(ctx, false, true, false); err != nil {
@@ -262,23 +280,23 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 	}
 
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Phase 2: Hash manifest + missing story fetch
 	log.Println("[starred] fetching hash manifest...")
 	raw, err := client.StarredStoryHashes(ctx)
 	if err != nil {
-		return fmt.Errorf("fetching hashes: %w", err)
+		return nil, fmt.Errorf("fetching hashes: %w", err)
 	}
 
 	if err := client.PutCachedStarredStoryHashes(raw); err != nil {
-		return fmt.Errorf("caching hash manifest: %w", err)
+		return nil, fmt.Errorf("caching hash manifest: %w", err)
 	}
 
 	hashes, err := newsblur.ParseStarredHashes(raw)
 	if err != nil {
-		return fmt.Errorf("parsing hashes: %w", err)
+		return nil, fmt.Errorf("parsing hashes: %w", err)
 	}
 
 	var missingStories []string
@@ -294,13 +312,13 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 	if len(missingStories) > 0 {
 		fetched, err := fetchStarredStoriesByHash(ctx, client, missingStories)
 		if err != nil {
-			return fmt.Errorf("fetching starred stories: %w", err)
+			return nil, fmt.Errorf("fetching starred stories: %w", err)
 		}
 		log.Printf("[starred] fetched %d/%d stories", fetched, len(missingStories))
 	}
 
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Phase 3: Original text for starred story hashes
@@ -324,7 +342,24 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 
 	log.Printf("[done] feeds: cached, stories: %d, original text: %d/%d cached",
 		len(hashes), len(hashes)-len(missingText), len(hashes))
-	return nil
+
+	// Surface the set that landed in the cache during this run,
+	// preserving the order we originally saw them missing. Used
+	// by the fetch subcommand to drive the post-fetch archive pass.
+	return newlyIndexedHashes(missingStories, client.HasCachedStarredStory), nil
+}
+
+// newlyIndexedHashes filters wasMissing down to the hashes that are
+// now reported present by isCached. Pure for testability — the
+// caller passes in any predicate over the starred-story cache.
+func newlyIndexedHashes(wasMissing []string, isCached func(hash string) bool) []string {
+	out := make([]string, 0, len(wasMissing))
+	for _, h := range wasMissing {
+		if isCached(h) {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // adaptiveBackoff learns from rate limit bursts. After a burst resolves
