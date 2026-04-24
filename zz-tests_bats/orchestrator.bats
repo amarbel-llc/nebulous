@@ -123,3 +123,38 @@ function orchestrator_rejects_missing_policy_file { # @test
   assert_equal "$(echo "$output" | jq '.failed | length')" '1'
   assert_equal "$(echo "$output" | jq -r '.failed[0].kind')" 'policy-load-failed'
 }
+
+function orchestrator_format_tap_emits_tap14 { # @test
+  # --format=tap forces TAP output even though bats captures a pipe
+  # (non-TTY). Expect the streamed header + plan line + one ok line
+  # for the single (subject, policy) pair.
+  run_archive --format=tap https://example.com/
+
+  assert_success
+  [[ ${lines[0]} == 'TAP version 14' ]] ||
+    fail "first line should be TAP header, got: ${lines[0]}"
+  echo "$output" | grep -qE '^1\.\.1$' ||
+    fail "expected plan line '1..1' in output:\n$output"
+  echo "$output" | grep -qE '^ok 1' ||
+    fail "expected 'ok 1' line in output:\n$output"
+}
+
+function orchestrator_format_json_explicit_matches_auto { # @test
+  # --format=json on a pipe matches the default (auto) behavior —
+  # same single JSON document with written/failed/bailed_out.
+  run_archive --format=json https://example.com/
+
+  assert_success
+  assert_equal "$(echo "$output" | jq -r '.bailed_out')" 'false'
+  assert_equal "$(echo "$output" | jq '.written | length')" '1'
+}
+
+function orchestrator_rejects_unknown_format { # @test
+  local bin="${NEBULOUS_BIN:-nebulous}"
+  run "$bin" archive-capture \
+    --policy="$BATS_TEST_TMPDIR/nebulous.toml" \
+    --archive-root="$BATS_TEST_TMPDIR/archives" \
+    --format=xml \
+    https://example.com/
+  [[ $status -eq 3 ]] || fail "expected exit 3 (unknown format), got $status"
+}

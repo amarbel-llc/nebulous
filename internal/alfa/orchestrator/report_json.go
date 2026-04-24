@@ -5,9 +5,12 @@ import (
 	"io"
 )
 
-// writeJSONReport emits a single JSON object describing the Report,
+// WriteJSONReport emits a single JSON object describing the Report,
 // pretty-printed with two-space indent. Intended for non-TTY
-// stdout, where a tool like `jq` is the likely consumer.
+// stdout, where a tool like `jq` is the likely consumer. Unlike
+// Args.StreamTAP, this is an atomic end-of-run emission — the whole
+// report is buffered into a single JSON document and flushed in one
+// Write call.
 //
 // Shape matches the design doc:
 //
@@ -18,7 +21,7 @@ import (
 //	}
 //
 // A terminal `\n` is appended (json.Encoder convention).
-func writeJSONReport(w io.Writer, r Report) error {
+func WriteJSONReport(w io.Writer, r Report) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(reportJSON{
@@ -26,15 +29,6 @@ func writeJSONReport(w io.Writer, r Report) error {
 		Failed:    toJSONFailures(r.Failed),
 		BailedOut: r.BailedOut,
 	})
-}
-
-// EmitReport dispatches the Report to its TTY-appropriate format:
-// TAP-14 when tty is true (interactive terminal), JSON otherwise.
-func EmitReport(w io.Writer, r Report, tty bool) error {
-	if tty {
-		return writeTAPReport(w, r)
-	}
-	return writeJSONReport(w, r)
 }
 
 // reportJSON / jsonJob / jsonFailure are the lowercased-field shapes

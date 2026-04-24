@@ -181,8 +181,10 @@ archive-recent n="5" jobs="1": build-go
   watch_pid=$!
   trap 'kill "$watch_pid" 2>/dev/null || true' EXIT
 
+  # --format=tap streams TAP-14 lines to the log as jobs complete, so
+  # `tail -f "$log"` shows live per-job progress during the run.
   ./build/debug/nebulous corpus-list -limit {{n}} \
-    | ./build/debug/nebulous archive-capture --jobs={{jobs}} - \
+    | ./build/debug/nebulous archive-capture --jobs={{jobs}} --format=tap - \
     > "$log" 2>&1
   rc=$?
 

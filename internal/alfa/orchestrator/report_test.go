@@ -19,7 +19,7 @@ func TestWriteTAPReport_basicShape(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := writeTAPReport(&buf, rep); err != nil {
+	if err := WriteTAPReport(&buf, rep); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -63,7 +63,7 @@ func TestWriteTAPReport_bailOutEmitsBailLine(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := writeTAPReport(&buf, rep); err != nil {
+	if err := WriteTAPReport(&buf, rep); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "Bail out!") {
@@ -84,7 +84,7 @@ func TestWriteJSONReport_shape(t *testing.T) {
 		Failed:  []JobFailure{},
 	}
 	var buf bytes.Buffer
-	if err := writeJSONReport(&buf, rep); err != nil {
+	if err := WriteJSONReport(&buf, rep); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,7 +121,7 @@ func TestWriteJSONReport_shape(t *testing.T) {
 func TestWriteJSONReport_bailedOutTrue(t *testing.T) {
 	rep := Report{BailedOut: true}
 	var buf bytes.Buffer
-	if err := writeJSONReport(&buf, rep); err != nil {
+	if err := WriteJSONReport(&buf, rep); err != nil {
 		t.Fatal(err)
 	}
 	var out map[string]any
@@ -130,24 +130,5 @@ func TestWriteJSONReport_bailedOutTrue(t *testing.T) {
 	}
 	if b, _ := out["bailed_out"].(bool); !b {
 		t.Errorf("bailed_out should be true, got %v", out["bailed_out"])
-	}
-}
-
-func TestEmitReport_dispatchesByTTY(t *testing.T) {
-	rep := Report{Written: []Job{{PolicyID: "p", Subject: "story:abc"}}}
-
-	var tapOut, jsonOut bytes.Buffer
-	if err := EmitReport(&tapOut, rep, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := EmitReport(&jsonOut, rep, false); err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.HasPrefix(tapOut.String(), "TAP version 14") {
-		t.Errorf("tty mode should emit TAP header, got: %q", firstLine(tapOut.String()))
-	}
-	if !strings.HasPrefix(strings.TrimSpace(jsonOut.String()), "{") {
-		t.Errorf("non-tty mode should emit JSON object, got: %q", firstLine(jsonOut.String()))
 	}
 }

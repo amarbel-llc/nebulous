@@ -21,11 +21,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 
 	"github.com/friedenberg/nebulous/internal/0/archive"
 	"github.com/friedenberg/nebulous/internal/alfa/capturer"
@@ -61,6 +64,18 @@ type Args struct {
 	// madder blob writes are content-addressed and safe to race per
 	// madder ADR-0002.
 	Jobs int
+
+	// StreamTAP, when non-nil, causes the orchestrator to emit TAP-14
+	// output to this writer as jobs complete. The stream carries the
+	// `TAP version 14` header, a `1..N` plan line before the first
+	// job, one `ok` / `not ok` line per completed job in completion
+	// order, and a final `Bail out!` line if the circuit breaker
+	// trips. Writes occur on the single result-consumer goroutine, so
+	// the writer does not need to be goroutine-safe. The returned
+	// Report is still populated and sorted regardless — this is an
+	// additional live-progress channel, not a replacement for the
+	// programmatic result.
+	StreamTAP io.Writer
 }
 
 // Job records one successful (policy, subject) archive result.
@@ -184,6 +199,17 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 		nworkers = len(jobs)
 	}
 
+	// Optional live TAP stream. NewWriter emits the `TAP version 14`
+	// header immediately; PlanAhead emits `1..N` before any results.
+	// Both land on args.StreamTAP before the first worker dispatches,
+	// so `tail -f` on a redirected log shows the plan as soon as the
+	// run starts.
+	var stream *tap.Writer
+	if args.StreamTAP != nil {
+		stream = tap.NewWriter(args.StreamTAP)
+		stream.PlanAhead(len(jobs))
+	}
+
 	// Cancelable sub-context so we can stop in-flight workers on bail.
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -240,6 +266,9 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 		} else {
 			report.Failed = append(report.Failed, r.failure)
 		}
+		if stream != nil {
+			emitStreamPoint(stream, r)
+		}
 
 		if windowLen < 3 {
 			window[windowLen] = !r.ok
@@ -254,11 +283,34 @@ func runJobs(ctx context.Context, args Args, d Deps, jobs []jobUnit) Report {
 			report.BailedOut = true
 			bailed = true
 			cancel()
+			if stream != nil {
+				stream.BailOut(bailOutReason)
+			}
 		}
 	}
 
 	return report
 }
+
+// emitStreamPoint writes a single TAP test point for one completed
+// jobResult. Description and diagnostics shape are kept in sync with
+// the batched writer in report_tap.go so streamed and batched TAP
+// output describe the same job identically.
+func emitStreamPoint(tw *tap.Writer, r jobResult) {
+	if r.ok {
+		tw.Ok(fmt.Sprintf("%s %s", r.job.PolicyID, r.job.Subject))
+		return
+	}
+	tw.NotOk(fmt.Sprintf("%s %s", r.failure.PolicyID, r.failure.Subject), map[string]string{
+		"kind":    r.failure.Kind,
+		"message": r.failure.Message,
+	})
+}
+
+// bailOutReason is the human-readable reason attached to the TAP
+// `Bail out!` directive when the circuit breaker trips. Shared with
+// the batched writer so both paths produce the same text.
+const bailOutReason = "3 consecutive archive job failures"
 
 // sortReport orders report.Written and report.Failed by
 // (subject, policy_id) so output is deterministic regardless of

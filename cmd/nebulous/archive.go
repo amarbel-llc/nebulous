@@ -37,9 +37,16 @@ func archiveMain(ctx context.Context, args []string) int {
 		policyPath  = fs.String("policy", defaultPolicyPath(), "path to nebulous.toml")
 		archiveRoot = fs.String("archive-root", defaultArchiveRoot(), "directory for archive records")
 		jobs        = fs.Int("jobs", 1, "worker-pool size for concurrent captures (1 = serial)")
+		format      = fs.String("format", "auto", "output format: tap | json | auto (auto = tap on TTY, json otherwise)")
 	)
 
 	if err := fs.Parse(args); err != nil {
+		return 3
+	}
+
+	effectiveFormat, err := resolveCaptureFormat(*format, term.IsTerminal(int(os.Stdout.Fd())))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "archive-capture: %v\n", err)
 		return 3
 	}
 
@@ -56,22 +63,51 @@ func archiveMain(ctx context.Context, args []string) int {
 		return 3
 	}
 
-	report := orchestrator.Run(ctx, orchestrator.Args{
+	// TAP format streams live — the orchestrator emits plan + test
+	// points to os.Stdout as jobs complete. JSON format stays a
+	// single atomic end-of-run document.
+	runArgs := orchestrator.Args{
 		StoryIDs:    storyIDs,
 		URLs:        urls,
 		PolicyPath:  *policyPath,
 		ArchiveRoot: *archiveRoot,
 		Jobs:        *jobs,
-	}, deps)
+	}
+	if effectiveFormat == "tap" {
+		runArgs.StreamTAP = os.Stdout
+	}
 
-	tty := term.IsTerminal(int(os.Stdout.Fd()))
-	if err := orchestrator.EmitReport(os.Stdout, report, tty); err != nil {
-		fmt.Fprintf(os.Stderr, "archive-capture: emit report: %v\n", err)
-		// Prefer the orchestrator's exit code over the emit error —
-		// the archive work either succeeded or failed independently
-		// of how we rendered the report.
+	report := orchestrator.Run(ctx, runArgs, deps)
+
+	if effectiveFormat == "json" {
+		if err := orchestrator.WriteJSONReport(os.Stdout, report); err != nil {
+			fmt.Fprintf(os.Stderr, "archive-capture: emit report: %v\n", err)
+			// Prefer the orchestrator's exit code over the emit error —
+			// the archive work either succeeded or failed independently
+			// of how we rendered the report.
+		}
 	}
 	return report.ExitCode()
+}
+
+// resolveCaptureFormat turns the user-supplied --format value into a
+// concrete choice of "tap" or "json" for archive-capture. The
+// special value "auto" (the default) picks TAP on an interactive
+// TTY and JSON otherwise. Unlike archive-list's resolveFormat,
+// unknown values are rejected with an error rather than passed
+// through — archive-capture has exactly two valid output formats.
+func resolveCaptureFormat(raw string, tty bool) (string, error) {
+	switch raw {
+	case "auto":
+		if tty {
+			return "tap", nil
+		}
+		return "json", nil
+	case "tap", "json":
+		return raw, nil
+	default:
+		return "", fmt.Errorf("invalid --format %q: want one of tap, json, auto", raw)
+	}
 }
 
 // resolveTargets parses positional args into classified story IDs

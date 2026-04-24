@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -471,4 +472,84 @@ func equalSlice(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestRun_streamsTAPAsJobsComplete verifies that Args.StreamTAP
+// receives TAP-14 output incrementally — header, plan, and one
+// `ok` line per completed job. With Jobs=1 the completion order is
+// deterministic, so we can assert the full streamed shape.
+func TestRun_streamsTAPAsJobsComplete(t *testing.T) {
+	dir := t.TempDir()
+	var stream bytes.Buffer
+	args := Args{
+		StoryIDs:    []string{"a", "b", "c"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+		Jobs:        1,
+		StreamTAP:   &stream,
+	}
+	rep := run(context.Background(), args, stubDeps(singlePolicySingleCapture(), successBatchOutput()))
+
+	if len(rep.Failed) != 0 {
+		t.Fatalf("unexpected failures: %+v", rep.Failed)
+	}
+	if len(rep.Written) != 3 {
+		t.Fatalf("written: got %d, want 3", len(rep.Written))
+	}
+
+	out := stream.String()
+	if !strings.HasPrefix(out, "TAP version 14\n") {
+		t.Errorf("stream should start with TAP header, got: %q", firstLine(out))
+	}
+	if !strings.Contains(out, "\n1..3\n") {
+		t.Errorf("stream should contain plan 1..3, got:\n%s", out)
+	}
+	if got := strings.Count(out, "\nok "); got != 3 {
+		t.Errorf("ok count: got %d, want 3 in:\n%s", got, out)
+	}
+	if strings.Contains(out, "\nnot ok ") {
+		t.Errorf("no `not ok` expected in all-success run, got:\n%s", out)
+	}
+
+	// Each streamed `ok` carries the policy id + subject. With
+	// Jobs=1 the order matches the StoryIDs input.
+	wantOrder := []string{"p1 story:a", "p1 story:b", "p1 story:c"}
+	for i, want := range wantOrder {
+		needle := fmt.Sprintf("\nok %d - %s\n", i+1, want)
+		if !strings.Contains(out, needle) {
+			t.Errorf("stream missing %q in:\n%s", needle, out)
+		}
+	}
+}
+
+// TestRun_streamsBailOutDirective verifies that the circuit breaker
+// tripping also emits a `Bail out!` line on the live stream.
+func TestRun_streamsBailOutDirective(t *testing.T) {
+	dir := t.TempDir()
+	d := stubDeps(manyPolicies(5), capturer.BatchOutput{})
+	d.RunCapturer = func(context.Context, capturer.BatchInput) (capturer.BatchOutput, error) {
+		return capturer.BatchOutput{}, errors.New("simulated capturer failure")
+	}
+
+	var stream bytes.Buffer
+	args := Args{
+		StoryIDs:    []string{"abc"},
+		PolicyPath:  filepath.Join(dir, "nebulous.toml"),
+		ArchiveRoot: filepath.Join(dir, "archives"),
+		Jobs:        1,
+		StreamTAP:   &stream,
+	}
+	rep := run(context.Background(), args, d)
+
+	if !rep.BailedOut {
+		t.Fatalf("expected BailedOut=true")
+	}
+	out := stream.String()
+	if !strings.Contains(out, "Bail out!") {
+		t.Errorf("stream should contain `Bail out!`, got:\n%s", out)
+	}
+	// Three `not ok` results must precede the bail-out directive.
+	if got := strings.Count(out, "\nnot ok "); got != 3 {
+		t.Errorf("not ok count before bail: got %d, want 3 in:\n%s", got, out)
+	}
 }
