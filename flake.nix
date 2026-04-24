@@ -2,13 +2,12 @@
   description = "NewsBlur MCP server";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/4590696c8693fea477850fe379a01544293ca4e2";
+    # amarbel-llc/nixpkgs carries the gomod2nix build helpers natively
+    # (pkgs.buildGoApplication, pkgs.mkGoEnv, pkgs.gomod2nix CLI). See
+    # `man 7 gomod2nix` inside the devshell for the migration guide.
+    nixpkgs.url = "github:amarbel-llc/nixpkgs";
     nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
-    gomod2nix = {
-      url = "github:amarbel-llc/gomod2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     madder = {
       url = "github:amarbel-llc/madder";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -40,7 +39,6 @@
       self,
       nixpkgs,
       utils,
-      gomod2nix,
       nixpkgs-master,
       madder,
       chrest,
@@ -50,14 +48,14 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            gomod2nix.overlays.default
-          ];
-        };
+        pkgs = import nixpkgs { inherit system; };
 
         pkgs-master = import nixpkgs-master { inherit system; };
+
+        # Single source of truth for the Go toolchain — threaded into
+        # both buildGoApplication and mkGoEnv so the build-time and
+        # devshell versions stay in lockstep.
+        go = pkgs-master.go_1_26;
 
         version = "0.1.0";
 
@@ -66,10 +64,9 @@
 
         nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
-          inherit version;
+          inherit version go;
           src = ./.;
           modules = ./gomod2nix.toml;
-          go = pkgs-master.go_1_26;
 
           subPackages = [ "cmd/nebulous" ];
 
@@ -99,7 +96,10 @@
 
         devShells.default = pkgs-master.mkShell {
           packages = [
-            pkgs-master.go_1_26
+            # mkGoEnv propagates the pinned go toolchain, the
+            # gomod2nix CLI, and the go-sync-wrap hook that auto-
+            # regenerates gomod2nix.toml after `go get` / `go mod tidy`.
+            (pkgs.mkGoEnv { pwd = ./.; inherit go; })
             pkgs-master.delve
             pkgs-master.gofumpt
             pkgs-master.golangci-lint
@@ -107,7 +107,6 @@
             pkgs-master.gopls
             pkgs-master.gotools
             pkgs-master.govulncheck
-            gomod2nix.packages.${system}.default
             pkgs.just
             pkgs.bats
             pkgs.shellcheck
