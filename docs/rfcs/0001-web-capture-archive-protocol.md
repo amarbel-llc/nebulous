@@ -261,7 +261,13 @@ The batch input is a JSON object with the following shape:
       "format":  "pdf",
       "options": { "background": true, "landscape": false },
       "browser": "firefox",
-      "extensions": [{ "id": "ublock-origin", "version": "1.62.0" }],
+      "extensions": [
+        {
+          "name":    "ublock-origin",
+          "version": "1.62.0",
+          "url":     "https://addons.mozilla.org/firefox/downloads/file/4283478/ublock_origin-1.62.0.xpi"
+        }
+      ],
       "dns":     { "mode": "system" }
     },
     {
@@ -291,7 +297,7 @@ Input field requirements:
 | `captures[].browser`        | string  | no       | Overrides `defaults.browser`. |
 | `captures[].isolation`      | string  | no       | Overrides `defaults.isolation`. |
 | `captures[].split`          | boolean | no       | Overrides `defaults.split`. |
-| `captures[].extensions`     | array of objects | no | Browser extensions to load. Each element is an object with string fields `id` and `version`, and OPTIONAL string field `manifest_digest` (markl ID). |
+| `captures[].extensions`     | array of objects | no | Browser extensions to load. Each element is an object with string fields `name`, `version`, and `url`. The capturer fetches the extension archive from `url`, writes it to the blob store, and produces an [extension specification artifact](#extension-specification-artifact) per extension. See [§ Extension Loading](#extension-loading) for fetch and install semantics. Identity-affecting. |
 | `captures[].dns`            | object  | no       | Overrides `defaults.dns`. See [§ DNS Configuration](#dns-configuration). |
 | `captures[].flags`          | array of strings | no | Additional browser command-line flags. |
 
@@ -404,6 +410,68 @@ The capturer MUST execute captures in the order given by the input
 can guarantee that doing so does not affect any capture's resulting spec,
 envelope, or payload artifacts.
 
+#### Identity-Affecting Fields
+
+Some batch-input fields are echoed into the spec artifact and therefore
+participate in [capture identity](#capture-spec-artifact). Currently:
+
+- `dns` (echoed into `browser.dns`)
+- `extensions` (each entry's extension-spec markl ID is echoed into
+  `browser.extensions[]`)
+
+When a capturer cannot honor a requested identity-affecting field — for
+example, the capturer's wire protocol does not support DNS overrides, or
+the capturer has not implemented extension loading — the capturer MUST
+fail the affected capture rather than emit a spec artifact whose
+`browser.*` claims a configuration that was not in fact applied. The
+capturer SHOULD also surface the limitation in its
+[capabilities artifact](#capabilities-artifact) so consumers can plan
+around it before submitting a batch.
+
+The failure boundary depends on the requesting capture's resolved
+isolation level:
+
+| Isolation | Failure surface | Rationale |
+|-----------|-----------------|-----------|
+| `fresh`   | `captures[].error` per affected capture | Each capture's browser-launch is independent; one capture's un-honorable request does not affect siblings. |
+| `session` | `errors[]` batch-level entry | The browser is launched once for the session. An un-honorable request prevents the session from starting; all captures that were to share that session fail. |
+| `shared`  | Capturer process startup failure (does not appear in batch output) | The browser is launched once at capturer startup. An un-honorable request is detected before any batch is accepted. |
+
+#### Extension Loading
+
+For each `captures[].extensions[]` entry, the capturer MUST:
+
+1. Fetch the archive bytes from the entry's `url`. The capturer MUST
+   apply the [DNS configuration](#dns-configuration) for the affected
+   capture when performing the fetch.
+2. Write the archive bytes to the writer (see
+   [§ Writer Protocol](#writer-protocol)) and record the returned markl
+   ID as the extension's `digest`.
+3. Produce an [extension specification artifact](#extension-specification-artifact)
+   from `(name, version, url, digest)`, JCS-canonicalize per
+   [RFC 8785][rfc-8785], and write the canonicalized bytes to the
+   writer. The returned markl ID MUST be used as the extension's
+   reference in `browser.extensions[]` of every spec artifact for a
+   capture that requested this extension.
+4. Install the archive into the browser when the browser launches. The
+   install MUST be performed against the browser process that will
+   render the capture, before the capture's payload bytes are
+   collected.
+
+The install timing is gated by the resolved `isolation` level:
+
+| Isolation | Install timing |
+|-----------|----------------|
+| `fresh`   | Once per capture, into the per-capture browser process. |
+| `session` | Once at session start, into the session's shared browser process. |
+| `shared`  | Once at capturer startup, into the long-lived browser process. |
+
+A fetch failure is treated as an un-honorable identity-affecting
+request and surfaces per the [§ Identity-Affecting Fields](#identity-affecting-fields)
+failure-boundary table; the recommended `kind` is
+`extension-fetch-failed` for per-capture failures and the same string
+in `errors[]` for batch-level failures.
+
 #### Writer Invocation
 
 For each successful capture, the capturer MUST invoke the writer in the
@@ -425,6 +493,17 @@ any capture's artifacts. The capturer MAY skip this invocation when
 the capabilities content has already been written to the same blob
 store earlier in the same process lifetime, provided the resulting
 markl ID is recorded unchanged in the batch output.
+
+For each extension referenced by any capture in the batch, the capturer
+MUST invoke the writer twice — once for the extension archive bytes,
+once for the extension-specification artifact — before invoking the
+writer for any spec artifact that references the extension. The
+capturer MAY emit these invocations eagerly (all extensions before any
+capture's payload) or lazily (each extension before the first capture
+that references it); both are conformant. The capturer MAY skip a
+duplicate invocation when the same content has already been written to
+the same blob store earlier in the same process lifetime, provided the
+resulting markl ID is recorded unchanged.
 
 ### Artifact Formats
 
@@ -461,7 +540,7 @@ Schema:
     "command_line": ["--headless", "--remote-debugging-port=0", "--no-remote"],
     "prefs":        { },
     "extensions": [
-      { "id": "ublock-origin", "version": "1.62.0", "manifest_digest": "blake2b256-…" }
+      "blake2b256-…"
     ],
     "dns": { "mode": "doh", "doh_url": "https://dns.nextdns.io/abc123" }
   },
@@ -497,10 +576,7 @@ Field requirements:
 | `browser.js_engine`          | no       | JavaScript engine name (e.g., `V8`, `SpiderMonkey`). |
 | `browser.command_line`       | no       | Command-line arguments passed to the browser process. Array of strings. When present, MUST be recorded in the order the capturer passed them. |
 | `browser.prefs`              | no       | Browser preferences applied for this capture. Object with string keys. Implementations SHOULD include only rendering-affecting preferences. |
-| `browser.extensions`         | yes      | Loaded extensions. MUST be `[]` if none. |
-| `browser.extensions[].id`    | yes      | Extension identifier. |
-| `browser.extensions[].version` | yes    | Extension version string. |
-| `browser.extensions[].manifest_digest` | no | markl ID of the extension's manifest file. RECOMMENDED when the extension was loaded from a local path rather than a known registry version. |
+| `browser.extensions`         | yes      | Array of markl ID strings, one per loaded extension. Each MUST be the markl ID of an [extension specification artifact](#extension-specification-artifact) for an extension that was successfully loaded into the browser. MUST be `[]` if none. Identity-affecting: changing the set of extensions, an extension's source URL, version, or archive bytes changes the corresponding extension-spec markl ID and thus the spec hash. |
 | `browser.dns`                | no       | Resolved DNS configuration. Echo of the batch input's effective `dns` object (per-capture override on top of `defaults.dns`) after the capturer applied defaults. Identity-affecting; see [§ DNS Configuration](#dns-configuration). |
 | `host.os`                    | yes      | Operating system name. |
 | `host.kernel`                | yes      | Kernel version string. |
@@ -791,6 +867,69 @@ MAY fall back to looking up capabilities by the (`capturer.name`,
 `capturer.version`) pair, with the understanding that this lookup is
 not authenticated by content addressing.
 
+#### Extension Specification Artifact
+
+The extension specification artifact is a small JSON document
+identifying a browser extension that was loaded for a capture. It is
+content-addressed and emitted by the capturer once per unique extension
+encountered in a batch (capturer-side dedup is permitted but not
+required; the blob store dedupes by content addressing regardless). The
+extension archive bytes themselves (the `.xpi` / `.crx` file) are
+stored as a separate blob, addressed by the `digest` field of this
+artifact.
+
+A conforming capturer MUST emit one extension specification artifact
+per `captures[].extensions[]` entry it successfully fetched, and the
+spec artifact for any capture that requested the extension MUST
+reference it via the corresponding markl ID in `browser.extensions[]`.
+
+JCS-canonicalize per [RFC 8785][rfc-8785] before writing to the writer.
+
+Media type: `application/vnd.web-capture-archive.extension+json`.
+
+The extension specification artifact MUST NOT contain time-varying
+data. It is a property of the (name, version, url, archive bytes)
+tuple and MUST be deterministic given that tuple. This makes the
+artifact dedupable: the same extension referenced by many captures or
+many batches shares one extension-spec blob.
+
+Schema:
+
+```json
+{
+  "schema":  "web-capture-archive.extension/v0",
+  "name":    "ublock-origin",
+  "version": "1.62.0",
+  "url":     "https://addons.mozilla.org/firefox/downloads/file/4283478/ublock_origin-1.62.0.xpi",
+  "digest":  "blake2b256-…"
+}
+```
+
+Field requirements:
+
+| Field      | Required | Description |
+|------------|----------|-------------|
+| `schema`   | yes      | MUST be `web-capture-archive.extension/v0`. |
+| `name`     | yes      | Echo of the batch input `captures[].extensions[].name`. Identifies the extension for human consumption; implementations MUST NOT rely on `name` for identity (use the artifact's markl ID for that). |
+| `version`  | yes      | Echo of the batch input `captures[].extensions[].version`. |
+| `url`      | yes      | Echo of the batch input `captures[].extensions[].url`. The URL the capturer fetched the archive from. |
+| `digest`   | yes      | markl ID of the extension archive bytes (`.xpi`, `.crx`, etc.) as written to the same blob store. The capturer MUST have successfully written the archive bytes and obtained this ID before composing the extension specification artifact. |
+
+The extension specification artifact does NOT carry an explicit browser
+target field. The archive bytes referenced by `digest` are
+browser-specific (a `.xpi` is a Firefox-only build of the same logical
+extension), so the digest itself disambiguates. Consumers needing to
+verify cross-browser compatibility MUST inspect the archive bytes
+referenced by `digest`.
+
+The extension specification artifact does NOT carry extension settings
+or runtime configuration. Operators who need deterministic extension
+behavior beyond defaults SHOULD pre-bake settings into a custom archive
+build; the resulting archive bytes (and thus `digest`) capture
+everything inside the archive. A future revision of this RFC MAY add a
+`settings_digest` field for the case where settings live alongside the
+archive rather than inside it.
+
 ### Archive Record Format
 
 The archive record is a JSON file owned by the orchestrator that ties
@@ -953,8 +1092,9 @@ options   = { background = true, landscape = false }
 dns       = { mode = "doh", doh_url = "https://dns.nextdns.io/abc123" }
 
   [[capture.extensions]]
-  id      = "ublock-origin"
+  name    = "ublock-origin"
   version = "1.62.0"
+  url     = "https://addons.mozilla.org/firefox/downloads/file/4283478/ublock_origin-1.62.0.xpi"
 
 [[capture]]
 name      = "screenshot"
@@ -985,7 +1125,7 @@ Field requirements:
 | `capture[].options`             | no       | Format-specific options passed to the capturer. |
 | `capture[].split`               | no       | Whether to emit an envelope artifact and normalize the payload. Default: `true`. |
 | `capture[].isolation`           | no       | Overrides `policy.isolation`. |
-| `capture[].extensions`          | no       | Browser extensions to load. Expressed as an array of objects with `id` and `version`. |
+| `capture[].extensions`          | no       | Browser extensions to load. Expressed as an array of tables with string fields `name`, `version`, and `url`. The orchestrator MUST pass these through unchanged into the capturer batch input. See [§ Extension Loading](#extension-loading). Identity-affecting. |
 | `capture[].dns`                 | no       | DNS configuration. Expressed as a table with `mode` (one of `system`, `doh`, `custom`) and the corresponding `doh_url` or `servers`. See [§ DNS Configuration](#dns-configuration). Identity-affecting. |
 | `capture[].flags`               | no       | Additional browser command-line flags. |
 
@@ -1136,10 +1276,29 @@ sandbox. Implementations SHOULD:
 
 Browser extensions loaded per the capture's `extensions` field run with
 elevated browser privileges, can modify rendered content, and may exfiltrate
-captured data. Implementations MUST load extensions only from locations
-explicitly configured by the operator, and SHOULD verify extension
-identity via `manifest_digest` when the extension was loaded from a local
-path rather than a trusted registry.
+captured data. Implementations MUST load extensions only from URLs
+explicitly named in the orchestrator-supplied batch input. The capturer
+MUST NOT consult any out-of-band configuration to decide which
+extensions to load; the batch input is the sole source of truth for
+extension identity and provenance.
+
+The integrity of a loaded extension is established by the
+`browser.extensions[]` markl IDs in the spec artifact: each ID
+references an [extension specification artifact](#extension-specification-artifact)
+whose `digest` field in turn references the exact archive bytes that
+were installed. A consumer that retrieves an archive and walks these
+markl IDs can verify, byte-for-byte, what extension was loaded for a
+capture. Operators SHOULD treat extension URLs in policies the same
+way they treat any other source of executable content in their build
+pipelines — review, version-pin, and audit changes.
+
+Extension archives fetched at capture time can change without warning
+(registry updates, URL repurposing, MITM). Operators concerned with
+reproducibility SHOULD self-host extension archives at stable URLs and
+avoid pointing `url` directly at registries that may serve different
+bytes for the same path. The extension specification artifact's
+content-addressed `digest` makes any such drift detectable but does
+not by itself prevent it.
 
 ### DNS Configuration May Leak Operator Identity
 
@@ -1237,6 +1396,10 @@ role:
 | § Capabilities Artifact, MUST be JCS-canonicalized when emitted | `capturer_capabilities_jcs.bats` | Substitute a writer that captures stdin to a file; verify the capabilities bytes are JCS canonical form. Skipped when the capturer does not emit capabilities. |
 | § Capabilities Artifact, MUST be deterministic | `capturer_capabilities_determinism.bats` | Run the same capturer twice in the same environment; assert identical capabilities markl IDs. |
 | § Capabilities Artifact, `capabilities_id` in spec MUST match batch output's capabilities artifact ref | `capturer_capabilities_consistency.bats` | When the batch output carries a `capabilities` ref, every per-capture spec artifact MUST embed the same markl ID in `capturer.capabilities_id`. |
+| § Extension Specification Artifact, MUST be JCS-canonicalized | `capturer_extension_jcs.bats` | Submit a capture with one extension; substitute a writer that captures stdin to files; assert the extension-spec bytes are JCS canonical form. |
+| § Extension Specification Artifact, `digest` MUST be the markl ID of the archive bytes | `capturer_extension_digest.bats` | Submit a capture with one extension whose URL serves known bytes; assert the extension-spec's `digest` equals the markl ID of those bytes (also written to the same writer). |
+| § Identity-Affecting Fields, MUST fail capture rather than emit a misleading spec | `capturer_strict_identity.bats` | Submit a capture requesting an extension that the capturer cannot honor (e.g., capabilities declares `extensions: not-implemented`); assert the affected capture has `error.kind = "extensions-not-supported"` and no spec artifact was written. |
+| § Extension Loading, fetch failure surfaces per isolation level | `capturer_extension_failure_isolation.bats` | Submit captures with an unfetchable extension URL under each isolation level; assert `fresh` produces per-capture errors only on captures that requested it, `session` produces a batch-level `errors[]` entry that affects all captures in the session. |
 | § Payload Artifact, PDF normalization removes `/CreationDate` | `capturer_pdf_normalize.bats` | Substitute a writer that captures stdin to a file; assert `/CreationDate` absent from the file when split=true. |
 | § Flows, writer spawn failure MUST NOT abort the batch | `capturer_resilience.bats` | Inject a writer that fails on the first invocation; verify subsequent captures still processed. |
 
@@ -1266,14 +1429,15 @@ a `v1` cut. No deployed implementations are yet expected to conform.
 Every JSON document defined by this specification carries a `schema` field
 of the form `<name>/vN`. Version `v0` is defined in this document:
 
-| Document                    | Schema string                            |
-|-----------------------------|------------------------------------------|
-| Capturer batch input        | `web-capture-archive/v0`                 |
-| Capturer batch output       | `web-capture-archive/v0`                 |
-| Capture spec artifact       | `web-capture-archive.spec/v0`            |
-| Envelope artifact           | `web-capture-archive.envelope/v0`        |
-| Capabilities artifact       | `web-capture-archive.capabilities/v0`    |
-| Archive record              | `web-capture-archive.record/v0`          |
+| Document                       | Schema string                            |
+|--------------------------------|------------------------------------------|
+| Capturer batch input           | `web-capture-archive/v0`                 |
+| Capturer batch output          | `web-capture-archive/v0`                 |
+| Capture spec artifact          | `web-capture-archive.spec/v0`            |
+| Envelope artifact              | `web-capture-archive.envelope/v0`        |
+| Capabilities artifact          | `web-capture-archive.capabilities/v0`    |
+| Extension specification artifact | `web-capture-archive.extension/v0`     |
+| Archive record                 | `web-capture-archive.record/v0`          |
 
 Implementations MUST reject documents with a `schema` string they do not
 understand. Implementations MUST NOT silently treat an unknown schema as
