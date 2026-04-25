@@ -252,7 +252,8 @@ The batch input is a JSON object with the following shape:
   "defaults": {
     "browser":   "firefox",
     "isolation": "fresh",
-    "split":     true
+    "split":     true,
+    "dns":       { "mode": "doh", "doh_url": "https://dns.nextdns.io/abc123" }
   },
   "captures": [
     {
@@ -260,7 +261,8 @@ The batch input is a JSON object with the following shape:
       "format":  "pdf",
       "options": { "background": true, "landscape": false },
       "browser": "firefox",
-      "extensions": [{ "id": "ublock-origin", "version": "1.62.0" }]
+      "extensions": [{ "id": "ublock-origin", "version": "1.62.0" }],
+      "dns":     { "mode": "system" }
     },
     {
       "name":   "text",
@@ -281,6 +283,7 @@ Input field requirements:
 | `defaults.browser`          | string  | no       | Default browser backend. MUST be one of: `chrome`, `firefox`. |
 | `defaults.isolation`        | string  | no       | Default browser isolation. MUST be one of: `fresh`, `session`, `shared`. If omitted, the capturer MUST treat it as `fresh`. |
 | `defaults.split`            | boolean | no       | Default `split` value. If omitted, the capturer MUST treat it as `true`. |
+| `defaults.dns`              | object  | no       | Default DNS configuration applied to each capture that does not override. See [§ DNS Configuration](#dns-configuration). |
 | `captures`                  | array   | yes      | Non-empty list of captures to perform, in order. |
 | `captures[].name`           | string  | yes      | Orchestrator-supplied label. MUST be unique within the batch. MUST NOT be included in the spec artifact (see [§ Capture Spec Artifact](#capture-spec-artifact)). |
 | `captures[].format`         | string  | yes      | Capture format. MUST be one of: `text`, `pdf`, `screenshot`, `mhtml`, `a11y`, `html-monolith`, `markdown-full`, `markdown-reader`, `markdown-selector`. |
@@ -289,10 +292,34 @@ Input field requirements:
 | `captures[].isolation`      | string  | no       | Overrides `defaults.isolation`. |
 | `captures[].split`          | boolean | no       | Overrides `defaults.split`. |
 | `captures[].extensions`     | array of objects | no | Browser extensions to load. Each element is an object with string fields `id` and `version`, and OPTIONAL string field `manifest_digest` (markl ID). |
+| `captures[].dns`            | object  | no       | Overrides `defaults.dns`. See [§ DNS Configuration](#dns-configuration). |
 | `captures[].flags`          | array of strings | no | Additional browser command-line flags. |
 
 The capturer MUST reject batch input with `schema` not equal to
 `web-capture-archive/v1` by exiting non-zero without writing a batch output.
+
+##### DNS Configuration
+
+A `dns` object configures how the capturer resolves hostnames for the
+top-level fetch and any subresources. The capturer SHOULD honor the
+configuration when its underlying browser exposes the corresponding
+controls; if it cannot, the capturer MUST report this in its
+[capabilities artifact](#capabilities-artifact) so consumers can
+distinguish "honored" from "silently ignored".
+
+The `dns` object has the following fields:
+
+| Field      | Type    | Required | Description |
+|------------|---------|----------|-------------|
+| `mode`     | string  | yes      | One of: `system` (use the OS resolver), `doh` (DNS-over-HTTPS via `doh_url`), `custom` (use the resolvers in `servers`). |
+| `doh_url`  | string  | conditional | REQUIRED when `mode` is `doh`. MUST be a fully-qualified `https://` URL of a DoH endpoint. |
+| `servers`  | array of strings | conditional | REQUIRED when `mode` is `custom`. Non-empty list of resolver IPs or `host:port` strings. |
+
+The DNS configuration is identity-affecting: it is echoed into the
+spec artifact's `browser.dns` field. Two captures of the same URL with
+different DNS configurations are NOT interchangeable for
+identity-matching purposes, because resolver behavior (blocklists,
+geo-routing, NXDOMAIN responses) can change the bytes captured.
 
 #### Batch Output
 
@@ -307,6 +334,7 @@ the following shape:
     "name":    "chrest",
     "version": "…"
   },
+  "capabilities": { "id": "blake2b256-…", "size": 1342, "media_type": "application/vnd.web-capture-archive.capabilities+json" },
   "errors": [],
   "captures": [
     {
@@ -330,6 +358,7 @@ Output field requirements:
 | `schema`                     | string  | yes      | MUST be `web-capture-archive/v1`. |
 | `capturer.name`              | string  | yes      | Identifier of the capturer implementation. |
 | `capturer.version`           | string  | yes      | Version string of the capturer implementation. |
+| `capabilities`               | artifact ref | no | Capabilities artifact (see [§ Capabilities Artifact](#capabilities-artifact)) describing what the capturer can produce. SHOULD be present. When present, the artifact's markl ID MUST equal the `capturer.capabilities_id` recorded in every spec artifact emitted by this batch. |
 | `errors`                     | array of error objects | yes | Batch-wide errors. MUST be `[]` if the batch completed with per-capture resolution. |
 | `captures`                   | array   | yes      | One entry per input capture, in input order. MUST have the same length as the input `captures` array. |
 | `captures[].name`            | string  | yes      | Echo of the input `name`. |
@@ -389,6 +418,14 @@ depending on `split`. Each invocation MUST conform to
 [§ Writer Protocol](#writer-protocol). The capturer MUST NOT reuse a
 single writer process across multiple artifacts.
 
+In addition, a capturer that emits a capabilities artifact (see
+[§ Capabilities Artifact](#capabilities-artifact)) MUST invoke the
+writer once for the capabilities bytes before invoking the writer for
+any capture's artifacts. The capturer MAY skip this invocation when
+the capabilities content has already been written to the same blob
+store earlier in the same process lifetime, provided the resulting
+markl ID is recorded unchanged in the batch output.
+
 ### Artifact Formats
 
 Every capture produces three artifacts — spec, envelope (optional), and
@@ -425,7 +462,8 @@ Schema:
     "prefs":        { },
     "extensions": [
       { "id": "ublock-origin", "version": "1.62.0", "manifest_digest": "blake2b256-…" }
-    ]
+    ],
+    "dns": { "mode": "doh", "doh_url": "https://dns.nextdns.io/abc123" }
   },
   "host": {
     "os":           "linux",
@@ -436,8 +474,9 @@ Schema:
     "gpu":          { "vendor": "…", "model": "…", "driver": "…" }
   },
   "capturer": {
-    "name":    "chrest",
-    "version": "…"
+    "name":            "chrest",
+    "version":         "…",
+    "capabilities_id": "blake2b256-…"
   }
 }
 ```
@@ -462,6 +501,7 @@ Field requirements:
 | `browser.extensions[].id`    | yes      | Extension identifier. |
 | `browser.extensions[].version` | yes    | Extension version string. |
 | `browser.extensions[].manifest_digest` | no | markl ID of the extension's manifest file. RECOMMENDED when the extension was loaded from a local path rather than a known registry version. |
+| `browser.dns`                | no       | Resolved DNS configuration. Echo of the batch input's effective `dns` object (per-capture override on top of `defaults.dns`) after the capturer applied defaults. Identity-affecting; see [§ DNS Configuration](#dns-configuration). |
 | `host.os`                    | yes      | Operating system name. |
 | `host.kernel`                | yes      | Kernel version string. |
 | `host.arch`                  | no       | CPU architecture (e.g., `x86_64`, `aarch64`). |
@@ -470,6 +510,7 @@ Field requirements:
 | `host.gpu`                   | no       | GPU information where obtainable. Object with string fields `vendor`, `model`, `driver` when present. |
 | `capturer.name`              | yes      | Identifier of the capturer implementation. |
 | `capturer.version`           | yes      | Version of the capturer. |
+| `capturer.capabilities_id`   | no       | markl ID of the [capabilities artifact](#capabilities-artifact) describing what this capturer can produce. RECOMMENDED. When present, MUST equal the markl ID of the capabilities artifact emitted in the same batch. Identity-affecting: changing the capabilities profile (e.g., capturer upgrade that adds support for a previously-unsupported field) will change the spec hash. |
 
 The spec artifact's markl ID is the **capture identity**. Two captures that
 produce identical spec bytes are considered interchangeable for
@@ -501,7 +542,8 @@ Schema:
       "content-type": "text/html; charset=utf-8",
       "date": "Sun, 19 Apr 2026 12:00:00 GMT"
     },
-    "timing_ms": { "dns": 12, "tcp": 31, "tls": 84, "ttfb": 187, "load": 412 }
+    "timing_ms":   { "dns": 12, "tcp": 31, "tls": 84, "ttfb": 187, "load": 412 },
+    "resolved_ip": "151.101.1.7"
   },
   "stripped": {
     "pdf": {
@@ -522,6 +564,7 @@ Field requirements:
 | `http.status`                | yes      | HTTP status code of the top-level document fetch. |
 | `http.headers`               | yes      | HTTP response headers of the top-level document. Header names MUST be lowercased. |
 | `http.timing_ms`             | no       | Network timing observations in milliseconds. |
+| `http.resolved_ip`           | no       | IP address (IPv4 or IPv6) the browser used for the top-level fetch. Capturers MAY include it when their underlying transport exposes it. Capturers that cannot obtain this value (notably those using W3C WebDriver BiDi as their wire protocol — `network.ResponseData` does not expose a remote IP field as of this writing) MUST omit it. Consumers MUST NOT treat absence as evidence of any particular network condition; consult the [capabilities artifact](#capabilities-artifact) to distinguish "could not measure" from "did not measure". A future revision of this RFC MAY add a `http.resolved_ips` field carrying per-subresource IP observations. |
 | `stripped`                   | no       | Per-format object recording fields that were removed from the payload during normalization. Required when any normalization was performed. |
 
 The capturer SHOULD record any field it stripped from the payload into
@@ -653,6 +696,101 @@ selector scoping the conversion to a single element (the first match wins).
 A conforming capturer MUST reject a `markdown-selector` capture that
 omits or empty-strings the `selector` option.
 
+#### Capabilities Artifact
+
+The capabilities artifact is a JSON document describing what the capturer
+can produce, which optional protocol fields it can populate, and which it
+cannot. The capabilities artifact answers the question "is this field
+absent because the data did not exist, or because this capturer cannot
+measure it?" — without it, consumers cannot distinguish protocol-level
+gaps (e.g., the W3C BiDi `network.ResponseData` type lacks a remote-IP
+field) from per-capture observations.
+
+A conforming capturer SHOULD emit a capabilities artifact alongside its
+batch output. JCS-canonicalize per [RFC 8785][rfc-8785] before writing
+to the writer.
+
+Media type: `application/vnd.web-capture-archive.capabilities+json`.
+
+The capabilities artifact MUST NOT contain time-varying data. It is a
+property of the (capturer, capturer version, browser, browser version)
+tuple and MUST be deterministic given that tuple. This makes the
+artifact content-addressable and dedupable: the same capturer build
+across many captures shares one capabilities blob.
+
+Schema:
+
+```json
+{
+  "schema": "web-capture-archive.capabilities/v1",
+  "capturer": {
+    "name":    "chrest",
+    "version": "1.4.0"
+  },
+  "wire_protocol": "webdriver-bidi",
+  "supported_formats": [
+    "text", "pdf", "screenshot", "html-monolith",
+    "markdown-full", "markdown-reader"
+  ],
+  "envelope_fields": {
+    "http.resolved_ip": {
+      "supported": false,
+      "reason": {
+        "code":   "unsupported",
+        "detail": "W3C WebDriver BiDi network.ResponseData does not expose a remote IP field"
+      }
+    },
+    "http.timing_ms": { "supported": true }
+  },
+  "request_fields": {
+    "dns": {
+      "supported":  true,
+      "modes":      ["doh", "system"]
+    },
+    "extensions": {
+      "supported": false,
+      "reason":    { "code": "not-implemented" }
+    }
+  },
+  "browsers": [
+    { "name": "firefox", "min_version": "128", "max_version": "" }
+  ]
+}
+```
+
+Field requirements:
+
+| Field                          | Required | Description |
+|--------------------------------|----------|-------------|
+| `schema`                       | yes      | MUST be `web-capture-archive.capabilities/v1`. |
+| `capturer.name`                | yes      | Identifier of the capturer implementation. MUST equal the batch output's `capturer.name`. |
+| `capturer.version`             | yes      | Version of the capturer. MUST equal the batch output's `capturer.version`. |
+| `wire_protocol`                | yes      | Identifier of the protocol used between the capturer and its underlying browser. RECOMMENDED values: `webdriver-bidi`, `cdp`, `playwright`. Other values are permitted; consumers SHOULD treat unknown values as opaque. |
+| `supported_formats`            | yes      | Array of capture format names this capturer can produce. Each MUST be one of the formats defined in [§ Payload Artifact](#payload-artifact). |
+| `envelope_fields`              | no       | Per-field support map for [§ Envelope Artifact](#envelope-artifact) fields the capturer would be expected to populate. Keys are dotted field paths (e.g. `http.resolved_ip`); values are support objects. |
+| `request_fields`               | no       | Per-field support map for [§ Batch Input](#batch-input) request fields. Keys are field names (e.g. `dns`, `extensions`); values are support objects. |
+| `browsers`                     | no       | Array describing browsers this capturer supports. Each entry is an object with `name` (string), and OPTIONAL `min_version`/`max_version` strings (empty string means open-ended). |
+
+A **support object** has:
+
+| Field        | Type    | Required | Description |
+|--------------|---------|----------|-------------|
+| `supported`  | boolean | yes      | Whether the capturer can populate (envelope fields) or honor (request fields) this entry. |
+| `reason`     | object  | conditional | REQUIRED when `supported` is false. Omitted otherwise. |
+| `reason.code`    | string | conditional | REQUIRED when `reason` is present. MUST be one of: `unsupported` (protocol- or browser-level constraint, the capturer cannot do this in its current form), `not-implemented` (capturer roadmap, may be added in a future version), `disabled` (operator config turned this off), `unavailable-on-platform` (works on some host platforms but not the current one). Implementations MAY use additional codes prefixed with `x-` for capturer-specific reasons; consumers MUST treat unknown codes as opaque equivalents of `unsupported`. |
+| `reason.detail`  | string | no | Free-form human-readable explanation. Implementations SHOULD include this when `reason.code` does not by itself convey enough context to act on. |
+
+Support objects MAY carry additional capturer-specific keys; entries
+that describe DNS-aware support (such as `dns`) MAY include a `modes`
+array enumerating the `dns.mode` values the capturer honors.
+
+Consumers reading a spec artifact's `capturer.capabilities_id` SHOULD
+fetch the referenced capabilities blob to interpret absent envelope
+fields. When the spec artifact's `capabilities_id` is absent, consumers
+MAY fall back to looking up capabilities by the (`capturer.name`,
+`capturer.version`) pair, with the understanding that this lookup is
+not authenticated by content addressing.
+
 ### Archive Record Format
 
 The archive record is a JSON file owned by the orchestrator that ties
@@ -688,6 +826,7 @@ records remain uniquely addressable.
   "url": "https://example.com/article",
   "policy_id": "starred-default",
   "captured_at": "2026-04-19T12:00:00.412Z",
+  "capabilities": { "id": "blake2b256-…", "size": 1342, "media_type": "application/vnd.web-capture-archive.capabilities+json" },
   "captures": [
     {
       "name": "pdf-clean",
@@ -713,6 +852,7 @@ Field requirements:
 | `url`                        | yes      | Concrete URL that was captured. |
 | `policy_id`                  | yes      | Value of the originating policy's `id` field. Used as a grouping label; the protocol assigns no semantic meaning to the value beyond string equality. |
 | `captured_at`                | yes      | RFC 3339 timestamp with millisecond precision, in UTC. For each capture in which `split` was true, this value MUST match the `captured_at` in that capture's envelope artifact. |
+| `capabilities`               | no       | Echo of the batch output's `capabilities` artifact ref (see [§ Capabilities Artifact](#capabilities-artifact)). Present iff the capturer emitted one. |
 | `captures`                   | yes      | Array of capture entries, in batch-execution order. MUST have the same length as the batch input's `captures` array. |
 | `captures[].name`            | yes      | Echo of the batch input capture name. |
 | `captures[].spec`            | conditional | Present iff the capture succeeded. MUST be an artifact ref. |
@@ -810,6 +950,7 @@ format    = "pdf"
 browser   = "firefox"
 split     = true
 options   = { background = true, landscape = false }
+dns       = { mode = "doh", doh_url = "https://dns.nextdns.io/abc123" }
 
   [[capture.extensions]]
   id      = "ublock-origin"
@@ -845,6 +986,7 @@ Field requirements:
 | `capture[].split`               | no       | Whether to emit an envelope artifact and normalize the payload. Default: `true`. |
 | `capture[].isolation`           | no       | Overrides `policy.isolation`. |
 | `capture[].extensions`          | no       | Browser extensions to load. Expressed as an array of objects with `id` and `version`. |
+| `capture[].dns`                 | no       | DNS configuration. Expressed as a table with `mode` (one of `system`, `doh`, `custom`) and the corresponding `doh_url` or `servers`. See [§ DNS Configuration](#dns-configuration). Identity-affecting. |
 | `capture[].flags`               | no       | Additional browser command-line flags. |
 
 #### URL Templating
@@ -999,6 +1141,20 @@ explicitly configured by the operator, and SHOULD verify extension
 identity via `manifest_digest` when the extension was loaded from a local
 path rather than a trusted registry.
 
+### DNS Configuration May Leak Operator Identity
+
+The `dns` configuration is echoed into the spec artifact's `browser.dns`
+field. DoH endpoints often embed account identifiers (e.g., NextDNS
+account IDs are present in the DoH URL path), and a `custom` server list
+may reveal a corporate or home-lab IP block. Operators MUST treat the
+spec artifact as containing the same level of operator-side
+configuration sensitivity as the policy file itself, and SHOULD redact
+or alias DoH URLs before sharing archives across trust boundaries.
+
+The capabilities artifact does not include a DNS configuration; its
+`request_fields.dns.modes` array describes only which modes the capturer
+supports, not which were used.
+
 ### Archive Content May Be Sensitive
 
 Captured URLs and their contents may include personal data, authentication
@@ -1076,8 +1232,11 @@ role:
 | § Capturer Protocol, MUST reject input with unknown `schema` | `capturer_schema.bats` | Pass `schema: bogus/v99` and assert non-zero exit. |
 | § Capturer Protocol, MUST emit exactly one JSON object on stdout | `capturer_output.bats` | Parse stdout; reject multiple objects. |
 | § Capturer Protocol, `captures[]` output length MUST match input length | `capturer_cardinality.bats` | Submit N captures; assert N entries in output. |
-| § Capturer Protocol, Writer Invocation count | `capturer_writer_invocations.bats` | Substitute a counting writer binary; assert 3 invocations per split=true capture and 2 per split=false capture. |
+| § Capturer Protocol, Writer Invocation count | `capturer_writer_invocations.bats` | Substitute a counting writer binary; assert 3 invocations per split=true capture and 2 per split=false capture, plus 1 capabilities invocation per batch when the capturer claims to emit one. |
 | § Capture Spec Artifact, MUST be JCS-canonicalized | `capturer_spec_jcs.bats` | Substitute a writer that captures stdin to a file; verify the captured bytes are JCS canonical form. |
+| § Capabilities Artifact, MUST be JCS-canonicalized when emitted | `capturer_capabilities_jcs.bats` | Substitute a writer that captures stdin to a file; verify the capabilities bytes are JCS canonical form. Skipped when the capturer does not emit capabilities. |
+| § Capabilities Artifact, MUST be deterministic | `capturer_capabilities_determinism.bats` | Run the same capturer twice in the same environment; assert identical capabilities markl IDs. |
+| § Capabilities Artifact, `capabilities_id` in spec MUST match batch output's capabilities artifact ref | `capturer_capabilities_consistency.bats` | When the batch output carries a `capabilities` ref, every per-capture spec artifact MUST embed the same markl ID in `capturer.capabilities_id`. |
 | § Payload Artifact, PDF normalization removes `/CreationDate` | `capturer_pdf_normalize.bats` | Substitute a writer that captures stdin to a file; assert `/CreationDate` absent from the file when split=true. |
 | § Flows, writer spawn failure MUST NOT abort the batch | `capturer_resilience.bats` | Inject a writer that fails on the first invocation; verify subsequent captures still processed. |
 
@@ -1112,6 +1271,7 @@ of the form `<name>/vN`. Version `v1` is defined in this document:
 | Capturer batch output       | `web-capture-archive/v1`                 |
 | Capture spec artifact       | `web-capture-archive.spec/v1`            |
 | Envelope artifact           | `web-capture-archive.envelope/v1`        |
+| Capabilities artifact       | `web-capture-archive.capabilities/v1`    |
 | Archive record              | `web-capture-archive.record/v1`          |
 
 Implementations MUST reject documents with a `schema` string they do not
@@ -1143,6 +1303,14 @@ Within `v1`, the envelope artifact schema is stable. The capturer MAY add
 new optional fields to `envelope.stripped` as it gains support for
 additional normalization formats; consumers MUST NOT rely on the absence
 of any `stripped.*` subkey.
+
+The `envelope.http.resolved_ip` field is OPTIONAL within `v1`. Its
+presence depends on the capturer's underlying transport: capturers using
+W3C WebDriver BiDi cannot currently surface a remote IP because the
+`network.ResponseData` type does not expose one. Consumers MUST treat
+absence as "not measured" and MUST NOT infer any network condition from
+absence; the capabilities artifact (when present) makes the distinction
+explicit via `envelope_fields["http.resolved_ip"]`.
 
 ## References
 
