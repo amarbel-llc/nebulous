@@ -244,7 +244,7 @@ The batch input is a JSON object with the following shape:
 
 ```json
 {
-  "schema": "web-capture-archive/v1",
+  "schema": "web-capture-archive/v0",
   "writer": {
     "cmd": ["madder", "--format=json", "write", "--store", "nebulous"]
   },
@@ -276,7 +276,7 @@ Input field requirements:
 
 | Field                       | Type    | Required | Description |
 |-----------------------------|---------|----------|-------------|
-| `schema`                    | string  | yes      | MUST be `web-capture-archive/v1`. |
+| `schema`                    | string  | yes      | MUST be `web-capture-archive/v0`. |
 | `writer.cmd`                | array of strings | yes | Argv passed to the writer (see [§ Writer Protocol](#writer-protocol)). MUST have at least one element. |
 | `url`                       | string  | yes      | Concrete URL to capture. MUST be a fully-qualified URL; the orchestrator MUST perform any templating before invoking the capturer. |
 | `defaults`                  | object  | no       | Defaults applied to each capture entry that does not override. |
@@ -296,7 +296,7 @@ Input field requirements:
 | `captures[].flags`          | array of strings | no | Additional browser command-line flags. |
 
 The capturer MUST reject batch input with `schema` not equal to
-`web-capture-archive/v1` by exiting non-zero without writing a batch output.
+`web-capture-archive/v0` by exiting non-zero without writing a batch output.
 
 ##### DNS Configuration
 
@@ -329,7 +329,7 @@ the following shape:
 
 ```json
 {
-  "schema": "web-capture-archive/v1",
+  "schema": "web-capture-archive/v0",
   "capturer": {
     "name":    "chrest",
     "version": "…"
@@ -355,7 +355,7 @@ Output field requirements:
 
 | Field                        | Type    | Required | Description |
 |------------------------------|---------|----------|-------------|
-| `schema`                     | string  | yes      | MUST be `web-capture-archive/v1`. |
+| `schema`                     | string  | yes      | MUST be `web-capture-archive/v0`. |
 | `capturer.name`              | string  | yes      | Identifier of the capturer implementation. |
 | `capturer.version`           | string  | yes      | Version string of the capturer implementation. |
 | `capabilities`               | artifact ref | no | Capabilities artifact (see [§ Capabilities Artifact](#capabilities-artifact)) describing what the capturer can produce. SHOULD be present. When present, the artifact's markl ID MUST equal the `capturer.capabilities_id` recorded in every spec artifact emitted by this batch. |
@@ -445,7 +445,7 @@ Schema:
 
 ```json
 {
-  "schema": "web-capture-archive.spec/v1",
+  "schema": "web-capture-archive.spec/v0",
   "capture": {
     "format":    "pdf",
     "options":   { "background": true, "landscape": false },
@@ -485,7 +485,7 @@ Field requirements:
 
 | Field                        | Required | Description |
 |------------------------------|----------|-------------|
-| `schema`                     | yes      | MUST be `web-capture-archive.spec/v1`. |
+| `schema`                     | yes      | MUST be `web-capture-archive.spec/v0`. |
 | `capture.format`             | yes      | Echo of the batch input capture format. |
 | `capture.options`            | yes      | Echo of the batch input options; `{}` if none. |
 | `capture.isolation`          | yes      | Resolved isolation (after defaults applied). |
@@ -533,7 +533,7 @@ Schema:
 
 ```json
 {
-  "schema": "web-capture-archive.envelope/v1",
+  "schema": "web-capture-archive.envelope/v0",
   "url": "https://example.com/article",
   "captured_at": "2026-04-19T12:00:00.412Z",
   "http": {
@@ -558,7 +558,7 @@ Field requirements:
 
 | Field                        | Required | Description |
 |------------------------------|----------|-------------|
-| `schema`                     | yes      | MUST be `web-capture-archive.envelope/v1`. |
+| `schema`                     | yes      | MUST be `web-capture-archive.envelope/v0`. |
 | `url`                        | yes      | Concrete URL that was captured. Echo of the batch input `url`. |
 | `captured_at`                | yes      | RFC 3339 timestamp with millisecond precision, in UTC. |
 | `http.status`                | yes      | HTTP status code of the top-level document fetch. |
@@ -722,7 +722,7 @@ Schema:
 
 ```json
 {
-  "schema": "web-capture-archive.capabilities/v1",
+  "schema": "web-capture-archive.capabilities/v0",
   "capturer": {
     "name":    "chrest",
     "version": "1.4.0"
@@ -762,7 +762,7 @@ Field requirements:
 
 | Field                          | Required | Description |
 |--------------------------------|----------|-------------|
-| `schema`                       | yes      | MUST be `web-capture-archive.capabilities/v1`. |
+| `schema`                       | yes      | MUST be `web-capture-archive.capabilities/v0`. |
 | `capturer.name`                | yes      | Identifier of the capturer implementation. MUST equal the batch output's `capturer.name`. |
 | `capturer.version`             | yes      | Version of the capturer. MUST equal the batch output's `capturer.version`. |
 | `wire_protocol`                | yes      | Identifier of the protocol used between the capturer and its underlying browser. RECOMMENDED values: `webdriver-bidi`, `cdp`, `playwright`. Other values are permitted; consumers SHOULD treat unknown values as opaque. |
@@ -821,7 +821,7 @@ records remain uniquely addressable.
 
 ```json
 {
-  "schema": "web-capture-archive.record/v1",
+  "schema": "web-capture-archive.record/v0",
   "subject": "6327282:5d1cf5",
   "url": "https://example.com/article",
   "policy_id": "starred-default",
@@ -847,7 +847,7 @@ Field requirements:
 
 | Field                        | Required | Description |
 |------------------------------|----------|-------------|
-| `schema`                     | yes      | MUST be `web-capture-archive.record/v1`. |
+| `schema`                     | yes      | MUST be `web-capture-archive.record/v0`. |
 | `subject`                    | yes      | Orchestrator-defined identifier for what was captured (story ID, URL hash, etc.). |
 | `url`                        | yes      | Concrete URL that was captured. |
 | `policy_id`                  | yes      | Value of the originating policy's `id` field. Used as a grouping label; the protocol assigns no semantic meaning to the value beyond string equality. |
@@ -1256,23 +1256,24 @@ that apply to the role they claim to implement.
 
 ## Compatibility
 
-This is the initial version of the specification; there are no previous
-versions to remain compatible with. No deployed implementations are yet
-expected to conform.
+This is the initial version of the specification. The schema strings
+defined here use the `v0` series, signalling that the design is still
+exploratory and that breaking changes are expected as it evolves toward
+a `v1` cut. No deployed implementations are yet expected to conform.
 
 ### Schema Versioning
 
 Every JSON document defined by this specification carries a `schema` field
-of the form `<name>/vN`. Version `v1` is defined in this document:
+of the form `<name>/vN`. Version `v0` is defined in this document:
 
 | Document                    | Schema string                            |
 |-----------------------------|------------------------------------------|
-| Capturer batch input        | `web-capture-archive/v1`                 |
-| Capturer batch output       | `web-capture-archive/v1`                 |
-| Capture spec artifact       | `web-capture-archive.spec/v1`            |
-| Envelope artifact           | `web-capture-archive.envelope/v1`        |
-| Capabilities artifact       | `web-capture-archive.capabilities/v1`    |
-| Archive record              | `web-capture-archive.record/v1`          |
+| Capturer batch input        | `web-capture-archive/v0`                 |
+| Capturer batch output       | `web-capture-archive/v0`                 |
+| Capture spec artifact       | `web-capture-archive.spec/v0`            |
+| Envelope artifact           | `web-capture-archive.envelope/v0`        |
+| Capabilities artifact       | `web-capture-archive.capabilities/v0`    |
+| Archive record              | `web-capture-archive.record/v0`          |
 
 Implementations MUST reject documents with a `schema` string they do not
 understand. Implementations MUST NOT silently treat an unknown schema as
@@ -1280,31 +1281,38 @@ a known one.
 
 ### Forward Compatibility
 
-Within a major version (`v1`), new OPTIONAL fields MAY be added to any
-document. Existing fields MUST NOT change semantics. Consumers MUST ignore
-unknown OPTIONAL fields.
+The `v0` series is **exploratory**: breaking changes — including renaming
+fields, tightening types, changing required/optional status, and altering
+the meaning of enum values — are permitted between revisions of this RFC.
+Implementations targeting `v0` SHOULD pin to a specific commit hash of
+this document and SHOULD NOT assume that two `v0` documents authored at
+different times are mutually compatible.
 
-A change that would make a previously valid document invalid — including
-renaming fields, tightening types, changing required/optional status, or
-altering the meaning of enum values — requires a major version bump
-(`v2`). Major version bumps trigger a superseding RFC per the RFC
-lifecycle.
+When the design stabilizes, a `v1` cut will be made. From `v1` onward,
+the standard major-version-stability contract applies: within a major
+version, new OPTIONAL fields MAY be added to any document, existing
+fields MUST NOT change semantics, and consumers MUST ignore unknown
+OPTIONAL fields. Any change that would make a previously valid document
+invalid will require a major version bump (`v2`, etc.) and a superseding
+RFC.
 
 ### Cross-Role Version Matching
 
 An orchestrator, capturer, and writer participating in the same capture
-MUST all use the same major version of this specification. Mixed-version
-batches are not supported. Implementations MAY detect mismatch via the
-`schema` field and refuse to proceed.
+MUST all use the same major version of this specification (or, during
+the `v0` series, the same RFC commit). Mixed-version batches are not
+supported. Implementations MAY detect mismatch via the `schema` field
+and refuse to proceed.
 
 ### Envelope Stability
 
-Within `v1`, the envelope artifact schema is stable. The capturer MAY add
-new optional fields to `envelope.stripped` as it gains support for
-additional normalization formats; consumers MUST NOT rely on the absence
-of any `stripped.*` subkey.
+Within `v0`, the envelope artifact schema is **provisional**. The
+capturer MAY add new optional fields to `envelope.stripped` as it gains
+support for additional normalization formats; consumers MUST NOT rely on
+the absence of any `stripped.*` subkey. Other envelope fields MAY be
+renamed, retyped, or removed in subsequent `v0` revisions.
 
-The `envelope.http.resolved_ip` field is OPTIONAL within `v1`. Its
+The `envelope.http.resolved_ip` field is OPTIONAL within `v0`. Its
 presence depends on the capturer's underlying transport: capturers using
 W3C WebDriver BiDi cannot currently surface a remote IP because the
 `network.ResponseData` type does not expose one. Consumers MUST treat
