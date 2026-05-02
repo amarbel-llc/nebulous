@@ -94,6 +94,10 @@ index (built from persistent store) → MCP response
 
 ## Nix Flake
 
-Follows the stable-first nixpkgs convention from the parent eng repo: `nixpkgs`
-= stable, `nixpkgs-master` = unstable. Devenvs are imported from `purse-first`
-(go + shell).
+Single nixpkgs input: `amarbel-llc/nixpkgs`, an overlay flake on top of
+upstream `nixpkgs/master` that surfaces the gomod2nix builders
+(`buildGoApplication`, `mkGoEnv`, `gomod2nix` CLI). Consumed via
+`nixpkgs.legacyPackages.${system}`. Sibling flake inputs (madder, chrest,
+bob, purse-first) follow our `nixpkgs` for their `nixpkgs` and follow
+`nixpkgs/nixpkgs` (the upstream master amarbel pins) for their
+`nixpkgs-master`. Devenvs are imported from `purse-first` (go + shell).

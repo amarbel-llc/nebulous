@@ -12,7 +12,8 @@
           "nixpkgs"
         ],
         "nixpkgs-master": [
-          "nixpkgs-master"
+          "nixpkgs",
+          "nixpkgs"
         ],
         "purse-first": "purse-first",
         "rust-overlay": "rust-overlay_2",
@@ -166,7 +167,8 @@
           "nixpkgs"
         ],
         "nixpkgs-master": [
-          "nixpkgs-master"
+          "nixpkgs",
+          "nixpkgs"
         ],
         "tommy": "tommy",
         "utils": [
@@ -964,7 +966,8 @@
           "nixpkgs"
         ],
         "nixpkgs-master": [
-          "nixpkgs-master"
+          "nixpkgs",
+          "nixpkgs"
         ],
         "purse-first": "purse-first_4",
         "tommy": "tommy_2",
@@ -1065,22 +1068,6 @@
       }
     },
     "nixpkgs-master_5": {
-      "locked": {
-        "lastModified": 1774366223,
-        "narHash": "sha256-EkNxFNHtu8q9oUcmcaQk/fsNrErrAMUMx4uMN5qjDIM=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "e2dde111aea2c0699531dc616112a96cd55ab8b5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "e2dde111aea2c0699531dc616112a96cd55ab8b5",
-        "type": "github"
-      }
-    },
-    "nixpkgs-master_6": {
       "locked": {
         "lastModified": 1774366223,
         "narHash": "sha256-EkNxFNHtu8q9oUcmcaQk/fsNrErrAMUMx4uMN5qjDIM=",
@@ -1418,7 +1405,8 @@
           "nixpkgs"
         ],
         "nixpkgs-master": [
-          "nixpkgs-master"
+          "nixpkgs",
+          "nixpkgs"
         ],
         "rust-overlay": "rust-overlay_10",
         "utils": [
@@ -1445,7 +1433,6 @@
         "chrest": "chrest",
         "madder": "madder",
         "nixpkgs": "nixpkgs_12",
-        "nixpkgs-master": "nixpkgs-master_6",
         "purse-first": "purse-first_6",
         "utils": "utils_5"
       }

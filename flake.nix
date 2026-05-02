@@ -2,34 +2,35 @@
   description = "NewsBlur MCP server";
 
   inputs = {
-    # amarbel-llc/nixpkgs carries the gomod2nix build helpers natively
-    # (pkgs.buildGoApplication, pkgs.mkGoEnv, pkgs.gomod2nix CLI). See
+    # amarbel-llc/nixpkgs is an overlay flake on top of upstream
+    # nixpkgs/master. Its `legacyPackages` exposes the gomod2nix build
+    # helpers (`buildGoApplication`, `mkGoEnv`, `gomod2nix` CLI) alongside
+    # the standard nixpkgs surface, with `allowUnfree = true`. See
     # `man 7 gomod2nix` inside the devshell for the migration guide.
     nixpkgs.url = "github:amarbel-llc/nixpkgs";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     madder = {
       url = "github:amarbel-llc/madder";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.nixpkgs-master.follows = "nixpkgs/nixpkgs";
       inputs.utils.follows = "utils";
     };
     chrest = {
       url = "github:amarbel-llc/chrest";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.nixpkgs-master.follows = "nixpkgs/nixpkgs";
       inputs.utils.follows = "utils";
     };
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.nixpkgs-master.follows = "nixpkgs/nixpkgs";
       inputs.utils.follows = "utils";
     };
     purse-first = {
       url = "github:amarbel-llc/purse-first";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.nixpkgs-master.follows = "nixpkgs/nixpkgs";
       inputs.utils.follows = "utils";
     };
   };
@@ -39,7 +40,6 @@
       self,
       nixpkgs,
       utils,
-      nixpkgs-master,
       madder,
       chrest,
       bob,
@@ -48,14 +48,12 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs { inherit system; };
-
-        pkgs-master = import nixpkgs-master { inherit system; };
+        pkgs = nixpkgs.legacyPackages.${system};
 
         # Single source of truth for the Go toolchain — threaded into
         # both buildGoApplication and mkGoEnv so the build-time and
         # devshell versions stay in lockstep.
-        go = pkgs-master.go_1_26;
+        go = pkgs.go_1_26;
 
         version = "0.1.0";
 
@@ -94,19 +92,19 @@
           madder = madderPkg;
         };
 
-        devShells.default = pkgs-master.mkShell {
+        devShells.default = pkgs.mkShell {
           packages = [
             # mkGoEnv propagates the pinned go toolchain, the
             # gomod2nix CLI, and the go-sync-wrap hook that auto-
             # regenerates gomod2nix.toml after `go get` / `go mod tidy`.
             (pkgs.mkGoEnv { pwd = ./.; inherit go; })
-            pkgs-master.delve
-            pkgs-master.gofumpt
-            pkgs-master.golangci-lint
-            pkgs-master.golines
-            pkgs-master.gopls
-            pkgs-master.gotools
-            pkgs-master.govulncheck
+            pkgs.delve
+            pkgs.gofumpt
+            pkgs.golangci-lint
+            pkgs.golines
+            pkgs.gopls
+            pkgs.gotools
+            pkgs.govulncheck
             pkgs.just
             pkgs.bats
             pkgs.shellcheck
