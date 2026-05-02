@@ -1129,16 +1129,35 @@
       }
     },
     "nixpkgs_12": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_13"
+      },
       "locked": {
-        "lastModified": 1777038787,
-        "narHash": "sha256-cu1t19xjWRGoGSqhS2RngWmenIImTf4jl86TeyXwcTE=",
+        "lastModified": 1777642091,
+        "narHash": "sha256-zgNLPnbbRZbAQt8uqfo0S2HNr5SXkpINWMv51Vngvzg=",
         "owner": "amarbel-llc",
         "repo": "nixpkgs",
-        "rev": "d8da94cdd5afbad8ef6c283789c925783595f650",
+        "rev": "ba254c01b25510e63be40e5ed7f65f59eccf020f",
         "type": "github"
       },
       "original": {
         "owner": "amarbel-llc",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_13": {
+      "locked": {
+        "lastModified": 1777639957,
+        "narHash": "sha256-N0Qb/WHzovKq+ZLEHAcDXAJpTidIqymKzd84FQLnxyU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "acd02b8771d0546f96ee281ac45c3a6f81b9bfba",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "master",
         "repo": "nixpkgs",
         "type": "github"
       }
