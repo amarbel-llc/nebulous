@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 
 	"github.com/friedenberg/nebulous/internal/0/archive"
 	"github.com/friedenberg/nebulous/internal/alfa/capturer"

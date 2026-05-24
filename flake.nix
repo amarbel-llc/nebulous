@@ -32,6 +32,12 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    tap = {
+      url = "github:amarbel-llc/tap";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -44,6 +50,7 @@
       chrest,
       bob,
       purse-first,
+      tap,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -63,7 +70,7 @@
         chrestPkg = chrest.packages.${system}.default;
 
         gomod = import ./gomod.nix {
-          inherit pkgs;
+          inherit pkgs system tap purse-first;
           src = self;
         };
 
@@ -79,6 +86,7 @@
           src = gomod.goPkgs.go-pkgs-test;
           pwd = gomod.goPkgs.go-pkgs-test;
           modules = ./gomod2nix.toml;
+          inherit (gomod) goFlakeInputs;
 
           subPackages = [ "cmd/nebulous" ];
 
@@ -112,7 +120,11 @@
             # mkGoEnv propagates the pinned go toolchain, the
             # gomod2nix CLI, and the go-sync-wrap hook that auto-
             # regenerates gomod2nix.toml after `go get` / `go mod tidy`.
-            (pkgs.mkGoEnv { pwd = ./.; inherit go; })
+            (pkgs.mkGoEnv {
+              pwd = ./.;
+              inherit go;
+              inherit (gomod) goFlakeInputs;
+            })
             pkgs-master.delve
             pkgs-master.gofumpt
             pkgs-master.golangci-lint

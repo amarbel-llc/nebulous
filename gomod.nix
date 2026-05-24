@@ -1,21 +1,34 @@
-# Nix side of go.mod: producer half of the flake-input-go_mod
-# protocol (amarbel-llc/nixpkgs RFC 0001).
+# Nix side of go.mod: producer + consumer halves of the
+# flake-input-go_mod protocol (amarbel-llc/nixpkgs RFC 0001).
 #
-# Publishes `go-pkgs` (prod: *.go excluding *_test.go + module files)
-# and `go-pkgs-test` (test superset: also *_test.go and testdata) via
-# `pkgs.mkGoPkgs`. Downstream consumers can then bridge nebulous's Go
-# module through `goFlakeInputs` instead of pinning gomod2nix hashes.
+# Producer: publishes go-pkgs (prod: *.go excluding *_test.go + module
+# files) and go-pkgs-test (test superset) via `pkgs.mkGoPkgs` so
+# downstream consumers can wire nebulous's Go module through
+# `goFlakeInputs` instead of pinning gomod2nix hashes.
 #
-# The consumer half (bridging sibling Go-module flakes through
-# `goFlakeInputs`) will land in the same file when adopted; per RFC
-# 0001 § The `gomod.nix` convention, producer and consumer halves
-# share one `gomod.nix`.
+# Consumer: bridges sibling Go-module flakes (tap, purse-first) so
+# cross-amarbel Go bumps collapse from a three-place edit
+# (go.mod + gomod2nix.toml + flake.lock) into one.
 {
   pkgs,
   src,
+  tap,
+  purse-first,
+  system,
 }:
 {
   goPkgs = pkgs.mkGoPkgs {
     inherit src;
+  };
+
+  goFlakeInputs = {
+    "github.com/amarbel-llc/tap/go" = {
+      src = tap.packages.${system}.go-pkgs;
+      subPath = "go";
+    };
+    "github.com/amarbel-llc/purse-first/libs/go-mcp" = {
+      src = purse-first.packages.${system}.go-pkgs;
+      subPath = "libs/go-mcp";
+    };
   };
 }

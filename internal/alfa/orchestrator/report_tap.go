@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
 // WriteTAPReport emits a TAP-14 stream describing an already-complete
