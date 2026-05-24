@@ -62,10 +62,22 @@
         madderPkg = madder.packages.${system}.default;
         chrestPkg = chrest.packages.${system}.default;
 
+        gomod = import ./gomod.nix {
+          inherit pkgs;
+          src = self;
+        };
+
+        # Self-consumption SHOULD (RFC 0001 § Producer interface):
+        # point our own buildGoApplication src/pwd at the published
+        # go-pkgs-test so checkPhase becomes the contract test for
+        # the producer outputs. Drift between the worktree and the
+        # filtered tree fails the build instead of slipping through
+        # to downstream consumers.
         nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
           inherit version go;
-          src = ./.;
+          src = gomod.goPkgs.go-pkgs-test;
+          pwd = gomod.goPkgs.go-pkgs-test;
           modules = ./gomod2nix.toml;
 
           subPackages = [ "cmd/nebulous" ];
@@ -92,6 +104,7 @@
           inherit nebulous;
           chrest = chrestPkg;
           madder = madderPkg;
+          inherit (gomod.goPkgs) go-pkgs go-pkgs-test;
         };
 
         devShells.default = pkgs-master.mkShell {
