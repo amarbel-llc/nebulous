@@ -291,11 +291,6 @@ schema = 3
     hash = 'sha256-hGo275DJlyLtcifSLpWnk8jardOksdeX9lH4lBeE3gI='
     goVersion = '1.17'
 
-  [mod.'github.com/pelletier/go-toml/v2']
-    version = 'v2.3.0'
-    hash = 'sha256-3ftKBqSwUp5rs10NigReAJ8RxfnP4Aol45EkP0XRaa4='
-    goVersion = '1.21.0'
-
   [mod.'github.com/pkg/sftp']
     version = 'v1.13.10'
     hash = 'sha256-YKjTWim2Qa6z3FA1dUFaKXSRxB4fsHDAG0GL17ZDE4U='

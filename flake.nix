@@ -14,12 +14,6 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-    chrest = {
-      url = "github:amarbel-llc/chrest";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.igloo.follows = "igloo";
@@ -47,7 +41,6 @@
       utils,
       nixpkgs-master,
       madder,
-      chrest,
       bob,
       purse-first,
       tap,
@@ -67,7 +60,6 @@
         version = "0.1.0";
 
         madderPkg = madder.packages.${system}.default;
-        chrestPkg = chrest.packages.${system}.default;
 
         gomod = import ./gomod.nix {
           inherit pkgs system tap purse-first;
@@ -92,7 +84,6 @@
 
           ldflags = [
             "-X github.com/friedenberg/nebulous/internal/0/madder.Bin=${madderPkg}/bin/madder"
-            "-X github.com/friedenberg/nebulous/internal/alfa/capturer.Bin=${chrestPkg}/bin/chrest"
           ];
 
           postInstall = ''
@@ -110,7 +101,6 @@
         packages = {
           default = nebulous;
           inherit nebulous;
-          chrest = chrestPkg;
           madder = madderPkg;
           inherit (gomod.goPkgs) go-pkgs go-pkgs-test;
         };
@@ -137,7 +127,6 @@
             pkgs.shellcheck
             pkgs.shfmt
             madderPkg
-            chrestPkg
             purse-first.packages.${system}.dagnabit
             bob.packages.${system}.batman
           ];
