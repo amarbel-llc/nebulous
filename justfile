@@ -32,6 +32,7 @@ build-go tag="debug":
   if [ -n "$(echo $ldflags)" ]; then ldflags_arg=(-ldflags "$ldflags"); fi
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous       ./cmd/nebulous
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/migrate-cache  ./cmd/migrate-cache
+  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous-cg    ./cmd/nebulous-cg
 
 build-nix:
   nix build --show-trace
@@ -57,6 +58,13 @@ debug-flake-update-input input:
 # [group: build]
 generate-facades:
   dagnabit export
+
+# Run the nebulous-cg cutting-garden plugin binary against the local
+# cache, e.g. `just cg list newsblur://feeds` or `just cg list newsblur://stories`.
+# Read-only traversal of the newsblur:// scheme; no token needed.
+# [group: explore]
+cg *args: build-go
+  build/debug/nebulous-cg {{args}}
 
 test-go *args:
   go test {{args}} ./...

@@ -1,0 +1,155 @@
+package cgplugin
+
+import (
+	"context"
+	"net/url"
+	"testing"
+
+	"github.com/friedenberg/nebulous/internal/bravo/tools"
+)
+
+// fakeIndex is a canned Index for exercising the plugin's traversal and
+// leaf routing without a live cache.
+type fakeIndex struct {
+	feeds       []tools.FeedRef
+	stories     []tools.StoryRef
+	feedStories map[int][]tools.StoryRef
+	tagStories  map[string][]tools.StoryRef
+	tags        []string
+	content     map[string]contentEntry
+	original    map[string][]byte
+}
+
+type contentEntry struct {
+	view tools.StoryContentView
+	raw  []byte
+}
+
+func (f *fakeIndex) Feeds(context.Context) ([]tools.FeedRef, error) { return f.feeds, nil }
+func (f *fakeIndex) Stories() ([]tools.StoryRef, error)            { return f.stories, nil }
+func (f *fakeIndex) FeedStories(id int) ([]tools.StoryRef, error)  { return f.feedStories[id], nil }
+func (f *fakeIndex) StoriesByTag(t string) ([]tools.StoryRef, error) {
+	return f.tagStories[t], nil
+}
+func (f *fakeIndex) Tags() ([]string, error) { return f.tags, nil }
+func (f *fakeIndex) StoryContent(h string) (tools.StoryContentView, []byte, bool) {
+	c, ok := f.content[h]
+	return c.view, c.raw, ok
+}
+func (f *fakeIndex) StoryOriginal(h string) ([]byte, bool) {
+	o, ok := f.original[h]
+	return o, ok
+}
+
+const sampleHash = "123:abc" // feed_id:guid — exercises the colon in a path
+
+func newFakeIndex() *fakeIndex {
+	return &fakeIndex{
+		feeds:       []tools.FeedRef{{ID: "123", Title: "Example Feed"}},
+		stories:     []tools.StoryRef{{Hash: sampleHash, Title: "A Story"}},
+		feedStories: map[int][]tools.StoryRef{123: {{Hash: sampleHash, Title: "A Story"}}},
+		tagStories:  map[string][]tools.StoryRef{"news": {{Hash: sampleHash, Title: "A Story"}}},
+		tags:        []string{"news"},
+		content: map[string]contentEntry{
+			sampleHash: {
+				view: tools.StoryContentView{Hash: sampleHash, Title: "A Story", Content: "hello", HasContent: false},
+				raw:  []byte("<p>hello</p>"),
+			},
+		},
+		original: map[string][]byte{sampleHash: []byte("<html>full</html>")},
+	}
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u
+}
+
+func TestRoots(t *testing.T) {
+	got, err := Plugin{}.Roots(context.Background())
+	if err != nil {
+		t.Fatalf("Roots: %v", err)
+	}
+	want := []string{"newsblur://feeds", "newsblur://stories", "newsblur://tags"}
+	if len(got) != len(want) {
+		t.Fatalf("Roots returned %d urls, want %d", len(got), len(want))
+	}
+	for i, u := range got {
+		if u.String() != want[i] {
+			t.Errorf("root[%d] = %q, want %q", i, u.String(), want[i])
+		}
+	}
+}
+
+func TestTypes(t *testing.T) {
+	types := Plugin{}.Types()
+	byTag := map[string]bool{}
+	for _, ty := range types {
+		byTag[ty.Tag] = ty.Container
+	}
+	if c, ok := byTag[typeStory]; !ok || !c {
+		t.Errorf("story type missing or not a container: %v", byTag)
+	}
+	if c, ok := byTag[typeStoryContent]; !ok || c {
+		t.Errorf("story-content type missing or wrongly a container: %v", byTag)
+	}
+}
+
+func TestListRoots(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	cases := []struct {
+		name     string
+		uri      string
+		wantURIs []string
+		wantType string
+	}{
+		{"feeds", "newsblur://feeds", []string{"newsblur://feed/123"}, typeFeed},
+		{"stories", "newsblur://stories", []string{"newsblur://story/123:abc"}, typeStory},
+		{"tags", "newsblur://tags", []string{"newsblur://tag/news"}, typeTag},
+		{"feed stories", "newsblur://feed/123", []string{"newsblur://story/123:abc"}, typeStory},
+		{"tag stories", "newsblur://tag/news", []string{"newsblur://story/123:abc"}, typeStory},
+		{
+			"story leaves", "newsblur://story/123:abc",
+			[]string{"newsblur://story/123:abc/content", "newsblur://story/123:abc/original"},
+			"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodes, err := Plugin{}.ListRoots(context.Background(), mustURL(t, tc.uri))
+			if err != nil {
+				t.Fatalf("ListRoots(%s): %v", tc.uri, err)
+			}
+			if len(nodes) != len(tc.wantURIs) {
+				t.Fatalf("ListRoots(%s) returned %d nodes, want %d", tc.uri, len(nodes), len(tc.wantURIs))
+			}
+			for i, n := range nodes {
+				if n.URI.String() != tc.wantURIs[i] {
+					t.Errorf("node[%d].URI = %q, want %q", i, n.URI.String(), tc.wantURIs[i])
+				}
+				if tc.wantType != "" && n.Type != tc.wantType {
+					t.Errorf("node[%d].Type = %q, want %q", i, n.Type, tc.wantType)
+				}
+			}
+		})
+	}
+}
+
+func TestListRootsLeafHasNoChildren(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	nodes, err := Plugin{}.ListRoots(context.Background(), mustURL(t, "newsblur://story/123:abc/content"))
+	if err != nil {
+		t.Fatalf("ListRoots(content leaf): %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Errorf("content leaf reported %d children, want 0", len(nodes))
+	}
+}
