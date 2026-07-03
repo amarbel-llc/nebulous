@@ -32,6 +32,29 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    bob.inputs.tap.inputs.bats.follows = "bob/bats";
+    bob.inputs.gomod2nix.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
+    bob.inputs.purse-first.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
+    bob.inputs.tap.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
+    bob.inputs.purse-first.inputs.gomod2nix.follows = "bob/gomod2nix";
+    bob.inputs.tap.inputs.gomod2nix.follows = "bob/gomod2nix";
+    bob.inputs.tap.inputs.purse-first.follows = "bob/purse-first";
+    bob.inputs.tap.inputs.rust-overlay.follows = "bob/rust-overlay";
+    utils.inputs.systems.follows = "igloo/systems";
+    tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
+    bob.inputs.bats.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
+    bob.inputs.tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
+    madder.inputs.bats.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
+    tap.inputs.bats.follows = "madder/bats";
+    igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
+    madder.inputs.purse-first.follows = "purse-first";
+    tap.inputs.purse-first.follows = "purse-first";
+    tap.inputs.gomod2nix.follows = "purse-first/gomod2nix";
+    madder.inputs.tap.follows = "tap";
+    bob.inputs.bats.inputs.utils.follows = "utils";
+    bob.inputs.gomod2nix.inputs.flake-utils.follows = "utils";
+    bob.inputs.purse-first.inputs.utils.follows = "utils";
+    bob.inputs.tap.inputs.utils.follows = "utils";
   };
 
   outputs =
@@ -62,7 +85,12 @@
         madderPkg = madder.packages.${system}.default;
 
         gomod = import ./gomod.nix {
-          inherit pkgs system tap purse-first;
+          inherit
+            pkgs
+            system
+            tap
+            purse-first
+            ;
           src = self;
         };
 

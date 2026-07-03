@@ -26,8 +26,9 @@ type contentEntry struct {
 }
 
 func (f *fakeIndex) Feeds(context.Context) ([]tools.FeedRef, error) { return f.feeds, nil }
-func (f *fakeIndex) Stories() ([]tools.StoryRef, error)            { return f.stories, nil }
-func (f *fakeIndex) FeedStories(id int) ([]tools.StoryRef, error)  { return f.feedStories[id], nil }
+func (f *fakeIndex) Stories() ([]tools.StoryRef, error)             { return f.stories, nil }
+func (f *fakeIndex) FeedStories(id int) ([]tools.StoryRef, error) { return f.feedStories[id], nil }
+
 func (f *fakeIndex) StoriesByTag(t string) ([]tools.StoryRef, error) {
 	return f.tagStories[t], nil
 }
@@ -36,6 +37,7 @@ func (f *fakeIndex) StoryContent(h string) (tools.StoryContentView, []byte, bool
 	c, ok := f.content[h]
 	return c.view, c.raw, ok
 }
+
 func (f *fakeIndex) StoryOriginal(h string) ([]byte, bool) {
 	o, ok := f.original[h]
 	return o, ok
