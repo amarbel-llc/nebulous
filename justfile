@@ -48,9 +48,13 @@ debug-flake-update-input input:
 
 # Regenerate pkgs/ facades from internal/ packages via dagnabit.
 # No-op until a source file contains `//go:generate dagnabit export`.
+# DAGNABIT_CEILING_DIRECTORIES bounds dagnabit's upward formatter-config
+# search at the repo root — nebulous has no on-disk conformist/treefmt
+# config, and an unbounded walk escalates to a stray ancestor
+# conformist.toml (an eng-root checkout).
 # [group: build]
 generate-facades:
-  dagnabit export
+  DAGNABIT_CEILING_DIRECTORIES="{{justfile_directory()}}" dagnabit export
 
 # Run the nebulous-cg cutting-garden plugin binary against the local
 # cache, e.g. `just cg list newsblur://feeds` or `just cg list newsblur://stories`.
