@@ -64,7 +64,8 @@ require a token.
     internal/charlie/cgplugin/     cutting-garden newsblur:// scheme plugin
       plugin.go                    Plugin identity + Index injection (SetIndex)
       traversal.go                 Types / Roots / ListRoots
-      leaf.go                      ReadLeaf (story content + original)
+      leaf.go                      ReadLeaf (story content/original/metadata, feed metadata)
+      facets.go                    FacetDescriber / FacetCounter / FacetLabeler
       url.go                       newsblur:// URL build/parse
 
 ### Two-Phase Architecture: Sync + Serve

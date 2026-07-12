@@ -27,42 +27,47 @@ func NewReadIndex(client *newsblur.Client) *ReadIndex {
 	}
 }
 
-// FeedRef is a feed's identity for a traversal listing.
+// FeedRef is a feed's identity plus the fields the newsblur-feed-v1
+// facet dimensions (folder, active) are drawn from.
 type FeedRef struct {
-	ID    string
-	Title string
+	ID     string
+	Title  string
+	Folder string
+	Active bool
 }
 
-// StoryRef is a story's identity for a traversal listing.
+// StoryRef is a story's identity plus the fields the newsblur-story-v1
+// facet dimensions (year, tags, feed, read) are drawn from.
 type StoryRef struct {
-	Hash  string
-	Title string
+	Hash     string
+	Title    string
+	Year     int
+	FeedID   int
+	UserTags []string
+	Tags     []string
+	Read     bool
 }
 
-// Feeds returns every subscribed feed (id + title).
+// Feeds returns every subscribed feed.
 func (r *ReadIndex) Feeds(ctx context.Context) ([]FeedRef, error) {
 	if err := r.feeds.ensureBuilt(ctx); err != nil {
 		return nil, err
 	}
-	out := make([]FeedRef, 0, len(r.feeds.feeds))
-	for idStr, raw := range r.feeds.feeds {
-		var f struct {
-			Title string `json:"feed_title"`
-		}
-		_ = json.Unmarshal(raw, &f)
-		out = append(out, FeedRef{ID: idStr, Title: f.Title})
+	out := make([]FeedRef, 0, len(r.feeds.summaries))
+	for idStr, s := range r.feeds.summaries {
+		out = append(out, FeedRef{ID: idStr, Title: s.Title, Folder: s.Folder, Active: s.Active})
 	}
 	return out, nil
 }
 
-// Stories returns every indexed (starred) story (hash + title).
+// Stories returns every indexed (starred) story.
 func (r *ReadIndex) Stories() ([]StoryRef, error) {
 	if err := r.stories.ensureBuilt(); err != nil {
 		return nil, err
 	}
 	out := make([]StoryRef, 0, len(r.stories.stories))
 	for _, rec := range r.stories.stories {
-		out = append(out, StoryRef{Hash: rec.Hash, Title: rec.Title})
+		out = append(out, storyRefOf(rec))
 	}
 	return out, nil
 }
@@ -75,7 +80,7 @@ func (r *ReadIndex) FeedStories(feedID int) ([]StoryRef, error) {
 	var out []StoryRef
 	for _, rec := range r.stories.stories {
 		if rec.FeedID == feedID {
-			out = append(out, StoryRef{Hash: rec.Hash, Title: rec.Title})
+			out = append(out, storyRefOf(rec))
 		}
 	}
 	return out, nil
@@ -90,10 +95,22 @@ func (r *ReadIndex) StoriesByTag(tag string) ([]StoryRef, error) {
 	var out []StoryRef
 	for _, rec := range r.stories.stories {
 		if rec.hasTag(tag) {
-			out = append(out, StoryRef{Hash: rec.Hash, Title: rec.Title})
+			out = append(out, storyRefOf(rec))
 		}
 	}
 	return out, nil
+}
+
+func storyRefOf(rec *storyRecord) StoryRef {
+	return StoryRef{
+		Hash:     rec.Hash,
+		Title:    rec.Title,
+		Year:     rec.Year,
+		FeedID:   rec.FeedID,
+		UserTags: rec.UserTags,
+		Tags:     rec.Tags,
+		Read:     rec.Read,
+	}
 }
 
 // Tags returns the union of user tags and story tags across the corpus.
@@ -113,6 +130,104 @@ func (r *ReadIndex) Tags() ([]string, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// FeedMetadataView is a feed's subscription-state projection — the
+// …/metadata leaf's structured view.
+type FeedMetadataView struct {
+	ID       string `json:"id"`
+	Title    string `json:"feed_title"`
+	Link     string `json:"feed_link"`
+	Folder   string `json:"folder,omitempty"`
+	Active   bool   `json:"active"`
+	Disabled bool   `json:"disabled"`
+	NT       int    `json:"nt"`
+	NG       int    `json:"ng"`
+	PS       int    `json:"ps"`
+}
+
+// FeedMetadata returns the structured + raw views of a feed's cached
+// subscription record. ok is false when id is not indexed.
+func (r *ReadIndex) FeedMetadata(ctx context.Context, id string) (view FeedMetadataView, raw json.RawMessage, ok bool) {
+	if err := r.feeds.ensureBuilt(ctx); err != nil {
+		return FeedMetadataView{}, nil, false
+	}
+	raw, ok = r.feeds.feeds[id]
+	if !ok {
+		return FeedMetadataView{}, nil, false
+	}
+	// The cached feed's own "id" is a JSON number; ID is filled in from
+	// the caller's string id below rather than unmarshaled, to avoid a
+	// string/number type mismatch.
+	var body struct {
+		Title    string `json:"feed_title"`
+		Link     string `json:"feed_link"`
+		Active   bool   `json:"active"`
+		Disabled bool   `json:"disabled"`
+		NT       int    `json:"nt"`
+		NG       int    `json:"ng"`
+		PS       int    `json:"ps"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return FeedMetadataView{}, nil, false
+	}
+	folder := ""
+	if s, ok := r.feeds.summaries[id]; ok {
+		folder = s.Folder
+	}
+	view = FeedMetadataView{
+		ID: id, Title: body.Title, Link: body.Link, Folder: folder,
+		Active: body.Active, Disabled: body.Disabled,
+		NT: body.NT, NG: body.NG, PS: body.PS,
+	}
+	return view, raw, true
+}
+
+// StoryMetadataView is a story's bibliographic projection — everything
+// but the body text, which lives on the content/original leaves.
+type StoryMetadataView struct {
+	Hash      string   `json:"hash"`
+	Title     string   `json:"title"`
+	Authors   string   `json:"authors"`
+	Permalink string   `json:"permalink"`
+	FeedID    int      `json:"feed_id"`
+	Date      string   `json:"date"`
+	Tags      []string `json:"tags"`
+	UserTags  []string `json:"user_tags"`
+	Starred   bool     `json:"starred"`
+	Read      bool     `json:"read"`
+}
+
+// StoryMetadata returns the structured + raw views of a story's
+// bibliographic fields. ok is false when the story is not in the local
+// store.
+func (r *ReadIndex) StoryMetadata(hash string) (view StoryMetadataView, raw []byte, ok bool) {
+	storyRaw, ok := r.stories.rawStoryByHash(hash)
+	if !ok {
+		return StoryMetadataView{}, nil, false
+	}
+	var full struct {
+		Hash       string   `json:"story_hash"`
+		Title      string   `json:"story_title"`
+		Authors    string   `json:"story_authors"`
+		Permalink  string   `json:"story_permalink"`
+		FeedID     int      `json:"story_feed_id"`
+		Date       string   `json:"story_date"`
+		Tags       []string `json:"story_tags"`
+		UserTags   []string `json:"user_tags"`
+		Starred    bool     `json:"starred"`
+		ReadStatus int      `json:"read_status"`
+	}
+	if err := json.Unmarshal(storyRaw, &full); err != nil {
+		return StoryMetadataView{}, nil, false
+	}
+	view = StoryMetadataView{
+		Hash: full.Hash, Title: full.Title, Authors: full.Authors,
+		Permalink: full.Permalink, FeedID: full.FeedID, Date: full.Date,
+		Tags: full.Tags, UserTags: full.UserTags, Starred: full.Starred,
+		Read: full.ReadStatus == 1,
+	}
+	return view, storyRaw, true
 }
 
 // StoryContentView is the structured projection of a story's cached

@@ -49,17 +49,23 @@ It serves the same local index as a content-addressable traversal tree:
 newsblur://feeds                  the subscription list (→ feeds)
 newsblur://stories                the starred-story corpus (→ stories)
 newsblur://tags                   the tag dictionary (→ tags)
-newsblur://feed/{id}              one feed's stories
+newsblur://feed/{id}              one feed's stories, plus its metadata leaf
+newsblur://feed/{id}/metadata     cached feed subscription record (JSON)
 newsblur://tag/{tag}              stories carrying a tag
-newsblur://story/{hash}           a story → its content + original leaves
+newsblur://story/{hash}           a story → its content/original/metadata leaves
 newsblur://story/{hash}/content   cached story_content (HTML, stripped)
 newsblur://story/{hash}/original  cached original article text (HTML)
+newsblur://story/{hash}/metadata  bibliographic fields (authors, tags, date, …)
 ```
 
 Discover and traverse it via the cutting-garden commands, e.g.
 `nebulous-cg health` or `nebulous-cg list newsblur://feeds`. Reads only the
-local cache — no NewsBlur token needed. (Facet-based aggregation over the
-tree lands once the cutting-garden facet SDK is tagged.)
+local cache — no NewsBlur token needed.
+
+Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
+`story_tag`, `feed`, `read` on stories; `folder`, `active` on feeds) via the
+cutting-garden `FacetDescriber`/`FacetCounter`/`FacetLabeler` capabilities —
+see `internal/charlie/cgplugin/facets.go`.
 
 ## CLI
 

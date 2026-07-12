@@ -25,11 +25,12 @@ type feedSummary struct {
 }
 
 type feedIndex struct {
-	client *newsblur.Client
-	once   sync.Once
-	words  map[string][]feedSummary
-	feeds  map[string]json.RawMessage
-	err    error
+	client    *newsblur.Client
+	once      sync.Once
+	words     map[string][]feedSummary
+	feeds     map[string]json.RawMessage
+	summaries map[string]feedSummary
+	err       error
 }
 
 func newFeedIndex(client *newsblur.Client) *feedIndex {
@@ -42,6 +43,7 @@ func (idx *feedIndex) ensureBuilt(ctx context.Context) error {
 	idx.once.Do(func() {
 		idx.words = make(map[string][]feedSummary)
 		idx.feeds = make(map[string]json.RawMessage)
+		idx.summaries = make(map[string]feedSummary)
 		idx.err = idx.build(ctx)
 	})
 	return idx.err
@@ -103,6 +105,7 @@ func (idx *feedIndex) build(ctx context.Context) error {
 			PS:     feed.PS,
 			Active: feed.Active && !feed.Disabled,
 		}
+		idx.summaries[idStr] = summary
 
 		var sources []string
 		sources = append(sources, feed.Title)

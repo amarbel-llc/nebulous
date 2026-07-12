@@ -11,6 +11,7 @@ package cgplugin
 
 import (
 	"context"
+	"encoding/json"
 
 	cg "github.com/amarbel-llc/cutting-garden/pkgs/cutting_garden_plugins"
 	"github.com/friedenberg/nebulous/internal/bravo/tools"
@@ -25,8 +26,10 @@ type Index interface {
 	FeedStories(feedID int) ([]tools.StoryRef, error)
 	StoriesByTag(tag string) ([]tools.StoryRef, error)
 	Tags() ([]string, error)
+	FeedMetadata(ctx context.Context, id string) (tools.FeedMetadataView, json.RawMessage, bool)
 	StoryContent(hash string) (tools.StoryContentView, []byte, bool)
 	StoryOriginal(hash string) ([]byte, bool)
+	StoryMetadata(hash string) (tools.StoryMetadataView, []byte, bool)
 }
 
 var _ Index = (*tools.ReadIndex)(nil)

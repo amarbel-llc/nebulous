@@ -3,7 +3,7 @@ module github.com/friedenberg/nebulous
 go 1.26
 
 require (
-	github.com/amarbel-llc/cutting-garden v0.1.22
+	github.com/amarbel-llc/cutting-garden v0.1.24
 	github.com/amarbel-llc/purse-first/libs/go-mcp v0.3.1
 	golang.org/x/text v0.37.0
 )
@@ -13,8 +13,10 @@ require (
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/amarbel-llc/crap/go-crap/v2 v2.2.2 // indirect
-	github.com/amarbel-llc/madder/go v0.3.36 // indirect
-	github.com/amarbel-llc/purse-first/libs/dewey v0.3.0 // indirect
+	github.com/amarbel-llc/hyphence/go v0.2.0 // indirect
+	github.com/amarbel-llc/madder/go v0.4.1-0.20260706024145-0063d397ab40 // indirect
+	github.com/amarbel-llc/piggy/go v0.0.0-20260706021717-a08ad5ae28b3 // indirect
+	github.com/amarbel-llc/purse-first/libs/dewey v0.3.2 // indirect
 	github.com/amarbel-llc/tap/go v0.1.11 // indirect
 	github.com/amarbel-llc/tommy v0.4.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect

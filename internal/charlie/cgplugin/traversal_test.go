@@ -2,6 +2,7 @@ package cgplugin
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"testing"
 
@@ -11,13 +12,15 @@ import (
 // fakeIndex is a canned Index for exercising the plugin's traversal and
 // leaf routing without a live cache.
 type fakeIndex struct {
-	feeds       []tools.FeedRef
-	stories     []tools.StoryRef
-	feedStories map[int][]tools.StoryRef
-	tagStories  map[string][]tools.StoryRef
-	tags        []string
-	content     map[string]contentEntry
-	original    map[string][]byte
+	feeds         []tools.FeedRef
+	stories       []tools.StoryRef
+	feedStories   map[int][]tools.StoryRef
+	tagStories    map[string][]tools.StoryRef
+	tags          []string
+	feedMetadata  map[string]feedMetadataEntry
+	content       map[string]contentEntry
+	original      map[string][]byte
+	storyMetadata map[string]storyMetadataEntry
 }
 
 type contentEntry struct {
@@ -25,14 +28,30 @@ type contentEntry struct {
 	raw  []byte
 }
 
+type feedMetadataEntry struct {
+	view tools.FeedMetadataView
+	raw  json.RawMessage
+}
+
+type storyMetadataEntry struct {
+	view tools.StoryMetadataView
+	raw  []byte
+}
+
 func (f *fakeIndex) Feeds(context.Context) ([]tools.FeedRef, error) { return f.feeds, nil }
 func (f *fakeIndex) Stories() ([]tools.StoryRef, error)             { return f.stories, nil }
-func (f *fakeIndex) FeedStories(id int) ([]tools.StoryRef, error) { return f.feedStories[id], nil }
+func (f *fakeIndex) FeedStories(id int) ([]tools.StoryRef, error)   { return f.feedStories[id], nil }
 
 func (f *fakeIndex) StoriesByTag(t string) ([]tools.StoryRef, error) {
 	return f.tagStories[t], nil
 }
 func (f *fakeIndex) Tags() ([]string, error) { return f.tags, nil }
+
+func (f *fakeIndex) FeedMetadata(_ context.Context, id string) (tools.FeedMetadataView, json.RawMessage, bool) {
+	m, ok := f.feedMetadata[id]
+	return m.view, m.raw, ok
+}
+
 func (f *fakeIndex) StoryContent(h string) (tools.StoryContentView, []byte, bool) {
 	c, ok := f.content[h]
 	return c.view, c.raw, ok
@@ -41,6 +60,11 @@ func (f *fakeIndex) StoryContent(h string) (tools.StoryContentView, []byte, bool
 func (f *fakeIndex) StoryOriginal(h string) ([]byte, bool) {
 	o, ok := f.original[h]
 	return o, ok
+}
+
+func (f *fakeIndex) StoryMetadata(h string) (tools.StoryMetadataView, []byte, bool) {
+	m, ok := f.storyMetadata[h]
+	return m.view, m.raw, ok
 }
 
 const sampleHash = "123:abc" // feed_id:guid — exercises the colon in a path
@@ -52,6 +76,12 @@ func newFakeIndex() *fakeIndex {
 		feedStories: map[int][]tools.StoryRef{123: {{Hash: sampleHash, Title: "A Story"}}},
 		tagStories:  map[string][]tools.StoryRef{"news": {{Hash: sampleHash, Title: "A Story"}}},
 		tags:        []string{"news"},
+		feedMetadata: map[string]feedMetadataEntry{
+			"123": {
+				view: tools.FeedMetadataView{ID: "123", Title: "Example Feed"},
+				raw:  json.RawMessage(`{"id":123,"feed_title":"Example Feed"}`),
+			},
+		},
 		content: map[string]contentEntry{
 			sampleHash: {
 				view: tools.StoryContentView{Hash: sampleHash, Title: "A Story", Content: "hello", HasContent: false},
@@ -59,6 +89,12 @@ func newFakeIndex() *fakeIndex {
 			},
 		},
 		original: map[string][]byte{sampleHash: []byte("<html>full</html>")},
+		storyMetadata: map[string]storyMetadataEntry{
+			sampleHash: {
+				view: tools.StoryMetadataView{Hash: sampleHash, Title: "A Story"},
+				raw:  []byte(`{"story_hash":"123:abc","story_title":"A Story"}`),
+			},
+		},
 	}
 }
 
@@ -114,11 +150,19 @@ func TestListRoots(t *testing.T) {
 		{"feeds", "newsblur://feeds", []string{"newsblur://feed/123"}, typeFeed},
 		{"stories", "newsblur://stories", []string{"newsblur://story/123:abc"}, typeStory},
 		{"tags", "newsblur://tags", []string{"newsblur://tag/news"}, typeTag},
-		{"feed stories", "newsblur://feed/123", []string{"newsblur://story/123:abc"}, typeStory},
+		{
+			"feed stories", "newsblur://feed/123",
+			[]string{"newsblur://story/123:abc", "newsblur://feed/123/metadata"},
+			"",
+		},
 		{"tag stories", "newsblur://tag/news", []string{"newsblur://story/123:abc"}, typeStory},
 		{
 			"story leaves", "newsblur://story/123:abc",
-			[]string{"newsblur://story/123:abc/content", "newsblur://story/123:abc/original"},
+			[]string{
+				"newsblur://story/123:abc/content",
+				"newsblur://story/123:abc/original",
+				"newsblur://story/123:abc/metadata",
+			},
 			"",
 		},
 	}

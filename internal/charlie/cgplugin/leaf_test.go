@@ -73,3 +73,55 @@ func TestReadLeafUncachedOriginal(t *testing.T) {
 		t.Error("ReadLeaf(uncached original) ok=true, want false")
 	}
 }
+
+func TestReadLeafStoryMetadata(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	got, ok, err := Plugin{}.ReadLeaf(context.Background(), mustURL(t, "newsblur://story/123:abc/metadata"))
+	if err != nil {
+		t.Fatalf("ReadLeaf(story metadata): %v", err)
+	}
+	if !ok {
+		t.Fatal("ReadLeaf(story metadata) ok=false, want true")
+	}
+	if got.RawMimeType != jsonMime {
+		t.Errorf("RawMimeType = %q, want %q", got.RawMimeType, jsonMime)
+	}
+	if got.Structured == nil {
+		t.Error("Structured is nil, want the metadata view")
+	}
+}
+
+func TestReadLeafFeedMetadata(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	got, ok, err := Plugin{}.ReadLeaf(context.Background(), mustURL(t, "newsblur://feed/123/metadata"))
+	if err != nil {
+		t.Fatalf("ReadLeaf(feed metadata): %v", err)
+	}
+	if !ok {
+		t.Fatal("ReadLeaf(feed metadata) ok=false, want true")
+	}
+	if got.RawMimeType != jsonMime {
+		t.Errorf("RawMimeType = %q, want %q", got.RawMimeType, jsonMime)
+	}
+	if got.Structured == nil {
+		t.Error("Structured is nil, want the metadata view")
+	}
+}
+
+// An uncached feed's metadata yields ok=false (no error).
+func TestReadLeafUncachedFeedMetadata(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	_, ok, err := Plugin{}.ReadLeaf(context.Background(), mustURL(t, "newsblur://feed/999/metadata"))
+	if err != nil {
+		t.Fatalf("ReadLeaf(uncached feed metadata): %v", err)
+	}
+	if ok {
+		t.Error("ReadLeaf(uncached feed metadata) ok=true, want false")
+	}
+}
