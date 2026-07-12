@@ -6,6 +6,8 @@
 # *_BIN env vars with PATH fallback.
 
 if [[ -z $BATS_TEST_TMPDIR ]]; then
+  # SC2016: literal $BATS_TEST_TMPDIR in the message string; no expansion wanted
+  # shellcheck disable=SC2016
   echo 'common.bash loaded before $BATS_TEST_TMPDIR set. aborting.' >&2
 
   cat >&2 <<-'EOM'

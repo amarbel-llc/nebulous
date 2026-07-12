@@ -129,6 +129,32 @@
     "conformist": {
       "inputs": {
         "igloo": [
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783882300,
+        "narHash": "sha256-aK0LVzftd/E7LR8tgjTsnEkLSyZecMqjtqyq4VDeHEc=",
+        "ref": "refs/heads/master",
+        "rev": "275968632782fd978b9db60926990fc38f3715bb",
+        "revCount": 144,
+        "type": "git",
+        "url": "https://code.linenisgreat.com/conformist.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://code.linenisgreat.com/conformist.git"
+      }
+    },
+    "conformist_2": {
+      "inputs": {
+        "igloo": [
           "madder",
           "igloo"
         ],
@@ -155,7 +181,7 @@
         "type": "github"
       }
     },
-    "conformist_2": {
+    "conformist_3": {
       "inputs": {
         "igloo": [
           "purse-first",
@@ -444,7 +470,7 @@
     "madder": {
       "inputs": {
         "bats": "bats_2",
-        "conformist": "conformist",
+        "conformist": "conformist_2",
         "crap": "crap",
         "doppelgang": "doppelgang",
         "hyphence": "hyphence",
@@ -623,7 +649,7 @@
     },
     "purse-first_2": {
       "inputs": {
-        "conformist": "conformist_2",
+        "conformist": "conformist_3",
         "gomod2nix": "gomod2nix_2",
         "igloo": [
           "igloo"
@@ -652,6 +678,7 @@
     "root": {
       "inputs": {
         "bob": "bob",
+        "conformist": "conformist",
         "igloo": "igloo",
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master_2",

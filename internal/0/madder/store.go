@@ -28,6 +28,7 @@ import (
 	_ "github.com/amarbel-llc/madder/go/pkgs/markl_registrations" // registers the config-digest markl purpose; EncodeWithDigest panics without it
 	"github.com/amarbel-llc/madder/go/pkgs/scoped_id"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/errors"
+
 	// The markl interface vocabulary (including the concrete Id type) was
 	// moved upstream to piggy (piggy#183 ownership inversion); madder's
 	// own domain_interfaces.MarklId is now a type alias into this package.

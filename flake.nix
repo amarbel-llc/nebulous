@@ -55,10 +55,17 @@
     bob.inputs.gomod2nix.inputs.flake-utils.follows = "utils";
     bob.inputs.purse-first.inputs.utils.follows = "utils";
     bob.inputs.tap.inputs.utils.follows = "utils";
+    conformist = {
+      url = "git+https://code.linenisgreat.com/conformist.git";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
     {
+      conformist,
       self,
       igloo,
       utils,
@@ -68,6 +75,12 @@
       purse-first,
       tap,
     }:
+    let
+      nebulousVersion = builtins.head (
+        builtins.match ".*NEBULOUS_VERSION=([^\n]+).*" (builtins.readFile ./version.env)
+      );
+      nebulousCommit = self.shortRev or self.dirtyShortRev or "unknown";
+    in
     {
       # System-independent module outputs (circus-host-integration(7)'s
       # producer-exports-modules convention). `self` is threaded in so
@@ -89,8 +102,6 @@
         # devshell versions stay in lockstep.
         go = pkgs-master.go_1_26;
 
-        version = "0.1.0";
-
         madderPkg = madder.packages.${system}.default;
 
         gomod = import ./gomod.nix {
@@ -111,7 +122,8 @@
         # to downstream consumers.
         nebulous = pkgs.buildGoApplication {
           pname = "nebulous";
-          inherit version go;
+          inherit go;
+          version = nebulousVersion;
           src = gomod.goPkgs.go-pkgs-test;
           pwd = gomod.goPkgs.go-pkgs-test;
           modules = ./gomod2nix.toml;
@@ -132,6 +144,23 @@
             license = licenses.mit;
           };
         };
+
+        conformistPkg = conformist.packages.${system}.default;
+
+        conformistEval = conformist.lib.evalModule pkgs {
+          imports = [
+            conformist.lib.presets.eng
+            conformist.lib.presets.eng-go
+            ./conformist.nix
+          ];
+          package = conformistPkg;
+        };
+
+        conformistImpureEval = conformist.lib.evalModule pkgs {
+          imports = [ conformist.lib.presets.eng-impure ];
+          package = conformistPkg;
+          projectRootFile = "flake.nix";
+        };
       in
       {
         packages = {
@@ -139,6 +168,9 @@
           inherit nebulous;
           madder = madderPkg;
           inherit (gomod.goPkgs) go-pkgs go-pkgs-test;
+          conformist-impure-config = conformistImpureEval.config.build.configFile;
+          conformist-pre-commit = conformistEval.config.build.preCommit;
+          conformist-repair = conformistEval.config.build.repair;
         };
 
         # Eval-check for the exported NixOS/home-manager modules
@@ -223,12 +255,18 @@
             madderPkg
             purse-first.packages.${system}.dagnabit
             bob.packages.${system}.batman
+            conformistPkg
+            conformistEval.config.build.preCommit
+            conformistEval.config.build.repair
           ];
 
           shellHook = ''
             export BATS_LIB_PATH=${bob.packages.${system}.batman}/share/bats
           '';
         };
+
+        formatter = conformistEval.config.build.wrapper;
+        checks.formatting = conformistEval.config.build.check self;
       }
     );
 }
