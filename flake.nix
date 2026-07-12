@@ -68,7 +68,16 @@
       purse-first,
       tap,
     }:
-    utils.lib.eachDefaultSystem (
+    {
+      # System-independent module outputs (circus-host-integration(7)'s
+      # producer-exports-modules convention). `self` is threaded in so
+      # each module's `package` option self-defaults to this flake's own
+      # nebulous build; circus adds this flake as an input and flips
+      # services.nebulous.enable.
+      nixosModules.default = import ./nix/nixos-module.nix self;
+      homeManagerModules.default = import ./nix/home-manager-module.nix self;
+    }
+    // utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import igloo { inherit system; };
@@ -108,7 +117,10 @@
           modules = ./gomod2nix.toml;
           inherit (gomod) goFlakeInputs;
 
-          subPackages = [ "cmd/nebulous" ];
+          subPackages = [
+            "cmd/nebulous"
+            "cmd/nebulous-cg"
+          ];
 
           postInstall = ''
             $out/bin/nebulous generate-plugin $out
@@ -128,6 +140,64 @@
           madder = madderPkg;
           inherit (gomod.goPkgs) go-pkgs go-pkgs-test;
         };
+
+        # Eval-check for the exported NixOS/home-manager modules
+        # (docs/features/0001-krone-live-service.md Stage 2): instantiate
+        # the exported NixOS module through a minimal host and assert the
+        # timer/service it renders carry the configured values through
+        # correctly — a logic error in the module's option-merge or
+        # config block fails this gate. Mirrors cutting-garden's own
+        # checks.modules-eval (nix/nixos-module.nix + flake.nix) shape.
+        # Network-free, no real binary invocation needed (unlike
+        # cutting-garden's config.toml-loading test) since nebulous's
+        # secret seam is a plain systemd EnvironmentFile, not a rendered
+        # config file this module parses itself.
+        checks.modules-eval =
+          # igloo.lib.nixosSystem assumes Linux; skip on darwin rather than
+          # force an evaluator that can't run there.
+          if !pkgs.stdenv.hostPlatform.isLinux then
+            pkgs.runCommand "nebulous-modules-eval-skipped" { } "touch \"$out\""
+          else
+            let
+              hostConfig =
+                (igloo.lib.nixosSystem {
+                  inherit system;
+                  modules = [
+                    self.nixosModules.default
+                    {
+                      system.stateVersion = "25.11";
+                      services.nebulous = {
+                        enable = true;
+                        fetchInterval = "42min";
+                      };
+                    }
+                  ];
+                }).config;
+              execStart = hostConfig.systemd.services.nebulous-fetch.serviceConfig.ExecStart;
+              onUnitActiveSec = hostConfig.systemd.timers.nebulous-fetch.timerConfig.OnUnitActiveSec;
+              installsPackage = builtins.elem nebulous hostConfig.environment.systemPackages;
+            in
+            pkgs.runCommand "nebulous-modules-eval"
+              {
+                inherit execStart onUnitActiveSec;
+                installsPackage = if installsPackage then "1" else "";
+              }
+              ''
+                echo "--- nebulous-fetch.serviceConfig.ExecStart ---"
+                echo "$execStart"
+                echo "$execStart" | grep -q '/bin/nebulous fetch'
+
+                echo "--- nebulous-fetch timer OnUnitActiveSec ---"
+                echo "$onUnitActiveSec"
+                [ "$onUnitActiveSec" = "42min" ]
+
+                [ -n "$installsPackage" ] || {
+                  echo "nebulous package missing from environment.systemPackages" >&2
+                  exit 1
+                }
+
+                touch "$out"
+              '';
 
         devShells.default = pkgs-master.mkShell {
           packages = [

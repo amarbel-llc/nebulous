@@ -152,11 +152,23 @@ corpus. This is Stage 1 of the roadmap below and is starting immediately.
   same pattern circus's own `nix-cache` module already uses (its
   `backend = "madder"` in-process library option,
   `infra/hosts/krone/configuration.nix`).
-- **Stage 2** (this repo): add `nix/nixos-module.nix` +
-  `nix/home-manager-module.nix` to nebulous, mirroring cutting-garden's
-  self-passing producer-module shape (`nix/nixos-module.nix` in that repo);
-  wire `NEWSBLUR_TOKEN` as a secret-*name*-only option per
-  `circus-host-integration(7)`.
+- **Stage 2** (this repo, done): `nix/nixos-module.nix` +
+  `nix/home-manager-module.nix`, mirroring cutting-garden's self-passing
+  producer-module shape. `NEWSBLUR_TOKEN` is wired as a secret-*name*-only
+  `environmentFile` option per `circus-host-integration(7)`. **Correction
+  from the original draft**: the periodic `nebulous fetch` systemd
+  timer/service lives in nebulous's OWN NixOS module, not in circus's
+  Stage 4 — re-reading `circus-host-integration(7)`'s "MCP on a host"
+  section, its "producer module defines no systemd unit of its own" rule
+  is scoped specifically to the MCP-stdio-child role ("under Path 1... it
+  defines no systemd unit"), not a blanket rule. `nix-cache` and `madder`'s
+  own producer modules already own non-MCP daemon units the same way;
+  `nebulous fetch` is exactly that kind of concern (a batch job, unrelated
+  to MCP serving), so it follows their precedent instead. A
+  `checks.modules-eval` flake check (mirroring cutting-garden's own)
+  instantiates the module through a throwaway host and asserts the
+  rendered timer/service, catching option-type regressions at `nix flake
+  check` time.
 - **Stage 3** (this repo): the multi-format capture loop -- for each
   newly-indexed story, shell out to `cutting-garden capture web:<permalink>
   --store <nebulous-store>` once per configured format, and record each
@@ -166,8 +178,12 @@ corpus. This is Stage 1 of the roadmap below and is starting immediately.
 - **Stage 4** (circus repo -- a separate session/repo, not this worktree):
   flake input + `services.nebulous` on krone, the dedicated durable volume
   via tofu (mirroring `infra/hosts/provision/krone/main.tf`'s existing
-  volume pattern), a systemd timer unit, and a third moxy child in
-  `mcp-origin.nix`.
+  volume pattern) bind-mounted onto `services.nebulous.stateDir` (mirroring
+  forgejo's `/var/lib/forgejo` <- `/mnt/durable/data` bind-mount pattern —
+  no new bind-mount mechanism needed, Stage 2's module already creates a
+  plain `stateDir` via `systemd.tmpfiles` for exactly this reason), and a
+  third moxy child in `mcp-origin.nix` for `nebulous serve mcp` (Path 1,
+  circus's job entirely — Stage 2's module does not touch MCP serving).
 
 ## Open Questions
 

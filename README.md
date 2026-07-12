@@ -67,6 +67,24 @@ Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
 cutting-garden `FacetDescriber`/`FacetCounter`/`FacetLabeler` capabilities —
 see `internal/charlie/cgplugin/facets.go`.
 
+## NixOS / home-manager
+
+The flake exports producer modules (`circus-host-integration(7)`'s
+self-passing convention, mirroring `cutting-garden`'s own module shape):
+
+- `nixosModules.default` (`services.nebulous`) — installs `nebulous` +
+  `nebulous-cg`, and runs `nebulous fetch` on a periodic systemd timer
+  (`fetchInterval`, default `1h`) so a host's local cache stays warm
+  without a manual invocation. `environmentFile` is the secret seam for
+  `NEWSBLUR_TOKEN` (a path to `VAR=value` lines — the value never enters
+  the Nix store). This module does **not** define an MCP-serving unit:
+  `nebulous serve mcp` is a moxy stdio child on hosts that expose it
+  (Path 1, per `circus-host-integration(7)`), wired host-side by the
+  consumer, not by this module.
+- `homeManagerModules.default` (`programs.nebulous`) — installs the
+  binaries for interactive/workstation use. No systemd unit; the periodic
+  timer is a NixOS-host concern.
+
 ## CLI
 
 ```

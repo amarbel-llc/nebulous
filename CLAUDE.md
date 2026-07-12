@@ -119,3 +119,9 @@ Follows the stable-first nixpkgs convention from the parent eng repo. Devenvs ar
 imported from `purse-first` (go + shell). `madder` is wired as a flake input
 (devShell + bats fixtures only — `internal/0/madder` uses `madder/go` in-process,
 no subprocess); `cutting-garden` is a vendored Go dependency (gomod2nix).
+
+`nix/nixos-module.nix` + `nix/home-manager-module.nix` are the self-passing
+producer modules (`circus-host-integration(7)`) exported as
+`nixosModules.default` / `homeManagerModules.default`; `checks.modules-eval`
+in `flake.nix` instantiates the NixOS module through a throwaway host to
+catch option-type regressions at `nix flake check` time.
