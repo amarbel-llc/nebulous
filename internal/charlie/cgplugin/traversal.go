@@ -18,6 +18,7 @@ const (
 	typeStoryContent  = "newsblur-story-content-v1"
 	typeStoryOriginal = "newsblur-story-original-v1"
 	typeStoryMetadata = "newsblur-story-metadata-v1"
+	typeStoryCapture  = "newsblur-story-capture-v1"
 )
 
 const (
@@ -37,6 +38,7 @@ func (Plugin) Types() []cg.NodeType {
 		{Tag: typeStoryContent, Container: false, MimeType: htmlMime},
 		{Tag: typeStoryOriginal, Container: false, MimeType: htmlMime},
 		{Tag: typeStoryMetadata, Container: false, MimeType: jsonMime},
+		{Tag: typeStoryCapture, Container: false, MimeType: jsonMime},
 	}
 }
 
@@ -146,10 +148,24 @@ func tagNodes() ([]cg.Node, error) {
 	return nodes, nil
 }
 
+// storyLeafNodes lists a story's leaves. content/original/metadata are
+// always present; a capture/{format} leaf is listed only for formats
+// that actually have a completed capture record — no phantom leaves for
+// formats never captured.
 func storyLeafNodes(hash string) []cg.Node {
-	return []cg.Node{
+	nodes := []cg.Node{
 		{URI: nodeURL("story", hash, "content"), Name: "content", Type: typeStoryContent},
 		{URI: nodeURL("story", hash, "original"), Name: "original", Type: typeStoryOriginal},
 		{URI: nodeURL("story", hash, "metadata"), Name: "metadata", Type: typeStoryMetadata},
 	}
+	for _, format := range index.CaptureFormats() {
+		if _, ok := index.CaptureRecord(hash, format); ok {
+			nodes = append(nodes, cg.Node{
+				URI:  nodeURL("story", hash, "capture", format),
+				Name: "capture/" + format,
+				Type: typeStoryCapture,
+			})
+		}
+	}
+	return nodes
 }

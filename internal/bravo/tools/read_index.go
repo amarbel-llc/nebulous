@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
@@ -43,15 +44,18 @@ type FeedRef struct {
 }
 
 // StoryRef is a story's identity plus the fields the newsblur-story-v1
-// facet dimensions (year, tags, feed, read) are drawn from.
+// facet dimensions (year, tags, feed, read) are drawn from, plus the
+// fields the capture loop needs (Permalink, Date).
 type StoryRef struct {
-	Hash     string
-	Title    string
-	Year     int
-	FeedID   int
-	UserTags []string
-	Tags     []string
-	Read     bool
+	Hash      string
+	Title     string
+	Year      int
+	FeedID    int
+	UserTags  []string
+	Tags      []string
+	Read      bool
+	Permalink string
+	Date      time.Time
 }
 
 // Feeds returns every subscribed feed.
@@ -109,13 +113,15 @@ func (r *ReadIndex) StoriesByTag(tag string) ([]StoryRef, error) {
 
 func storyRefOf(rec *storyRecord) StoryRef {
 	return StoryRef{
-		Hash:     rec.Hash,
-		Title:    rec.Title,
-		Year:     rec.Year,
-		FeedID:   rec.FeedID,
-		UserTags: rec.UserTags,
-		Tags:     rec.Tags,
-		Read:     rec.Read,
+		Hash:      rec.Hash,
+		Title:     rec.Title,
+		Year:      rec.Year,
+		FeedID:    rec.FeedID,
+		UserTags:  rec.UserTags,
+		Tags:      rec.Tags,
+		Read:      rec.Read,
+		Permalink: rec.Permalink,
+		Date:      rec.Date,
 	}
 }
 
@@ -124,6 +130,45 @@ func storyRefOf(rec *storyRecord) StoryRef {
 // mtime changes exactly when a fetch run writes new data).
 func (r *ReadIndex) ManifestPath() string {
 	return r.client.ManifestPath()
+}
+
+// CaptureRecordView is the read-only projection of a completed
+// cutting-garden capture — the receipt id a consumer resolves further
+// via madder://blobs/<digest>, plus when it was captured.
+type CaptureRecordView struct {
+	ReceiptID  string    `json:"receipt_id"`
+	CapturedAt time.Time `json:"captured_at"`
+}
+
+// CaptureRecord returns the completed capture record for
+// (storyHash, format), if any. Read-only lookup; writing a new record is
+// the capture command's job (via *newsblur.Client directly, not through
+// this façade).
+func (r *ReadIndex) CaptureRecord(storyHash, format string) (CaptureRecordView, bool) {
+	rec, ok := r.client.CaptureRecordFor(storyHash, format)
+	if !ok {
+		return CaptureRecordView{}, false
+	}
+	return CaptureRecordView{ReceiptID: rec.ReceiptID, CapturedAt: rec.CapturedAt}, true
+}
+
+// DefaultCaptureFormats is the format list `nebulous capture` uses when
+// --formats is not given, and CaptureFormats' fallback before any
+// capture has ever completed.
+var DefaultCaptureFormats = []string{"markdown-reader"}
+
+// CaptureFormats returns every format string that has ever produced a
+// completed capture record — the set cgplugin's traversal checks when
+// building a story's capture leaves, since a story's own completion
+// records don't enumerate themselves (opaque cache-key hashes). An
+// operator running `nebulous capture --formats <anything>` is fully
+// reflected here, not just DefaultCaptureFormats; falls back to
+// DefaultCaptureFormats only before any capture has ever completed.
+func (r *ReadIndex) CaptureFormats() []string {
+	if formats := r.client.CaptureFormats(); len(formats) > 0 {
+		return formats
+	}
+	return DefaultCaptureFormats
 }
 
 // Tags returns the union of user tags and story tags across the corpus.

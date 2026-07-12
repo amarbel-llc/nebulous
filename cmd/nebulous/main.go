@@ -28,6 +28,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
 		fmt.Fprintf(os.Stderr, "  nebulous fetch                Progressively cache feeds, starred stories, and original text\n")
+		fmt.Fprintf(os.Stderr, "  nebulous capture [-formats f1,f2] [-store id] [-backfill]\n")
+		fmt.Fprintf(os.Stderr, "                                Capture eligible starred stories via cutting-garden+chrest\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
@@ -118,6 +120,11 @@ func main() {
 		if err := fetchAll(ctx, client); err != nil {
 			log.Fatalf("fetch: %v", err)
 		}
+		return
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "capture" {
+		runCapture(flag.Args()[1:])
 		return
 	}
 

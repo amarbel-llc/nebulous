@@ -23,22 +23,35 @@ func (Plugin) ReadLeaf(
 	}
 
 	segs := pathSegments(node)
-	if len(segs) != 3 {
+	if len(segs) < 3 {
 		return cg.LeafContent{}, false, nil
 	}
 
 	switch segs[0] {
 	case "story":
-		return readStoryLeaf(segs[1], segs[2])
+		return readStoryLeaf(segs[1], segs[2:])
 	case "feed":
+		if len(segs) != 3 {
+			return cg.LeafContent{}, false, nil
+		}
 		return readFeedLeaf(ctx, segs[1], segs[2])
 	default:
 		return cg.LeafContent{}, false, nil
 	}
 }
 
-func readStoryLeaf(hash, tier string) (cg.LeafContent, bool, error) {
-	switch tier {
+// readStoryLeaf dispatches on tail, the path segments after
+// story/{hash}/: a single segment for content/original/metadata, or
+// ["capture", format] for a capture leaf.
+func readStoryLeaf(hash string, tail []string) (cg.LeafContent, bool, error) {
+	if len(tail) == 2 && tail[0] == "capture" {
+		return readStoryCaptureLeaf(hash, tail[1])
+	}
+	if len(tail) != 1 {
+		return cg.LeafContent{}, false, nil
+	}
+
+	switch tail[0] {
 	case "content":
 		view, raw, ok := index.StoryContent(hash)
 		if !ok {
@@ -71,6 +84,24 @@ func readStoryLeaf(hash, tier string) (cg.LeafContent, bool, error) {
 	default:
 		return cg.LeafContent{}, false, nil
 	}
+}
+
+// readStoryCaptureLeaf returns the completed capture record for
+// (hash, format) — the receipt markl-id and when it was captured.
+// Deliberately does not walk the receipt's RFC-0002 merkle tree itself
+// (hyphence-parsing, typed blob refs) — that's cutting-garden/madder's
+// job; a consumer resolves the receipt id further via
+// madder://blobs/<digest>, the same mechanism used throughout this
+// environment's own tooling.
+func readStoryCaptureLeaf(hash, format string) (cg.LeafContent, bool, error) {
+	rec, ok := index.CaptureRecord(hash, format)
+	if !ok {
+		return cg.LeafContent{}, false, nil
+	}
+	return cg.LeafContent{
+		Structured:  rec,
+		RawMimeType: jsonMime,
+	}, true, nil
 }
 
 func readFeedLeaf(ctx context.Context, id, tier string) (cg.LeafContent, bool, error) {

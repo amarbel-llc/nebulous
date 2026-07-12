@@ -12,16 +12,18 @@ import (
 // fakeIndex is a canned Index for exercising the plugin's traversal and
 // leaf routing without a live cache.
 type fakeIndex struct {
-	feeds         []tools.FeedRef
-	stories       []tools.StoryRef
-	feedStories   map[int][]tools.StoryRef
-	tagStories    map[string][]tools.StoryRef
-	tags          []string
-	feedMetadata  map[string]feedMetadataEntry
-	content       map[string]contentEntry
-	original      map[string][]byte
-	storyMetadata map[string]storyMetadataEntry
-	manifestPath  string
+	feeds          []tools.FeedRef
+	stories        []tools.StoryRef
+	feedStories    map[int][]tools.StoryRef
+	tagStories     map[string][]tools.StoryRef
+	tags           []string
+	feedMetadata   map[string]feedMetadataEntry
+	content        map[string]contentEntry
+	original       map[string][]byte
+	storyMetadata  map[string]storyMetadataEntry
+	manifestPath   string
+	captureRecords map[string]tools.CaptureRecordView // key: hash+"/"+format
+	captureFormats []string
 }
 
 type contentEntry struct {
@@ -69,6 +71,18 @@ func (f *fakeIndex) StoryMetadata(h string) (tools.StoryMetadataView, []byte, bo
 }
 
 func (f *fakeIndex) ManifestPath() string { return f.manifestPath }
+
+func (f *fakeIndex) CaptureRecord(hash, format string) (tools.CaptureRecordView, bool) {
+	rec, ok := f.captureRecords[hash+"/"+format]
+	return rec, ok
+}
+
+func (f *fakeIndex) CaptureFormats() []string {
+	if f.captureFormats != nil {
+		return f.captureFormats
+	}
+	return tools.DefaultCaptureFormats
+}
 
 const sampleHash = "123:abc" // feed_id:guid — exercises the colon in a path
 
@@ -201,4 +215,67 @@ func TestListRootsLeafHasNoChildren(t *testing.T) {
 	if len(nodes) != 0 {
 		t.Errorf("content leaf reported %d children, want 0", len(nodes))
 	}
+}
+
+// A story with a completed capture record lists a capture/{format} leaf
+// alongside content/original/metadata; a story with none (the common
+// newFakeIndex() case, exercised by "story leaves" in TestListRoots)
+// lists only the three static leaves — no phantom capture leaves for
+// uncaptured formats.
+func TestListRootsStoryCaptureLeaf(t *testing.T) {
+	fi := newFakeIndex()
+	format := tools.DefaultCaptureFormats[0]
+	fi.captureRecords = map[string]tools.CaptureRecordView{
+		sampleHash + "/" + format: {ReceiptID: "blake2b256-abc"},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	nodes, err := Plugin{}.ListRoots(context.Background(), mustURL(t, "newsblur://story/123:abc"))
+	if err != nil {
+		t.Fatalf("ListRoots(story): %v", err)
+	}
+	wantURI := "newsblur://story/123:abc/capture/" + format
+	var found bool
+	for _, n := range nodes {
+		if n.URI.String() == wantURI {
+			found = true
+			if n.Type != typeStoryCapture {
+				t.Errorf("capture leaf Type = %q, want %q", n.Type, typeStoryCapture)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("ListRoots(story) = %v, want a %q node", nodes, wantURI)
+	}
+	if len(nodes) != 4 {
+		t.Errorf("ListRoots(story) returned %d nodes, want 4 (content/original/metadata/capture)", len(nodes))
+	}
+}
+
+// A capture record for a format OUTSIDE tools.DefaultCaptureFormats
+// (e.g. an operator ran `nebulous capture --formats pdf`) must still
+// surface as a leaf: storyLeafNodes consults index.CaptureFormats(),
+// not the hardcoded default list.
+func TestListRootsStoryCaptureLeafNonDefaultFormat(t *testing.T) {
+	fi := newFakeIndex()
+	const format = "pdf"
+	fi.captureFormats = []string{format}
+	fi.captureRecords = map[string]tools.CaptureRecordView{
+		sampleHash + "/" + format: {ReceiptID: "blake2b256-pdf"},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	nodes, err := Plugin{}.ListRoots(context.Background(), mustURL(t, "newsblur://story/123:abc"))
+	if err != nil {
+		t.Fatalf("ListRoots(story): %v", err)
+	}
+	wantURI := "newsblur://story/123:abc/capture/" + format
+	for _, n := range nodes {
+		if n.URI.String() == wantURI {
+			return
+		}
+	}
+	t.Errorf("ListRoots(story) = %v, want a %q node", nodes, wantURI)
 }

@@ -31,6 +31,8 @@ type Index interface {
 	StoryOriginal(hash string) ([]byte, bool)
 	StoryMetadata(hash string) (tools.StoryMetadataView, []byte, bool)
 	ManifestPath() string
+	CaptureRecord(storyHash, format string) (tools.CaptureRecordView, bool)
+	CaptureFormats() []string
 }
 
 var _ Index = (*tools.ReadIndex)(nil)

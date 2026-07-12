@@ -208,10 +208,46 @@
               execStart = hostConfig.systemd.services.nebulous-fetch.serviceConfig.ExecStart;
               onUnitActiveSec = hostConfig.systemd.timers.nebulous-fetch.timerConfig.OnUnitActiveSec;
               installsPackage = builtins.elem nebulous hostConfig.environment.systemPackages;
+
+              # A second host config supplies chrestPackage/cuttingGardenPackage
+              # (stand-ins — this flake carries neither as a real input) to
+              # exercise the nebulous-capture timer/service path, which the
+              # module only renders when both are non-null (FDR 0001 Stage 3).
+              captureHostConfig =
+                (igloo.lib.nixosSystem {
+                  inherit system;
+                  modules = [
+                    self.nixosModules.default
+                    {
+                      system.stateVersion = "25.11";
+                      services.nebulous = {
+                        enable = true;
+                        chrestPackage = pkgs.hello;
+                        cuttingGardenPackage = pkgs.hello;
+                        captureFormats = [
+                          "markdown-reader"
+                          "pdf"
+                        ];
+                        captureStoreId = "nebulous";
+                        captureInterval = "3h";
+                      };
+                    }
+                  ];
+                }).config;
+              captureExecStart = captureHostConfig.systemd.services.nebulous-capture.serviceConfig.ExecStart;
+              captureOnUnitActiveSec =
+                captureHostConfig.systemd.timers.nebulous-capture.timerConfig.OnUnitActiveSec;
+              capturePath = builtins.elemAt captureHostConfig.systemd.services.nebulous-capture.serviceConfig.Environment 1;
             in
             pkgs.runCommand "nebulous-modules-eval"
               {
-                inherit execStart onUnitActiveSec;
+                inherit
+                  execStart
+                  onUnitActiveSec
+                  captureExecStart
+                  captureOnUnitActiveSec
+                  capturePath
+                  ;
                 installsPackage = if installsPackage then "1" else "";
               }
               ''
@@ -227,6 +263,22 @@
                   echo "nebulous package missing from environment.systemPackages" >&2
                   exit 1
                 }
+
+                echo "--- nebulous-capture.serviceConfig.ExecStart ---"
+                echo "$captureExecStart"
+                echo "$captureExecStart" | grep -q '/bin/nebulous'
+                echo "$captureExecStart" | grep -q 'capture'
+                echo "$captureExecStart" | grep -q 'markdown-reader,pdf'
+                echo "$captureExecStart" | grep -q 'nebulous$'
+
+                echo "--- nebulous-capture timer OnUnitActiveSec ---"
+                echo "$captureOnUnitActiveSec"
+                [ "$captureOnUnitActiveSec" = "3h" ]
+
+                echo "--- nebulous-capture.serviceConfig.Environment[PATH] ---"
+                echo "$capturePath"
+                echo "$capturePath" | grep -q '^PATH='
+                echo "$capturePath" | grep -q '/bin:'
 
                 touch "$out"
               '';

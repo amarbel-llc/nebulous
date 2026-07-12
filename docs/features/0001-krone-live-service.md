@@ -4,10 +4,11 @@ date: 2026-07-12
 promotion-criteria: |
   Promote to experimental when: (1) the madder shell-out perf fix (Stage 1)
   is merged, (2) a nixosModule + home-manager module exist and build,
-  (3) a first end-to-end capture (nebulous fetch -> cutting-garden capture
-  web:<url> -> chrest -> receipt in a dedicated madder store -> discoverable
-  via a new newsblur:// leaf) has run successfully against a real story,
-  even if only exercised manually rather than via a deployed timer.
+  (3) a first end-to-end capture (nebulous capture -> cutting-garden capture
+  <store> web:<url> -> chrest -> receipt in a dedicated madder store ->
+  discoverable via a new newsblur:// leaf) has run successfully against a
+  real story, even if only exercised manually rather than via a deployed
+  timer.
   Promote to testing when: the systemd timer + services.nebulous module are
   deployed on krone and have completed at least one unattended cycle.
 ---
@@ -48,14 +49,18 @@ not chrest itself.** `cutting-garden` ships a built-in `web` plugin
 (`plugins/web/`) that claims the opt-in `web:` URL scheme and drives
 `chrest` (resolved via `PATH`) as a subprocess: it tries the persistent
 `chrest capture-serve` session first (RFC 0008), falling back to one-shot
-`chrest capture-batch`. `cutting-garden capture web:<url> --store <name>`
-already produces a full [RFC 0002][cg-rfc-0002]/[RFC 0003][cg-rfc-0003]
-receipt (merkle tree: identity/outcome/payload) written into whatever
-madder store is targeted -- **no new integration code is needed on the
-chrest or cutting-garden side.** chrest needs no NixOS module either; it's
-a self-contained package (headless Firefox included via its own
-fixed-output derivation), so `environment.systemPackages = [ chrest ]` on
-krone is sufficient.
+`chrest capture-batch`. `cutting-garden capture <store-id> web:<url>`
+(**positional** store id, e.g. `cutting-garden capture nebulous
+web:https://example.com/article` -- corrected during Stage 3
+implementation; the store id itself carries **no leading dot** either,
+confirmed by a real invocation: `.nebulous` fails with `blob store not
+found`, bare `nebulous` succeeds) already produces a full
+[RFC 0002][cg-rfc-0002]/[RFC 0003][cg-rfc-0003] receipt (merkle tree:
+identity/outcome/payload) written into whatever madder store is targeted
+-- **no new integration code is needed on the chrest or cutting-garden
+side.** chrest needs no NixOS module either; it's a self-contained package
+(headless Firefox included via its own fixed-output derivation), so
+`environment.systemPackages = [ chrest ]` on krone is sufficient.
 
 krone already runs the durable substrate this needs: `/var/lib/madder` is
 the group-owned `//default` madder store (`services.madder`, a unix-socket
@@ -169,12 +174,32 @@ corpus. This is Stage 1 of the roadmap below and is starting immediately.
   instantiates the module through a throwaway host and asserts the
   rendered timer/service, catching option-type regressions at `nix flake
   check` time.
-- **Stage 3** (this repo): the multi-format capture loop -- for each
-  newly-indexed story, shell out to `cutting-garden capture web:<permalink>
-  --store <nebulous-store>` once per configured format, and record each
-  resulting receipt markl-id as a new leaf under
-  `newsblur://story/{hash}/...` (alongside the existing `.../metadata`) so
-  captures are discoverable through nebulous's own structured tree.
+- **Stage 3** (this repo, done): the multi-format capture loop -- a new
+  `nebulous capture` subcommand (deliberately separate from `fetch`, its
+  own systemd timer) runs a **gap-filling scan**: for each configured
+  format, it shells out to `cutting-garden capture <store-id>
+  web:<permalink>` (with `CUTTING_GARDEN_WEB_FORMAT=<format>`) for any
+  starred story that doesn't yet have a recorded receipt for that format,
+  and records each resulting receipt markl-id -- parsed directly off the
+  capture command's own tap-ndjson stdout (the default for a piped/
+  non-TTY child, exactly nebulous's case; cutting-garden's "receipt
+  store=..." phase already carries `receipt_id` machine-readably, no
+  second process or file read needed) -- as a new
+  `newsblur://story/{hash}/capture/{format}` leaf alongside the existing
+  `.../metadata` leaf. Self-healing by construction: a failed capture
+  just has no receipt, so the next scan retries it automatically -- no
+  separate retry/failure-state design needed (resolves the "retry
+  policy" open question below). Backlog scope is **new stories only**
+  for now, via a persisted watermark (`story.Date >= watermark`, set on
+  first-ever run); a `--backfill` flag overrides the watermark for one
+  run while still skipping already-captured (story, format) pairs, as
+  the escape hatch for the eventual full-corpus pass. The
+  `nebulous-capture` timer (longer interval than fetch's, since a
+  capture is a real headless-browser render) is gated in
+  `nix/nixos-module.nix` on two new option values, `chrestPackage` +
+  `cuttingGardenPackage` (both nullable `types.package`) -- supplied by
+  the consumer (circus), not this flake, since neither is a flake input
+  of nebulous's own flake.
 - **Stage 4** (circus repo -- a separate session/repo, not this worktree):
   flake input + `services.nebulous` on krone, the dedicated durable volume
   via tofu (mirroring `infra/hosts/provision/krone/main.tf`'s existing
@@ -187,19 +212,33 @@ corpus. This is Stage 1 of the roadmap below and is starting immediately.
 
 ## Open Questions
 
-- What counts as "newly-indexed" for the capture loop to trigger on --
-  every fetch cycle's diff against the previous run, or an explicit
-  "captured" marker per story to avoid re-capturing on every timer tick?
-- Retry/failure policy for a chrest capture that fails (rate limits,
-  paywalls, JS-heavy pages chrest can't render) -- silently skip and retry
-  next cycle, or surface a persistent failure state?
+- **Still open**: whether the whole `newsblur://` tree shape should be
+  re-examined to better match cutting-garden's own conventions, now that
+  a capture-index story exists on the nebulous side (cutting-garden#124's
+  tri-modal container-body gap is part of that). Stage 3 shipped the
+  straightforward extension -- one leaf per format,
+  `newsblur://story/{hash}/capture/{format}` -- deliberately without
+  resolving this broader question; Sasha flagged it explicitly as a
+  later pass, not blocking Stage 3.
+- **Resolved (Stage 3)**: "newly-indexed" is approximated via a
+  persisted watermark compared against each story's publish date
+  (`story.Date`), not an exact first-starred timestamp -- an accepted
+  approximation for a personal-scale tool; `--backfill` is the escape
+  hatch for anything this misses.
+- **Resolved (Stage 3)**: retry/failure policy is "no explicit policy" --
+  the gap-filling scan is naturally self-healing (a failed capture has no
+  receipt, so the next scan attempts it again), so no persistent
+  failure-state tracking was built.
+- **Resolved (Stage 3)**: one leaf per format was chosen over one leaf
+  enumerating all formats, consistent with the existing
+  content/original/metadata leaf pattern.
 - Multiple format invocations mean multiple chrest browser launches per
-  story per cycle -- is this an acceptable cost, or does it argue for
+  story per scan -- is this an acceptable cost, or does it argue for
   petitioning cutting-garden for the multi-format-per-call capability
-  (Gap 5) instead of working around it nebulous-side?
-- Exact shape of the new `newsblur://story/{hash}/...` capture leaf(s) --
-  one leaf per format, or one leaf enumerating all captured formats with
-  their receipt ids?
+  (Gap 5) instead of working around it nebulous-side? Not yet exercised
+  at scale (only a single-story, single-format smoke test has run so
+  far) -- revisit once a real `--backfill` pass or a longer unattended
+  timer run surfaces the actual cost.
 - Whether nebulous's dedicated store on krone should have its own
   home-manager-rendered config for local (non-krone) access too, or stay
   krone-only.

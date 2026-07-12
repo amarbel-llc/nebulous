@@ -3,6 +3,8 @@ package cgplugin
 import (
 	"context"
 	"testing"
+
+	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
 
 func TestReadLeafContent(t *testing.T) {
@@ -123,5 +125,49 @@ func TestReadLeafUncachedFeedMetadata(t *testing.T) {
 	}
 	if ok {
 		t.Error("ReadLeaf(uncached feed metadata) ok=true, want false")
+	}
+}
+
+func TestReadLeafStoryCapture(t *testing.T) {
+	fi := newFakeIndex()
+	format := tools.DefaultCaptureFormats[0]
+	fi.captureRecords = map[string]tools.CaptureRecordView{
+		sampleHash + "/" + format: {ReceiptID: "blake2b256-abc"},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	got, ok, err := Plugin{}.ReadLeaf(context.Background(), mustURL(t, "newsblur://story/123:abc/capture/"+format))
+	if err != nil {
+		t.Fatalf("ReadLeaf(capture): %v", err)
+	}
+	if !ok {
+		t.Fatal("ReadLeaf(capture) ok=false, want true")
+	}
+	if got.RawMimeType != jsonMime {
+		t.Errorf("RawMimeType = %q, want %q", got.RawMimeType, jsonMime)
+	}
+	rec, isRecordView := got.Structured.(tools.CaptureRecordView)
+	if !isRecordView {
+		t.Fatalf("Structured = %#v, want a tools.CaptureRecordView", got.Structured)
+	}
+	if rec.ReceiptID != "blake2b256-abc" {
+		t.Errorf("ReceiptID = %q, want %q", rec.ReceiptID, "blake2b256-abc")
+	}
+}
+
+// A story/format pair with no recorded capture yields ok=false (no
+// error) — matching the other uncached-leaf cases above.
+func TestReadLeafStoryCaptureUncaptured(t *testing.T) {
+	index = newFakeIndex()
+	t.Cleanup(func() { index = nil })
+
+	format := tools.DefaultCaptureFormats[0]
+	_, ok, err := Plugin{}.ReadLeaf(context.Background(), mustURL(t, "newsblur://story/123:abc/capture/"+format))
+	if err != nil {
+		t.Fatalf("ReadLeaf(uncaptured): %v", err)
+	}
+	if ok {
+		t.Error("ReadLeaf(uncaptured) ok=true, want false")
 	}
 }

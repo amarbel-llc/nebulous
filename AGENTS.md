@@ -1,7 +1,7 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with
-code in this repository.
+This file provides guidance to coding agents (Claude Code and others) when
+working with code in this repository.
 
 ## Overview
 
@@ -40,13 +40,18 @@ require a token.
 ## Architecture
 
     cmd/nebulous/main.go           Entry point: parses args, creates client, starts MCP server
+    cmd/nebulous/capture.go        `nebulous capture` subcommand: the gap-filling capture scan
     cmd/nebulous-cg/main.go        cutting-garden CLI with the newsblur:// plugin baked in
-    internal/0/madder/             `madder` CLI wrapper for blob store shell-outs
+    internal/0/madder/             In-process madder/go blob store (nebulous's named store)
     internal/0/manifest/           SHA256 manifest tracking (leaf package)
     internal/alfa/newsblur/        HTTP client wrapping NewsBlur REST API
       client.go                    Client struct, request helpers, cache access
       cache.go                     Madder-backed persistent store keyed by a SHA256 manifest
+      capture_state.go             Capture watermark + per-(hash,format) completion records
       feeds.go, stories.go, ...    One file per API domain
+    internal/alfa/capture/         cutting-garden subprocess client for `nebulous capture`
+      capture.go                   Shells out to `cutting-garden capture`, reads the receipt
+                                    id directly off its tap-ndjson stdout
     internal/bravo/tools/          MCP tool registration + handlers
       registry.go                  RegisterAll() → *command.App + ResourceProvider
       read_index.go                ReadIndex read façade over feedIndex/storyStore (for the cg plugin)
@@ -63,19 +68,31 @@ require a token.
       feed_index.go                In-memory word index over feed metadata
     internal/charlie/cgplugin/     cutting-garden newsblur:// scheme plugin
       plugin.go                    Plugin identity + Index injection (SetIndex)
-      traversal.go                 Types / Roots / ListRoots
-      leaf.go                      ReadLeaf (story content + original)
+      traversal.go                 Types / Roots / ListRoots (incl. per-format capture leaves)
+      leaf.go                      ReadLeaf (story content/original/metadata/capture, feed metadata)
+      facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
       url.go                       newsblur:// URL build/parse
 
-### Two-Phase Architecture: Sync + Serve
+### Three-Phase Architecture: Sync + Capture + Serve
 
-The server operates in two distinct modes:
+The server operates in three distinct modes:
 
 - **`nebulous fetch`** (sync phase): Sequential CLI command that populates the
   local persistent store by fetching from the NewsBlur API. Handles rate
   limiting with adaptive backoff. Fetches feeds metadata, starred story pages,
   and original article text. This is the sole ingestion pipeline --- the MCP
   server and the cutting-garden plugin never hit the API for reads.
+
+- **`nebulous capture`** (capture phase): A separate, self-healing
+  gap-filling scan over the local story corpus. For each configured format
+  it shells out to `cutting-garden capture <store-id> web:<permalink>`
+  (`internal/alfa/capture`), which drives chrest under the hood, and records
+  the resulting receipt (parsed directly off the capture command's own
+  tap-ndjson stdout) via `internal/alfa/newsblur/capture_state.go`. New stories
+  only by default (a persisted watermark compared against `story.Date`);
+  `--backfill` overrides the watermark for one run. A failed capture simply
+  has no receipt, so the next scan retries it --- no separate retry
+  bookkeeping.
 
 - **MCP server** (serve phase): Reads exclusively from the local persistent
   store. In-memory indices (`feedIndex`, `storyStore`) are built from cached
@@ -89,11 +106,17 @@ Sync: `nebulous fetch` → `newsblur.Client` → HTTP to `newsblur.com/api/*` �
 response → persistent store (SHA256 manifest at `$XDG_DATA_HOME/nebulous/manifest.json`
 + a `nebulous` madder blob store).
 
+Capture: `nebulous capture` → `tools.ReadIndex.Stories()` (eligible stories) →
+`internal/alfa/capture.Client` → `cutting-garden capture <store> web:<url>` →
+chrest → RFC 0002 receipt in the `nebulous` madder store → receipt id parsed
+off stdout → completion record in the same persistent store.
+
 Serve: MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers → in-memory
 index (built from persistent store) → MCP response.
 
 Traverse: `nebulous-cg <cmd>` → cutting-garden SDK → `cgplugin` (RootProvider /
-LeafReader) → `tools.ReadIndex` → in-memory index → cutting-garden node/leaf.
+LeafReader) → `tools.ReadIndex` → in-memory index → cutting-garden node/leaf
+(including `.../capture/{format}` once a receipt is recorded).
 
 ### Key Patterns
 

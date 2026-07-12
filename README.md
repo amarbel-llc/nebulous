@@ -28,6 +28,16 @@ phases:
   rate-limit bursts, and persists responses into the local store: a
   SHA256-keyed manifest (`$XDG_DATA_HOME/nebulous/manifest.json`) whose
   response bodies live in a dedicated `nebulous` madder blob store.
+- **Capture** — `nebulous capture` is a separate, self-healing gap-filling
+  scan: for each configured format (`--formats`, default `markdown-reader`),
+  it drives `cutting-garden capture <store-id> web:<permalink>` (which
+  drives chrest under the hood) for any starred story that doesn't yet have
+  a recorded receipt for that format, writing a full-page archive
+  independent of NewsBlur's own (often truncated) `story_content`. New
+  stories only by default, via a persisted watermark; `--backfill` captures
+  the full existing corpus for one run, skipping pairs already captured. A
+  failed capture simply has no receipt, so the next scan retries it
+  automatically — no separate retry bookkeeping.
 - **Serve** — `nebulous serve mcp` reads exclusively from that local store;
   it never hits the API for reads. In-memory feed and story indices
   (word-search accelerated) are built lazily from cached responses.
@@ -52,11 +62,18 @@ newsblur://tags                   the tag dictionary (→ tags)
 newsblur://feed/{id}              one feed's stories, plus its metadata leaf
 newsblur://feed/{id}/metadata     cached feed subscription record (JSON)
 newsblur://tag/{tag}              stories carrying a tag
-newsblur://story/{hash}           a story → its content/original/metadata leaves
-newsblur://story/{hash}/content   cached story_content (HTML, stripped)
-newsblur://story/{hash}/original  cached original article text (HTML)
-newsblur://story/{hash}/metadata  bibliographic fields (authors, tags, date, …)
+newsblur://story/{hash}                    a story → its leaves below
+newsblur://story/{hash}/content            cached story_content (HTML, stripped)
+newsblur://story/{hash}/original           cached original article text (HTML)
+newsblur://story/{hash}/metadata           bibliographic fields (authors, tags, date, …)
+newsblur://story/{hash}/capture/{format}   a completed capture's receipt id + timestamp
 ```
+
+The `capture/{format}` leaf only appears once `nebulous capture` has
+recorded a receipt for that (story, format) pair — it is not a placeholder
+for uncaptured formats. It exposes the receipt's markl-id and when it was
+captured; it does not walk the RFC 0002 receipt merkle tree itself — a
+madder-aware consumer resolves it further via `madder://blobs/<digest>`.
 
 Discover and traverse it via the cutting-garden commands, e.g.
 `nebulous-cg health` or `nebulous-cg list newsblur://feeds`. Reads only the
@@ -81,6 +98,15 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
   `nebulous serve mcp` is a moxy stdio child on hosts that expose it
   (Path 1, per `circus-host-integration(7)`), wired host-side by the
   consumer, not by this module.
+  Supplying `chrestPackage` and `cuttingGardenPackage` (both nullable
+  `types.package`, unset by default) additionally enables a second timer,
+  `nebulous-capture` (`captureInterval`, default `6h`), running the
+  gap-filling capture scan described above (`captureFormats`, default
+  `[ "markdown-reader" ]`; `captureStoreId`, default `"nebulous"`). Both
+  packages are external to nebulous's own flake, so the consumer (circus)
+  supplies them as option values from its own chrest/cutting-garden flake
+  inputs — a host that only wants NewsBlur sync (no captures) leaves them
+  unset and gets only the fetch timer.
 - `homeManagerModules.default` (`programs.nebulous`) — installs the
   binaries for interactive/workstation use. No systemd unit; the periodic
   timer is a NixOS-host concern.
@@ -90,6 +116,8 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
 ```
 nebulous serve mcp                    Start the MCP server over stdio
 nebulous fetch                        Sync feeds, starred stories, original text
+nebulous capture [--formats f1,f2] [--store id] [--backfill]
+                                      Gap-filling capture-via-chrest scan (see above)
 nebulous corpus-list / corpus-read    Starred-story corpus access (for maneater)
 nebulous generate-plugin | hook | install-mcp
                                       Plugin/install plumbing (no token needed)
