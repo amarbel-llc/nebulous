@@ -21,6 +21,7 @@ type fakeIndex struct {
 	content       map[string]contentEntry
 	original      map[string][]byte
 	storyMetadata map[string]storyMetadataEntry
+	manifestPath  string
 }
 
 type contentEntry struct {
@@ -66,6 +67,8 @@ func (f *fakeIndex) StoryMetadata(h string) (tools.StoryMetadataView, []byte, bo
 	m, ok := f.storyMetadata[h]
 	return m.view, m.raw, ok
 }
+
+func (f *fakeIndex) ManifestPath() string { return f.manifestPath }
 
 const sampleHash = "123:abc" // feed_id:guid — exercises the colon in a path
 

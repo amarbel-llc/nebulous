@@ -34,6 +34,9 @@ type Manifest struct {
 	entries map[string]ManifestEntry
 }
 
+// Path returns the on-disk location of the manifest's JSON file.
+func (m *Manifest) Path() string { return m.path }
+
 func NewManifest(path string) (*Manifest, error) {
 	m := &Manifest{
 		path:    path,

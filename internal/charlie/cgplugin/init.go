@@ -1,6 +1,6 @@
 package cgplugin
 
-import cg "github.com/amarbel-llc/cutting-garden/pkgs/cutting_garden_plugins"
+import cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 
 // init registers the newsblur plugin in the cutting-garden scheme
 // registry. The plugin implements none of capture/restore/diff, so it

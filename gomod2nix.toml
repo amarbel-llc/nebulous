@@ -1,6 +1,11 @@
 schema = 3
 
 [mod]
+  [mod.'code.linenisgreat.com/cutting-garden']
+    version = 'v0.1.25-0.20260712203012-5c8636ccf925'
+    hash = 'sha256-pO1mV8qZV+BiODslnM6w4d/v1RcvJmIE+wRIAhduIr0='
+    goVersion = '1.26'
+
   [mod.'filippo.io/age']
     version = 'v1.3.1'
     hash = 'sha256-Qs/q3zQYV0PukABBPf/aU5V1oOhw95NG6K301VYJk8A='
@@ -19,11 +24,6 @@ schema = 3
   [mod.'github.com/amarbel-llc/crap/go-crap/v2']
     version = 'v2.2.2'
     hash = 'sha256-ZyZNwjoJjDNB3pVJnHXomcQ5EYNOoLVSQu2X1Tj3CCY='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/cutting-garden']
-    version = 'v0.1.24'
-    hash = 'sha256-BULn4ajvBxp6cCQ6O9UFJ2xwSAos1DiEOJiFMJNv1Vc='
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/hyphence/go']

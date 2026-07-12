@@ -83,6 +83,17 @@ func (c *Client) WithCache(manifestPath string, ttl time.Duration, sink BlobSink
 	return nil
 }
 
+// ManifestPath returns the on-disk location of the persistent cache
+// manifest, or "" if the client has no cache attached. Used to derive a
+// cheap "has anything changed" freshness signal (e.g. a facet version
+// token) without scanning the manifest's contents.
+func (c *Client) ManifestPath() string {
+	if c.cache == nil {
+		return ""
+	}
+	return c.cache.manifest.Path()
+}
+
 func (c *Client) get(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
 	if c.cache != nil {
 		cacheKey := c.cache.cacheKey(path, params)

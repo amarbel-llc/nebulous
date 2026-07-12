@@ -13,7 +13,7 @@ import (
 	"context"
 	"encoding/json"
 
-	cg "github.com/amarbel-llc/cutting-garden/pkgs/cutting_garden_plugins"
+	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
 
@@ -30,6 +30,7 @@ type Index interface {
 	StoryContent(hash string) (tools.StoryContentView, []byte, bool)
 	StoryOriginal(hash string) ([]byte, bool)
 	StoryMetadata(hash string) (tools.StoryMetadataView, []byte, bool)
+	ManifestPath() string
 }
 
 var _ Index = (*tools.ReadIndex)(nil)

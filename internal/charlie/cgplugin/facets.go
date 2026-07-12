@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 
-	cg "github.com/amarbel-llc/cutting-garden/pkgs/cutting_garden_plugins"
+	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
 
@@ -29,6 +30,7 @@ var (
 	_ cg.FacetDescriber = Plugin{}
 	_ cg.FacetCounter   = Plugin{}
 	_ cg.FacetLabeler   = Plugin{}
+	_ cg.FacetVersioner = Plugin{}
 )
 
 // DescribeFacets declares the facet dimensions of the story and feed
@@ -113,6 +115,75 @@ func (Plugin) FacetCounts(
 	default:
 		return cg.FacetResult{}, false, nil
 	}
+}
+
+// FacetVersion returns a cheap change token for a node's facet-relevant
+// content, so the cutting-garden MCP server's summary memoization (RFC
+// 0012 §11) recomputes only when something moved instead of on every
+// read. Two wires, both cheaper than FacetCounts:
+//
+//   - Story-listing containers (stories/tags/tag/{tag}) share one
+//     corpus-wide token: the local cache manifest file's mtime, which
+//     changes exactly when a `nebulous fetch` run writes new data (one
+//     os.Stat, no manifest content scan).
+//   - A single feed's story-subset container (feed/{id}) tokens on that
+//     feed's own NewsBlur-reported NT (unread count): it moves on both
+//     new-story-arrival and read-state change, and `read` is itself a
+//     declared story facet dimension, so NT is a legitimate proxy, not
+//     just a correlate.
+//   - `feeds` (the feed-listing container) also uses the manifest mtime —
+//     feed metadata (folder/active) only refreshes via the same fetch
+//     runs.
+//
+// A spuriously-changing token only costs an extra recompute; nebulous's
+// fetch cadence is already periodic, so "stale until the next fetch"
+// isn't a new class of staleness here — it's the same lag every other
+// nebulous surface already has.
+func (Plugin) FacetVersion(ctx context.Context, node *url.URL) (string, bool, error) {
+	if node == nil {
+		return "", false, fmt.Errorf("newsblur plugin: FacetVersion requires a node URI")
+	}
+	if index == nil {
+		return "", false, fmt.Errorf("newsblur plugin: index not initialized")
+	}
+
+	segs := pathSegments(node)
+	switch {
+	case len(segs) == 1 && (segs[0] == "stories" || segs[0] == "tags" || segs[0] == "feeds"):
+		return manifestVersionToken(index.ManifestPath())
+	case len(segs) == 2 && segs[0] == "tag":
+		return manifestVersionToken(index.ManifestPath())
+	case len(segs) == 2 && segs[0] == "feed":
+		feeds, err := index.Feeds(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		for _, f := range feeds {
+			if f.ID == segs[1] {
+				return strconv.Itoa(f.NT), true, nil
+			}
+		}
+		return "", false, nil
+	default:
+		return "", false, nil
+	}
+}
+
+// manifestVersionToken stats the local cache manifest and formats its
+// mtime as an opaque token. ok=false (no error) when the manifest hasn't
+// been written yet (a fresh install before the first `nebulous fetch`).
+func manifestVersionToken(manifestPath string) (string, bool, error) {
+	if manifestPath == "" {
+		return "", false, nil
+	}
+	fi, err := os.Stat(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), true, nil
 }
 
 // ResolveFacetLabels resolves the feed dimension's opaque feed-id keys

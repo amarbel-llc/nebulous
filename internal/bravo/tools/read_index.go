@@ -34,6 +34,12 @@ type FeedRef struct {
 	Title  string
 	Folder string
 	Active bool
+	// NT is NewsBlur's own unread-story count for this feed. It changes
+	// on new-story-arrival and on read-state change alike — both
+	// facet-relevant here, since `read` is a declared story facet
+	// dimension — so it doubles as a cheap FacetVersion token for this
+	// feed's story-subset container.
+	NT int
 }
 
 // StoryRef is a story's identity plus the fields the newsblur-story-v1
@@ -55,7 +61,7 @@ func (r *ReadIndex) Feeds(ctx context.Context) ([]FeedRef, error) {
 	}
 	out := make([]FeedRef, 0, len(r.feeds.summaries))
 	for idStr, s := range r.feeds.summaries {
-		out = append(out, FeedRef{ID: idStr, Title: s.Title, Folder: s.Folder, Active: s.Active})
+		out = append(out, FeedRef{ID: idStr, Title: s.Title, Folder: s.Folder, Active: s.Active, NT: s.NT})
 	}
 	return out, nil
 }
@@ -111,6 +117,13 @@ func storyRefOf(rec *storyRecord) StoryRef {
 		Tags:     rec.Tags,
 		Read:     rec.Read,
 	}
+}
+
+// ManifestPath returns the on-disk location of the persistent cache
+// manifest — a cheap freshness proxy for the whole story corpus (its
+// mtime changes exactly when a fetch run writes new data).
+func (r *ReadIndex) ManifestPath() string {
+	return r.client.ManifestPath()
 }
 
 // Tags returns the union of user tags and story tags across the corpus.
