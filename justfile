@@ -8,18 +8,7 @@ test: test-go test-bats
 build-go tag="debug":
   #!/usr/bin/env bash
   set -euo pipefail
-  # Resolve the flake-pinned madder so its absolute path is
-  # ldflags-injected into internal/0/madder.Bin — mirrors what the Nix
-  # build does in flake.nix. Without this, debug builds would invoke
-  # madder via PATH, where older user-profile binaries can shadow the
-  # devShell's.
-  madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
-  extra_ldflags=""
-  if [ -n "$madder_path" ]; then
-    extra_ldflags="$extra_ldflags -X github.com/friedenberg/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
-  fi
-  base_ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
-  ldflags="$base_ldflags $extra_ldflags"
+  ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
   gcflags="{{if tag == "release" { "" } else { "all=-N -l" } }}"
   gcflags_arg=()
   if [ -n "$gcflags" ]; then gcflags_arg=(-gcflags "$gcflags"); fi
@@ -31,14 +20,6 @@ build-go tag="debug":
 
 build-nix:
   nix build --show-trace
-
-# Verify the flake-pinned madder path is ldflags-injected into the debug build.
-# [group: debug]
-debug-inject-check:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  echo "=== madder ==="
-  strings build/debug/nebulous | grep -m1 '/nix/store/.*madder.*/bin/madder' || echo "MISSING"
 
 # Bump a single flake input's pin in flake.lock. Example:
 #   just debug-flake-update-input madder

@@ -110,10 +110,6 @@
 
           subPackages = [ "cmd/nebulous" ];
 
-          ldflags = [
-            "-X github.com/friedenberg/nebulous/internal/0/madder.Bin=${madderPkg}/bin/madder"
-          ];
-
           postInstall = ''
             $out/bin/nebulous generate-plugin $out
           '';

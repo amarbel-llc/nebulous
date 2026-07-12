@@ -41,7 +41,7 @@ require a token.
 
     cmd/nebulous/main.go           Entry point: parses args, creates client, starts MCP server
     cmd/nebulous-cg/main.go        cutting-garden CLI with the newsblur:// plugin baked in
-    internal/0/madder/             `madder` CLI wrapper for blob store shell-outs
+    internal/0/madder/             In-process madder/go blob store (nebulous's named store)
     internal/0/manifest/           SHA256 manifest tracking (leaf package)
     internal/alfa/newsblur/        HTTP client wrapping NewsBlur REST API
       client.go                    Client struct, request helpers, cache access
@@ -116,6 +116,6 @@ LeafReader) → `tools.ReadIndex` → in-memory index → cutting-garden node/le
 ## Nix Flake
 
 Follows the stable-first nixpkgs convention from the parent eng repo. Devenvs are
-imported from `purse-first` (go + shell). `madder` is wired as a flake input and
-ldflags-injected into `internal/0/madder.Bin`; `cutting-garden` is a vendored Go
-dependency (gomod2nix).
+imported from `purse-first` (go + shell). `madder` is wired as a flake input
+(devShell + bats fixtures only — `internal/0/madder` uses `madder/go` in-process,
+no subprocess); `cutting-garden` is a vendored Go dependency (gomod2nix).
