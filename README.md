@@ -20,29 +20,39 @@ One Go module, two surfaces over one local store:
 ## NewsBlur MCP server
 
 Built on `go-mcp` from `amarbel-llc/purse-first`. Operates in two distinct
-phases:
+modes; sync and capture are now both phases of the same `fetch` command
+rather than separate processes:
 
-- **Sync** — `nebulous fetch` is the sole ingestion pipeline. It
+- **Sync (+ Capture)** — `nebulous fetch` is the sole ingestion pipeline. It
   sequentially fetches feed metadata, starred stories, and original article
   text from the NewsBlur API, with adaptive backoff that learns from
   rate-limit bursts, and persists responses into the local store: a
   SHA256-keyed manifest (`$XDG_DATA_HOME/nebulous/manifest.json`) whose
-  response bodies live in a dedicated `nebulous` madder blob store.
-- **Capture** — `nebulous capture` is a separate, self-healing gap-filling
-  scan: for each configured format (`--formats`, default `markdown-reader`),
-  it drives `cutting-garden capture <store-id> web:<permalink>` (which
-  drives chrest under the hood) for any starred story that doesn't yet have
-  a recorded receipt for that format, writing a full-page archive
-  independent of NewsBlur's own (often truncated) `story_content`. New
-  stories only by default, via a persisted watermark; `--backfill` captures
-  the full existing corpus for one run, skipping pairs already captured. A
-  failed capture simply has no receipt, so the next scan retries it
-  automatically — no separate retry bookkeeping.
+  response bodies live in a dedicated `nebulous` madder blob store. It also
+  runs a **capture phase** as a fourth step: a self-healing gap-filling
+  scan that, for each configured format (`--formats`, default
+  `markdown-reader`), drives `cutting-garden capture <store-id>
+  web:<permalink>` (which drives chrest under the hood) for any starred
+  story that doesn't yet have a recorded receipt for that format, writing a
+  full-page archive independent of NewsBlur's own (often truncated)
+  `story_content`. New stories only by default, via a persisted watermark.
+  A failed capture simply has no receipt, so the next scan retries it
+  automatically — no separate retry bookkeeping. Gated by its own interval
+  (`NEBULOUS_CAPTURE_INTERVAL`, default `6h`) rather than fetch's own sync
+  cadence, since the corpus scan behind the capture loop is real cost tied
+  to the manifest's mtime; soft-skips if cutting-garden isn't on `PATH` or
+  `--no-capture` was passed. `nebulous capture` also remains a standalone
+  subcommand for manual invocations and `--backfill` (captures the full
+  existing corpus for one run, ignoring the interval gate, while still
+  skipping pairs already captured).
 - **Serve** — `nebulous serve mcp` reads exclusively from that local store;
   it never hits the API for reads. In-memory feed and story indices
-  (word-search accelerated) are built lazily from cached responses.
-  Mutation tools (star/unstar, mark read/unread, subscribe/unsubscribe,
-  folders) are the exception and call the NewsBlur API directly.
+  (word-search accelerated) rebuild themselves whenever the manifest file's
+  mtime changes since the last check, so a concurrently-running
+  `nebulous fetch`'s new data becomes visible without restarting the
+  server. Mutation tools (star/unstar, mark read/unread,
+  subscribe/unsubscribe, folders) are the exception and call the NewsBlur
+  API directly.
 
 Query surface: `feed_query` and `story_query` tools (structured filters by
 year/tag/feed/status plus word search), a facets resource
@@ -90,23 +100,27 @@ The flake exports producer modules (`circus-host-integration(7)`'s
 self-passing convention, mirroring `cutting-garden`'s own module shape):
 
 - `nixosModules.default` (`services.nebulous`) — installs `nebulous` +
-  `nebulous-cg`, and runs `nebulous fetch` on a periodic systemd timer
-  (`fetchInterval`, default `1h`) so a host's local cache stays warm
-  without a manual invocation. `environmentFile` is the secret seam for
-  `NEWSBLUR_TOKEN` (a path to `VAR=value` lines — the value never enters
-  the Nix store). This module does **not** define an MCP-serving unit:
-  `nebulous serve mcp` is a moxy stdio child on hosts that expose it
-  (Path 1, per `circus-host-integration(7)`), wired host-side by the
+  `nebulous-cg`, and runs `nebulous fetch` on a single periodic systemd
+  timer (`fetchInterval`, default `1h`) so a host's local cache stays
+  warm without a manual invocation. `environmentFile` is the secret seam
+  for `NEWSBLUR_TOKEN` (a path to `VAR=value` lines — the value never
+  enters the Nix store). This module does **not** define an MCP-serving
+  unit: `nebulous serve mcp` is a moxy stdio child on hosts that expose
+  it (Path 1, per `circus-host-integration(7)`), wired host-side by the
   consumer, not by this module.
   Supplying `chrestPackage` and `cuttingGardenPackage` (both nullable
-  `types.package`, unset by default) additionally enables a second timer,
-  `nebulous-capture` (`captureInterval`, default `6h`), running the
-  gap-filling capture scan described above (`captureFormats`, default
-  `[ "markdown-reader" ]`; `captureStoreId`, default `"nebulous"`). Both
-  packages are external to nebulous's own flake, so the consumer (circus)
-  supplies them as option values from its own chrest/cutting-garden flake
-  inputs — a host that only wants NewsBlur sync (no captures) leaves them
-  unset and gets only the fetch timer.
+  `types.package`, unset by default) additionally enables the gap-filling
+  capture scan described above as a fourth phase of the same
+  `nebulous fetch` run — no second timer. It's gated by its own interval
+  (`captureInterval`, default `6h`, threaded in as `NEBULOUS_CAPTURE_INTERVAL`
+  and checked against a persisted last-scan timestamp, since a no-op pass
+  is cheap but the corpus scan behind it isn't) with `captureFormats`
+  (default `[ "markdown-reader" ]`) and `captureStoreId` (default
+  `"nebulous"`) passed through as `-formats`/`-store` flags. Both packages
+  are external to nebulous's own flake, so the consumer (circus) supplies
+  them as option values from its own chrest/cutting-garden flake inputs —
+  a host that only wants NewsBlur sync (no captures) leaves them unset and
+  `fetch` runs sync-only.
 - `homeManagerModules.default` (`programs.nebulous`) — installs the
   binaries for interactive/workstation use. No systemd unit; the periodic
   timer is a NixOS-host concern.
@@ -115,9 +129,11 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
 
 ```
 nebulous serve mcp                    Start the MCP server over stdio
-nebulous fetch                        Sync feeds, starred stories, original text
+nebulous fetch [--formats f1,f2] [--store id] [--no-capture]
+                                      Sync feeds/starred stories/original text; also runs
+                                      the gap-filling capture scan when its interval elapses
 nebulous capture [--formats f1,f2] [--store id] [--backfill]
-                                      Gap-filling capture-via-chrest scan (see above)
+                                      Run the capture scan standalone, ignoring the interval gate
 nebulous corpus-list / corpus-read    Starred-story corpus access (for maneater)
 nebulous generate-plugin | hook | install-mcp
                                       Plugin/install plumbing (no token needed)

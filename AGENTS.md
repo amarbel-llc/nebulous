@@ -73,9 +73,10 @@ require a token.
       facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
       url.go                       newsblur:// URL build/parse
 
-### Three-Phase Architecture: Sync + Capture + Serve
+### Three-Phase Architecture: Sync (+ Capture) + Serve
 
-The server operates in three distinct modes:
+The server operates in two distinct modes; sync and capture are now both
+phases of the same `fetch` command rather than separate processes:
 
 - **`nebulous fetch`** (sync phase): Sequential CLI command that populates the
   local persistent store by fetching from the NewsBlur API. Handles rate
@@ -83,22 +84,32 @@ The server operates in three distinct modes:
   and original article text. This is the sole ingestion pipeline --- the MCP
   server and the cutting-garden plugin never hit the API for reads.
 
-- **`nebulous capture`** (capture phase): A separate, self-healing
+  `fetch` also runs a **capture phase** as its fourth step: a self-healing
   gap-filling scan over the local story corpus. For each configured format
   it shells out to `cutting-garden capture <store-id> web:<permalink>`
   (`internal/alfa/capture`), which drives chrest under the hood, and records
   the resulting receipt (parsed directly off the capture command's own
   tap-ndjson stdout) via `internal/alfa/newsblur/capture_state.go`. New stories
-  only by default (a persisted watermark compared against `story.Date`);
-  `--backfill` overrides the watermark for one run. A failed capture simply
-  has no receipt, so the next scan retries it --- no separate retry
-  bookkeeping.
+  only by default (a persisted watermark compared against `story.Date`).
+  A failed capture simply has no receipt, so the next scan retries it ---
+  no separate retry bookkeeping. Gated by its own interval
+  (`NEBULOUS_CAPTURE_INTERVAL`, default `6h`, checked against a persisted
+  `CaptureLastScanAt` timestamp) rather than fetch's own cadence, since the
+  corpus scan behind the capture loop is real cost tied to the manifest's
+  mtime; soft-skips if cutting-garden isn't on `PATH` or `-no-capture` was
+  passed. `nebulous capture` also remains a standalone subcommand for manual
+  invocations and `--backfill` (which overrides the watermark for one run,
+  ignoring the interval gate).
 
 - **MCP server** (serve phase): Reads exclusively from the local persistent
-  store. In-memory indices (`feedIndex`, `storyStore`) are built from cached
-  responses on first use via `sync.Once`. All query tools and resources operate
-  against these local indices. The `nebulous-cg` cutting-garden plugin reads the
-  same indices through `tools.ReadIndex`.
+  store. In-memory indices (`feedIndex`, `storyStore`) rebuild themselves
+  when the manifest file's mtime changes since the last check (a debounced
+  staleness check, `internal/bravo/tools/stale_cache.go`), so a
+  concurrently-running `nebulous fetch`'s new data becomes visible without
+  restarting the server --- they no longer build once via `sync.Once` and
+  never again. All query tools and resources operate against these local
+  indices. The `nebulous-cg` cutting-garden plugin reads the same indices
+  through `tools.ReadIndex`.
 
 ### Data Flow
 
@@ -106,7 +117,8 @@ Sync: `nebulous fetch` → `newsblur.Client` → HTTP to `newsblur.com/api/*` �
 response → persistent store (SHA256 manifest at `$XDG_DATA_HOME/nebulous/manifest.json`
 + a `nebulous` madder blob store).
 
-Capture: `nebulous capture` → `tools.ReadIndex.Stories()` (eligible stories) →
+Capture: `nebulous fetch`'s fourth phase (or the standalone `nebulous capture`
+subcommand) → `tools.ReadIndex.Stories()` (eligible stories) →
 `internal/alfa/capture.Client` → `cutting-garden capture <store> web:<url>` →
 chrest → RFC 0002 receipt in the `nebulous` madder store → receipt id parsed
 off stdout → completion record in the same persistent store.
@@ -124,8 +136,8 @@ LeafReader) → `tools.ReadIndex` → in-memory index → cutting-garden node/le
   (`generate-plugin`, `hook`, `install-mcp`). Tool handlers and indices are only
   initialized when client is non-nil.
 - **Story store**: `storyStore` holds all stories as typed records with a word
-  acceleration index. Built once from cached starred story pages via
-  `sync.Once`.
+  acceleration index, built from cached starred story pages and rebuilt
+  whenever the manifest file's mtime changes (see `stale_cache.go` above).
 - **All newsblur client methods return `json.RawMessage`** --- parsing happens
   in tool handlers.
 - **Persistent store**: a SHA256-keyed manifest plus a madder blob store under
