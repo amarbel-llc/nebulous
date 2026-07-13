@@ -97,6 +97,22 @@ func (c *Client) ManifestPath() string {
 func (c *Client) get(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
 	if c.cache != nil {
 		cacheKey := c.cache.cacheKey(path, params)
+		if c.httpClient == nil {
+			// Cache-only client (NewCacheOnlyClient, ttl=0): there is no
+			// live source to fall back to, so a TTL-expired entry is
+			// still the best available data — never fall through to
+			// doGet, which would nil-panic on this client's absent
+			// httpClient. Confirmed in production: nebulous-cg mcp
+			// crashed here when cutting-garden's own background
+			// facet-maintenance goroutine called FacetCounts, which
+			// reaches feedIndex.build -> client.Feeds -> here, and a
+			// ttl=0 cache-only client's non-immutable feeds cache entry
+			// always reads as TTL-expired via the regular get() below.
+			if cached, ok := c.cache.getNoTTL(cacheKey); ok {
+				return cached, nil
+			}
+			return nil, fmt.Errorf("newsblur: %s not cached (cache-only client, no NewsBlur token)", path)
+		}
 		if cached, ok := c.cache.get(cacheKey); ok {
 			return cached, nil
 		}
@@ -109,6 +125,9 @@ func (c *Client) getSkipCache(ctx context.Context, path string, params url.Value
 }
 
 func (c *Client) doGet(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
+	if c.httpClient == nil {
+		return nil, fmt.Errorf("newsblur: cannot fetch %s live: client has no HTTP client (cache-only mode)", path)
+	}
 	u := c.baseURL + path
 	if len(params) > 0 {
 		u += "?" + params.Encode()
@@ -228,6 +247,9 @@ func (c *Client) PutCachedOriginalText(storyHash string, raw json.RawMessage) er
 }
 
 func (c *Client) post(ctx context.Context, path string, form url.Values) (json.RawMessage, error) {
+	if c.httpClient == nil {
+		return nil, fmt.Errorf("newsblur: cannot post %s: client has no HTTP client (cache-only mode)", path)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)

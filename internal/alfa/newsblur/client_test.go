@@ -1,7 +1,9 @@
 package newsblur
 
 import (
+	"context"
 	"encoding/json"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -89,6 +91,56 @@ func TestInvalidateStarredStoryHashManifest(t *testing.T) {
 	_, ok := c.CachedStarredStoryHashes()
 	if ok {
 		t.Error("CachedStarredStoryHashes returned true after invalidate")
+	}
+}
+
+// nebulous#41-followup: NewCacheOnlyClient's ttl=0 means get()'s
+// TTL-checked cache path always treats a non-immutable entry (like the
+// one client.Feeds()'s own doGet writes via the plain `put`) as expired,
+// falling through to doGet — which nil-panics on a cache-only client's
+// absent httpClient. Confirmed live: nebulous-cg mcp crashed exactly
+// this way when cutting-garden's background facet-maintenance goroutine
+// called FacetCounts -> ReadIndex.Feeds() -> feedIndex.build() ->
+// client.Feeds().
+func TestCacheOnlyClientFeedsReadsCachedEntryWithoutPanicking(t *testing.T) {
+	sink := newMemSink()
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+
+	// Seed the cache the way an online client's Feeds() would on a
+	// cache miss: the regular (TTL-checked) `put`, not `putImmutable`.
+	seed := NewClient("test-token")
+	if err := seed.WithCache(manifestPath, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	feedsRaw := json.RawMessage(`{"feeds":{},"flat_folders_with_feeds":[]}`)
+	key := seed.cache.cacheKey("/reader/feeds", url.Values{"flat": {"true"}})
+	if err := seed.cache.put(key, feedsRaw); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheOnly, err := NewCacheOnlyClient(manifestPath, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := cacheOnly.Feeds(context.Background(), false, true, false)
+	if err != nil {
+		t.Fatalf("Feeds: %v (want the cached entry, not a live-fetch error/panic)", err)
+	}
+	if string(got) != string(feedsRaw) {
+		t.Errorf("Feeds = %s, want %s", got, feedsRaw)
+	}
+}
+
+// A cache-only client with nothing cached must return a clean error, not
+// attempt a live fetch against its nil httpClient.
+func TestCacheOnlyClientFeedsUncachedReturnsCleanError(t *testing.T) {
+	cacheOnly, err := NewCacheOnlyClient(filepath.Join(t.TempDir(), "manifest.json"), newMemSink())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cacheOnly.Feeds(context.Background(), false, true, false); err == nil {
+		t.Error("Feeds() err = nil, want a clean 'not cached' error for a cache-only client with nothing cached")
 	}
 }
 
