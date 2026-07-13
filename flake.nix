@@ -213,8 +213,10 @@
 
               # A second host config supplies chrestPackage/cuttingGardenPackage
               # (stand-ins — this flake carries neither as a real input) to
-              # exercise the nebulous-capture timer/service path, which the
-              # module only renders when both are non-null (FDR 0001 Stage 3).
+              # exercise the capture phase folded into nebulous-fetch itself
+              # (no separate unit anymore — Change 2 reversed FDR 0001 Stage
+              # 3's own timer), which the module only enables (extra
+              # -formats/-store flags + PATH prepend) when both are non-null.
               captureHostConfig =
                 (igloo.lib.nixosSystem {
                   inherit system;
@@ -236,10 +238,8 @@
                     }
                   ];
                 }).config;
-              captureExecStart = captureHostConfig.systemd.services.nebulous-capture.serviceConfig.ExecStart;
-              captureOnUnitActiveSec =
-                captureHostConfig.systemd.timers.nebulous-capture.timerConfig.OnUnitActiveSec;
-              capturePath = builtins.elemAt captureHostConfig.systemd.services.nebulous-capture.serviceConfig.Environment 1;
+              captureExecStart = captureHostConfig.systemd.services.nebulous-fetch.serviceConfig.ExecStart;
+              captureEnvJoined = pkgs.lib.concatStringsSep "\n" captureHostConfig.systemd.services.nebulous-fetch.serviceConfig.Environment;
             in
             pkgs.runCommand "nebulous-modules-eval"
               {
@@ -247,15 +247,18 @@
                   execStart
                   onUnitActiveSec
                   captureExecStart
-                  captureOnUnitActiveSec
-                  capturePath
+                  captureEnvJoined
                   ;
                 installsPackage = if installsPackage then "1" else "";
               }
               ''
-                echo "--- nebulous-fetch.serviceConfig.ExecStart ---"
+                echo "--- nebulous-fetch.serviceConfig.ExecStart (sync-only host) ---"
                 echo "$execStart"
                 echo "$execStart" | grep -q '/bin/nebulous fetch'
+                if echo "$execStart" | grep -q -- '-formats'; then
+                  echo "sync-only ExecStart unexpectedly carries -formats (chrestPackage/cuttingGardenPackage unset)" >&2
+                  exit 1
+                fi
 
                 echo "--- nebulous-fetch timer OnUnitActiveSec ---"
                 echo "$onUnitActiveSec"
@@ -266,21 +269,19 @@
                   exit 1
                 }
 
-                echo "--- nebulous-capture.serviceConfig.ExecStart ---"
+                echo "--- nebulous-fetch.serviceConfig.ExecStart (capture-enabled host) ---"
                 echo "$captureExecStart"
-                echo "$captureExecStart" | grep -q '/bin/nebulous'
-                echo "$captureExecStart" | grep -q 'capture'
+                echo "$captureExecStart" | grep -q '/bin/nebulous fetch'
+                echo "$captureExecStart" | grep -q -- '-formats'
                 echo "$captureExecStart" | grep -q 'markdown-reader,pdf'
+                echo "$captureExecStart" | grep -q -- '-store'
                 echo "$captureExecStart" | grep -q 'nebulous$'
 
-                echo "--- nebulous-capture timer OnUnitActiveSec ---"
-                echo "$captureOnUnitActiveSec"
-                [ "$captureOnUnitActiveSec" = "3h" ]
-
-                echo "--- nebulous-capture.serviceConfig.Environment[PATH] ---"
-                echo "$capturePath"
-                echo "$capturePath" | grep -q '^PATH='
-                echo "$capturePath" | grep -q '/bin:'
+                echo "--- nebulous-fetch.serviceConfig.Environment (capture-enabled host) ---"
+                echo "$captureEnvJoined"
+                echo "$captureEnvJoined" | grep -q 'NEBULOUS_CAPTURE_INTERVAL=3h'
+                echo "$captureEnvJoined" | grep -q '^PATH='
+                echo "$captureEnvJoined" | grep -q '/bin:'
 
                 touch "$out"
               '';
