@@ -109,13 +109,30 @@ func (c *Client) recordCaptureFormat(format string) error {
 	return c.cache.putImmutable(c.captureFormatsCacheKey(), raw)
 }
 
+// legacyPersistedTime is the pre-2026-07-13 on-disk shape (a wrapper
+// struct per key: captureWatermark{Since} / captureLastScanAt{At}) that
+// getPersistedTime/putPersistedTime replaced with a bare time.Time.
+// krone already has a real CaptureWatermark entry persisted in this
+// shape (from an already-run `nebulous capture --backfill` — see FDR
+// 0001's frontmatter) — silently failing to parse it as "not set" would
+// make the next run establish a brand-new watermark, discarding the true
+// original eligibility anchor and permanently excluding any story
+// published between the two from the automatic gap-filling scan.
+// CaptureLastScanAt has no pre-existing production data (brand new this
+// change), but decodes the same way for consistency at negligible cost.
+type legacyPersistedTime struct {
+	Since time.Time `json:"since"`
+	At    time.Time `json:"at"`
+}
+
 // getPersistedTime/putPersistedTime back both CaptureWatermark and
 // CaptureLastScanAt — two distinct concerns (eligibility anchor by publish
 // date vs. when the capture phase itself last ran) that happen to share
 // the exact same "persist one timestamp under one cache key" shape, so
 // they share this one implementation rather than each defining its own
-// near-identical wrapper struct (time.Time already marshals to JSON
-// directly, no wrapper needed).
+// near-identical wrapper struct (time.Time marshals to JSON directly for
+// anything written going forward; legacyPersistedTime above is read-only
+// back-compat for what's already on disk).
 func (c *Client) getPersistedTime(key string) (time.Time, bool) {
 	if c.cache == nil {
 		return time.Time{}, false
@@ -125,10 +142,20 @@ func (c *Client) getPersistedTime(key string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	var t time.Time
-	if err := json.Unmarshal(raw, &t); err != nil {
+	if err := json.Unmarshal(raw, &t); err == nil {
+		return t, true
+	}
+	var legacy legacyPersistedTime
+	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return time.Time{}, false
 	}
-	return t, true
+	if !legacy.Since.IsZero() {
+		return legacy.Since, true
+	}
+	if !legacy.At.IsZero() {
+		return legacy.At, true
+	}
+	return time.Time{}, false
 }
 
 func (c *Client) putPersistedTime(key string, t time.Time) error {
