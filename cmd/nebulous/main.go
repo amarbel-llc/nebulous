@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
@@ -27,14 +29,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch                Progressively cache feeds, starred stories, and original text\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch [-formats f1,f2] [-store id] [-no-capture]\n")
+		fmt.Fprintf(os.Stderr, "                                Cache feeds, starred stories, and original text; also runs\n")
+		fmt.Fprintf(os.Stderr, "                                the gap-filling capture phase when its interval has elapsed\n")
+		fmt.Fprintf(os.Stderr, "                                (NEBULOUS_CAPTURE_INTERVAL, default 6h; -no-capture skips it)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous capture [-formats f1,f2] [-store id] [-backfill]\n")
-		fmt.Fprintf(os.Stderr, "                                Capture eligible starred stories via cutting-garden+chrest\n")
+		fmt.Fprintf(os.Stderr, "                                Run the capture phase standalone, ignoring the interval gate\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN   NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
-		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME    honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
+		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME              honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_CAPTURE_INTERVAL  how often `fetch`'s folded-in capture phase actually runs (default 6h)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -109,6 +115,21 @@ func main() {
 			log.Fatal("NEWSBLUR_TOKEN environment variable is required")
 		}
 
+		fetchFlags := flag.NewFlagSet("fetch", flag.ExitOnError)
+		formatsFlag := fetchFlags.String(
+			"formats", strings.Join(tools.DefaultCaptureFormats, ","),
+			"comma-separated cutting-garden capture formats (for the folded-in capture phase)",
+		)
+		storeFlag := fetchFlags.String(
+			"store", defaultCaptureStoreId,
+			"cutting-garden blob-store id to capture receipts into (for the folded-in capture phase)",
+		)
+		noCapture := fetchFlags.Bool(
+			"no-capture", false,
+			"skip the capture phase entirely on this run, regardless of the interval gate",
+		)
+		fetchFlags.Parse(flag.Args()[1:])
+
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
@@ -117,7 +138,7 @@ func main() {
 			log.Fatalf("fetch: cache setup: %v", err)
 		}
 
-		if err := fetchAll(ctx, client); err != nil {
+		if err := fetchAll(ctx, client, splitFormats(*formatsFlag), *storeFlag, *noCapture); err != nil {
 			log.Fatalf("fetch: %v", err)
 		}
 		return
@@ -250,9 +271,79 @@ func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
 	return newsblur.NewCacheOnlyClient(manifestPath, sink)
 }
 
-// fetchAll runs all three ingestion phases (feeds, starred stories,
-// original text), populating the local cache.
-func fetchAll(ctx context.Context, client *newsblur.Client) error {
+// defaultCaptureInterval is how often fetchAll's folded-in capture phase
+// actually runs, absent NEBULOUS_CAPTURE_INTERVAL. The capture loop
+// itself is cheap to no-op (HasCaptureRecord is a pure cache lookup per
+// (story, format) pair), but the corpus scan behind it (index.Stories())
+// is real cost tied to the manifest's mtime — running it every fetch
+// tick (default 1h) instead of a slower cadence would multiply that
+// cost 6x for no benefit, since new stories are gap-filled regardless of
+// which fetch tick catches them.
+const defaultCaptureInterval = 6 * time.Hour
+
+// captureInterval returns the configured gate for fetchAll's capture
+// phase, parsed from NEBULOUS_CAPTURE_INTERVAL (falls back to
+// defaultCaptureInterval on unset/unparseable — same operator-facing
+// default the standalone nebulous-capture systemd timer used to enforce).
+func captureInterval() time.Duration {
+	if raw := os.Getenv("NEBULOUS_CAPTURE_INTERVAL"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil {
+			return d
+		}
+	}
+	return defaultCaptureInterval
+}
+
+// captureDue reports whether enough time has passed since the capture
+// phase's last successful run (or it has never run) to run it again.
+func captureDue(client *newsblur.Client) (due bool, lastScan time.Time) {
+	last, ok := client.CaptureLastScanAt()
+	if !ok {
+		return true, time.Time{}
+	}
+	return time.Since(last) >= captureInterval(), last
+}
+
+// lookPathCuttingGarden is a var (not a direct exec.LookPath call) so
+// tests can substitute a fake PATH-miss without depending on whether
+// cutting-garden actually happens to be installed on the test machine.
+var lookPathCuttingGarden = func() (string, error) { return exec.LookPath("cutting-garden") }
+
+// runFetchCapturePhase is fetchAll's final phase: the gap-filling
+// capture scan (internal/alfa/capture via cutting-garden+chrest), folded
+// into fetch instead of living behind its own systemd timer (FDR 0001
+// Stage 3's original separation reversed — see docs/features/0001).
+// Soft-skips (single log line, no error) on -no-capture, a missing
+// cutting-garden on PATH (a fetch-only host with no chrest wired), or
+// the interval gate not yet elapsed — mirrors the existing
+// "[feeds] error: %v (continuing)" pattern: a capture-phase failure
+// never fails the fetch run as a whole.
+func runFetchCapturePhase(ctx context.Context, client *newsblur.Client, storeId string, formats []string, skipCapture bool) {
+	if skipCapture {
+		log.Println("[capture] skipped (-no-capture)")
+		return
+	}
+	if _, err := lookPathCuttingGarden(); err != nil {
+		log.Println("[capture] skipped: cutting-garden not on PATH")
+		return
+	}
+	due, last := captureDue(client)
+	if !due {
+		log.Printf("[capture] skipped: last ran %s ago (interval %s)", time.Since(last).Round(time.Second), captureInterval())
+		return
+	}
+	if err := runCaptureLoop(ctx, client, storeId, formats, false); err != nil {
+		log.Printf("[capture] error: %v (continuing)", err)
+		return
+	}
+	if err := client.PutCaptureLastScanAt(time.Now()); err != nil {
+		log.Printf("[capture] error recording last-scan timestamp: %v (continuing)", err)
+	}
+}
+
+// fetchAll runs all four phases (feeds, starred stories, original text,
+// and the gap-filling capture scan), populating the local cache.
+func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []string, captureStoreId string, skipCapture bool) error {
 	// Phase 1: Feeds metadata
 	log.Println("[feeds] fetching feed list...")
 	if _, err := client.Feeds(ctx, false, true, false); err != nil {
@@ -324,6 +415,13 @@ func fetchAll(ctx context.Context, client *newsblur.Client) error {
 
 	log.Printf("[done] feeds: cached, stories: %d, original text: %d/%d cached",
 		len(hashes), len(hashes)-len(missingText), len(hashes))
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Phase 4: capture (best-effort, self-healing gap-filling scan)
+	runFetchCapturePhase(ctx, client, captureStoreId, captureFormats, skipCapture)
 
 	return nil
 }

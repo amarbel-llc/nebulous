@@ -149,3 +149,47 @@ func (c *Client) PutCaptureWatermark(since time.Time) error {
 	}
 	return c.cache.putImmutable(c.captureWatermarkCacheKey(), raw)
 }
+
+func (c *Client) captureLastScanAtCacheKey() string {
+	return c.cache.cacheKey("/capture/last-scan", nil)
+}
+
+// captureLastScanAt is the persisted JSON body for the capture phase's
+// interval gate: a distinct concern from captureWatermark (eligibility by
+// publish date) — this tracks when the capture phase itself last ran, so
+// `nebulous fetch` (once it folds the capture phase in) can skip it on
+// most ticks and only run it every captureInterval.
+type captureLastScanAt struct {
+	At time.Time `json:"at"`
+}
+
+// CaptureLastScanAt returns the persisted timestamp of the capture
+// phase's last run, if any.
+func (c *Client) CaptureLastScanAt() (time.Time, bool) {
+	var v captureLastScanAt
+	if c.cache == nil {
+		return time.Time{}, false
+	}
+	raw, ok := c.cache.getNoTTL(c.captureLastScanAtCacheKey())
+	if !ok {
+		return time.Time{}, false
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return time.Time{}, false
+	}
+	return v.At, true
+}
+
+// PutCaptureLastScanAt persists the capture phase's last-run timestamp.
+// Called every time the capture phase actually runs (not skipped), so
+// this is rewritten repeatedly, unlike the watermark's write-once use.
+func (c *Client) PutCaptureLastScanAt(t time.Time) error {
+	if c.cache == nil {
+		return nil
+	}
+	raw, err := json.Marshal(captureLastScanAt{At: t})
+	if err != nil {
+		return err
+	}
+	return c.cache.putImmutable(c.captureLastScanAtCacheKey(), raw)
+}
