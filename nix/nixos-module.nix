@@ -52,6 +52,12 @@ let
     types
     ;
 
+  # The capture phase (folded into nebulous-fetch, no separate unit) is
+  # only enabled when both packages are supplied — bound once so the
+  # ExecStart flags and the PATH/env wiring below can't drift apart from
+  # checking the same condition twice.
+  captureEnabled = cfg.chrestPackage != null && cfg.cuttingGardenPackage != null;
+
   # Hardening + state/secret wiring for nebulous-fetch's oneshot
   # timer-triggered service.
   mkOneshotService =
@@ -267,7 +273,7 @@ in
           "${cfg.package}/bin/nebulous"
           "fetch"
         ]
-        ++ lib.optionals (cfg.chrestPackage != null && cfg.cuttingGardenPackage != null) [
+        ++ lib.optionals captureEnabled [
           "-formats"
           (lib.concatStringsSep "," cfg.captureFormats)
           "-store"
@@ -289,7 +295,7 @@ in
         # it) — deferred; for now the simpler fix is a unit-scoped PATH
         # carrying exactly the two packages the capture phase needs,
         # nothing else.
-        lib.optionals (cfg.chrestPackage != null && cfg.cuttingGardenPackage != null) [
+        lib.optionals captureEnabled [
           "PATH=${cfg.cuttingGardenPackage}/bin:${cfg.chrestPackage}/bin:/run/current-system/sw/bin"
         ];
     };

@@ -304,32 +304,32 @@ func captureDue(client *newsblur.Client) (due bool, lastScan time.Time) {
 	return time.Since(last) >= captureInterval(), last
 }
 
-// lookPathCuttingGarden is a var (not a direct exec.LookPath call) so
-// tests can substitute a fake PATH-miss without depending on whether
-// cutting-garden actually happens to be installed on the test machine.
-var lookPathCuttingGarden = func() (string, error) { return exec.LookPath("cutting-garden") }
-
 // runFetchCapturePhase is fetchAll's final phase: the gap-filling
 // capture scan (internal/alfa/capture via cutting-garden+chrest), folded
 // into fetch instead of living behind its own systemd timer (FDR 0001
 // Stage 3's original separation reversed — see docs/features/0001).
-// Soft-skips (single log line, no error) on -no-capture, a missing
-// cutting-garden on PATH (a fetch-only host with no chrest wired), or
-// the interval gate not yet elapsed — mirrors the existing
-// "[feeds] error: %v (continuing)" pattern: a capture-phase failure
-// never fails the fetch run as a whole.
-func runFetchCapturePhase(ctx context.Context, client *newsblur.Client, storeId string, formats []string, skipCapture bool) {
+// Soft-skips (single log line, no error) on -no-capture, the interval
+// gate not yet elapsed, or a missing cutting-garden on PATH (a fetch-only
+// host with no chrest wired) — mirrors the existing "[feeds] error: %v
+// (continuing)" pattern: a capture-phase failure never fails the fetch
+// run as a whole. lookPath is threaded as a parameter (matching every
+// other capture-phase input) rather than a package-level var, so tests
+// can substitute a fake PATH-miss/hit without a shared mutable global;
+// checked last among the skip conditions since it's the only one that
+// does real I/O (a PATH scan), and the interval gate above it already
+// skips most fetch ticks for free.
+func runFetchCapturePhase(ctx context.Context, client *newsblur.Client, storeId string, formats []string, skipCapture bool, lookPath func() (string, error)) {
 	if skipCapture {
 		log.Println("[capture] skipped (-no-capture)")
-		return
-	}
-	if _, err := lookPathCuttingGarden(); err != nil {
-		log.Println("[capture] skipped: cutting-garden not on PATH")
 		return
 	}
 	due, last := captureDue(client)
 	if !due {
 		log.Printf("[capture] skipped: last ran %s ago (interval %s)", time.Since(last).Round(time.Second), captureInterval())
+		return
+	}
+	if _, err := lookPath(); err != nil {
+		log.Println("[capture] skipped: cutting-garden not on PATH")
 		return
 	}
 	if err := runCaptureLoop(ctx, client, storeId, formats, false); err != nil {
@@ -421,7 +421,9 @@ func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []str
 	}
 
 	// Phase 4: capture (best-effort, self-healing gap-filling scan)
-	runFetchCapturePhase(ctx, client, captureStoreId, captureFormats, skipCapture)
+	runFetchCapturePhase(ctx, client, captureStoreId, captureFormats, skipCapture, func() (string, error) {
+		return exec.LookPath("cutting-garden")
+	})
 
 	return nil
 }

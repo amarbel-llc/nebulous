@@ -109,87 +109,73 @@ func (c *Client) recordCaptureFormat(format string) error {
 	return c.cache.putImmutable(c.captureFormatsCacheKey(), raw)
 }
 
+// getPersistedTime/putPersistedTime back both CaptureWatermark and
+// CaptureLastScanAt — two distinct concerns (eligibility anchor by publish
+// date vs. when the capture phase itself last ran) that happen to share
+// the exact same "persist one timestamp under one cache key" shape, so
+// they share this one implementation rather than each defining its own
+// near-identical wrapper struct (time.Time already marshals to JSON
+// directly, no wrapper needed).
+func (c *Client) getPersistedTime(key string) (time.Time, bool) {
+	if c.cache == nil {
+		return time.Time{}, false
+	}
+	raw, ok := c.cache.getNoTTL(key)
+	if !ok {
+		return time.Time{}, false
+	}
+	var t time.Time
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func (c *Client) putPersistedTime(key string, t time.Time) error {
+	if c.cache == nil {
+		return nil
+	}
+	raw, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+	return c.cache.putImmutable(key, raw)
+}
+
 func (c *Client) captureWatermarkCacheKey() string {
 	return c.cache.cacheKey("/capture/watermark", nil)
 }
 
-// captureWatermark is the persisted JSON body for the capture-eligibility
-// anchor: stories published before Since are not eligible for the
-// gap-filling scan unless --backfill overrides it.
-type captureWatermark struct {
-	Since time.Time `json:"since"`
-}
-
-// CaptureWatermark returns the persisted capture-eligibility watermark,
-// if one has been established (by a prior `nebulous capture` run).
+// CaptureWatermark returns the persisted capture-eligibility watermark —
+// stories published before it are not eligible for the gap-filling scan
+// unless --backfill overrides it — if one has been established (by a
+// prior `nebulous capture` run).
 func (c *Client) CaptureWatermark() (time.Time, bool) {
-	var w captureWatermark
-	if c.cache == nil {
-		return time.Time{}, false
-	}
-	raw, ok := c.cache.getNoTTL(c.captureWatermarkCacheKey())
-	if !ok {
-		return time.Time{}, false
-	}
-	if err := json.Unmarshal(raw, &w); err != nil {
-		return time.Time{}, false
-	}
-	return w.Since, true
+	return c.getPersistedTime(c.captureWatermarkCacheKey())
 }
 
 // PutCaptureWatermark persists the capture-eligibility watermark. Called
 // once, the first time `nebulous capture` ever runs.
 func (c *Client) PutCaptureWatermark(since time.Time) error {
-	if c.cache == nil {
-		return nil
-	}
-	raw, err := json.Marshal(captureWatermark{Since: since})
-	if err != nil {
-		return err
-	}
-	return c.cache.putImmutable(c.captureWatermarkCacheKey(), raw)
+	return c.putPersistedTime(c.captureWatermarkCacheKey(), since)
 }
 
 func (c *Client) captureLastScanAtCacheKey() string {
 	return c.cache.cacheKey("/capture/last-scan", nil)
 }
 
-// captureLastScanAt is the persisted JSON body for the capture phase's
-// interval gate: a distinct concern from captureWatermark (eligibility by
-// publish date) — this tracks when the capture phase itself last ran, so
-// `nebulous fetch` (once it folds the capture phase in) can skip it on
-// most ticks and only run it every captureInterval.
-type captureLastScanAt struct {
-	At time.Time `json:"at"`
-}
-
 // CaptureLastScanAt returns the persisted timestamp of the capture
-// phase's last run, if any.
+// phase's last run, if any — a distinct concern from CaptureWatermark
+// (eligibility by publish date): this tracks when the capture phase
+// itself last ran, so `nebulous fetch`'s folded-in capture phase can skip
+// it on most ticks and only run it every captureInterval.
 func (c *Client) CaptureLastScanAt() (time.Time, bool) {
-	var v captureLastScanAt
-	if c.cache == nil {
-		return time.Time{}, false
-	}
-	raw, ok := c.cache.getNoTTL(c.captureLastScanAtCacheKey())
-	if !ok {
-		return time.Time{}, false
-	}
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return time.Time{}, false
-	}
-	return v.At, true
+	return c.getPersistedTime(c.captureLastScanAtCacheKey())
 }
 
 // PutCaptureLastScanAt persists the capture phase's last-run timestamp.
 // Called every time the capture phase actually runs (not skipped), so
 // this is rewritten repeatedly, unlike the watermark's write-once use.
 func (c *Client) PutCaptureLastScanAt(t time.Time) error {
-	if c.cache == nil {
-		return nil
-	}
-	raw, err := json.Marshal(captureLastScanAt{At: t})
-	if err != nil {
-		return err
-	}
-	return c.cache.putImmutable(c.captureLastScanAtCacheKey(), raw)
+	return c.putPersistedTime(c.captureLastScanAtCacheKey(), t)
 }

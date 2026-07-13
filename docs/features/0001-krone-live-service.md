@@ -216,30 +216,23 @@ corpus. This is Stage 1 of the roadmap below and is starting immediately.
   of nebulous's own flake.
 
   **Amendment (2026-07-13): the separate `nebulous-capture` timer was
-  removed.** Stage 3 as originally shipped kept `capture` "deliberately
-  separate from `fetch`, its own systemd timer" -- the reasoning at the
-  time was that a capture launches a real headless-browser render per
-  eligible (story, format) pair and is considerably heavier than a
-  NewsBlur API sync, so it needed its own (longer) cadence. Continued
-  verification after Stage 3 landed surfaced a **separate** production
-  bug: `nebulous serve mcp`'s in-memory indices never rebuilt after
-  their initial build, so a concurrently-running `nebulous fetch`'s new
-  data was invisible to the MCP surface until a restart. Fixing that
-  (a debounced manifest-mtime staleness check) meant `nebulous fetch`
-  already needed to bump the manifest's mtime and have that observed
-  elsewhere -- at which point keeping `capture` as a fully separate
-  process buys little: the watermark + per-(hash, format)
-  completion-record idempotency already built for the gap-filling scan
-  makes a no-op capture pass cheap (`HasCaptureRecord` is a pure cache
-  lookup), so `nebulous capture` folded into `fetchAll` as a fourth
-  phase instead of staying behind its own timer. **The actual cost that
-  still argues for a slower cadence than `fetch`'s own sync interval
-  isn't the chrest/headless-browser cost -- it's the corpus scan
-  (`index.Stories()`) the capture loop runs before it can check
-  `HasCaptureRecord` per story**, since that scan is tied to the same
+  removed** -- reversing Stage 3's "deliberately separate from `fetch`,
+  its own systemd timer" call above. The trigger was a **separate**
+  production bug found during continued verification: `nebulous serve
+  mcp`'s in-memory indices never rebuilt after their initial build, so a
+  concurrently-running `nebulous fetch`'s new data was invisible to the
+  MCP surface until a restart. Fixing that (a debounced manifest-mtime
+  staleness check) meant `nebulous fetch` already needed to bump the
+  manifest's mtime and have that observed elsewhere -- at which point
+  keeping `capture` as a fully separate process buys little, since the
+  watermark + completion-record idempotency above already makes a no-op
+  capture pass cheap. **The cadence argument above (headless-browser
+  cost) turns out not to be the actual constraint** -- it's the corpus
+  scan (`index.Stories()`) the capture loop runs before it can check
+  `HasCaptureRecord` per story, since that scan is tied to the same
   manifest mtime `fetch` bumps on every write. That's now enforced via a
-  persisted `CaptureLastScanAt` timestamp and an interval gate inside
-  the merged command (`NEBULOUS_CAPTURE_INTERVAL`, default unchanged at
+  persisted `CaptureLastScanAt` timestamp and an interval gate inside the
+  merged command (`NEBULOUS_CAPTURE_INTERVAL`, default unchanged at
   `6h`) rather than a second systemd timer. `nebulous capture` remains a
   standalone subcommand for manual invocations and `--backfill`; only
   the *automatic, unattended* path collapsed into one timer.

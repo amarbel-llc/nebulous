@@ -113,27 +113,22 @@ func TestCaptureIntervalUnsetIsDefault(t *testing.T) {
 	}
 }
 
-// withFakeLookPath temporarily substitutes lookPathCuttingGarden and
-// restores the original on cleanup, so this test doesn't depend on
-// whether cutting-garden happens to be installed on PATH.
-func withFakeLookPath(t *testing.T, found bool) {
-	t.Helper()
-	orig := lookPathCuttingGarden
-	t.Cleanup(func() { lookPathCuttingGarden = orig })
+// fakeLookPath builds a lookPath function for runFetchCapturePhase, so
+// tests don't depend on whether cutting-garden happens to be installed
+// on PATH.
+func fakeLookPath(found bool) func() (string, error) {
 	if found {
-		lookPathCuttingGarden = func() (string, error) { return "/fake/bin/cutting-garden", nil }
-	} else {
-		lookPathCuttingGarden = func() (string, error) {
-			return "", fmt.Errorf("exec: %q: executable file not found in $PATH", "cutting-garden")
-		}
+		return func() (string, error) { return "/fake/bin/cutting-garden", nil }
+	}
+	return func() (string, error) {
+		return "", fmt.Errorf("exec: %q: executable file not found in $PATH", "cutting-garden")
 	}
 }
 
 func TestRunFetchCapturePhaseSkipsOnNoCaptureFlag(t *testing.T) {
 	c := testFetchClient(t)
-	withFakeLookPath(t, true)
 
-	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, true)
+	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, true, fakeLookPath(true))
 
 	if _, ok := c.CaptureLastScanAt(); ok {
 		t.Error("CaptureLastScanAt set despite -no-capture; the phase should never have run")
@@ -142,9 +137,8 @@ func TestRunFetchCapturePhaseSkipsOnNoCaptureFlag(t *testing.T) {
 
 func TestRunFetchCapturePhaseSkipsWhenCuttingGardenMissing(t *testing.T) {
 	c := testFetchClient(t)
-	withFakeLookPath(t, false)
 
-	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false)
+	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false, fakeLookPath(false))
 
 	if _, ok := c.CaptureLastScanAt(); ok {
 		t.Error("CaptureLastScanAt set despite cutting-garden missing from PATH; the phase should have soft-skipped")
@@ -153,14 +147,13 @@ func TestRunFetchCapturePhaseSkipsWhenCuttingGardenMissing(t *testing.T) {
 
 func TestRunFetchCapturePhaseSkipsWithinInterval(t *testing.T) {
 	c := testFetchClient(t)
-	withFakeLookPath(t, true)
 
 	last := time.Now().Round(time.Second)
 	if err := c.PutCaptureLastScanAt(last); err != nil {
 		t.Fatalf("PutCaptureLastScanAt: %v", err)
 	}
 
-	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false)
+	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false, fakeLookPath(true))
 
 	got, ok := c.CaptureLastScanAt()
 	if !ok {
@@ -179,10 +172,9 @@ func TestRunFetchCapturePhaseSkipsWithinInterval(t *testing.T) {
 // binary to actually invoke.
 func TestRunFetchCapturePhaseRunsAndRecordsLastScan(t *testing.T) {
 	c := testFetchClient(t)
-	withFakeLookPath(t, true)
 
 	before := time.Now()
-	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false)
+	runFetchCapturePhase(context.Background(), c, defaultCaptureStoreId, nil, false, fakeLookPath(true))
 
 	got, ok := c.CaptureLastScanAt()
 	if !ok {
