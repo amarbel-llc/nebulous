@@ -30,6 +30,31 @@ func TestManifestRecordAndLookup(t *testing.T) {
 	}
 }
 
+// nebulous#41-followup: os.CreateTemp always creates its file 0600
+// (unaffected by umask), and Rename preserves that mode — so every
+// prior save left manifest.json unreadable by a co-group process
+// (circus's mcp-origin, added to the nebulous group specifically to
+// read it). Confirms the tempfile is widened to group-readable before
+// the rename that makes it live.
+func TestManifestSaveIsGroupReadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Record("k1", ManifestEntry{Digest: "abc", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm&0o040 == 0 {
+		t.Errorf("manifest mode = %o, want group-readable (0o040 bit set)", perm)
+	}
+}
+
 func TestManifestPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manifest.json")
 

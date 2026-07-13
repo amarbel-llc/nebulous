@@ -129,6 +129,17 @@ func (m *Manifest) saveLocked() error {
 		return fmt.Errorf("manifest: tempfile: %w", err)
 	}
 	tmpName := tmp.Name()
+	// os.CreateTemp always creates its file 0600 (Go stdlib, not subject
+	// to umask) — widen to group-readable before the rename makes it
+	// live, so a co-group reader (e.g. circus's mcp-origin, added to the
+	// nebulous group specifically for this) can open it. Every save
+	// replaces the file via this same tempfile+rename path, so a
+	// narrower mode would silently reassert itself on the next write.
+	if err := tmp.Chmod(0o640); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("manifest: chmod: %w", err)
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
