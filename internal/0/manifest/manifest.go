@@ -25,6 +25,17 @@ type ManifestEntry struct {
 	Immutable bool `json:"immutable,omitempty"`
 }
 
+// staleCheckDebounce bounds how often Lookup/All stat the manifest file
+// to check for another process's writes (nebulous serve mcp's Manifest
+// used to never reload after its initial load, so a concurrently-running
+// `nebulous fetch` was invisible until the server itself restarted).
+// Debounced rather than checked on every call: story_store's build does
+// tens of thousands of sequential Lookup calls, and a busy fetch run
+// rewrites the whole file (bumping its mtime) on every single Record —
+// without debouncing, a build racing an active fetch could reload
+// mid-scan far more than once.
+const staleCheckDebounce = 1 * time.Second
+
 // Manifest is a persistent map from logical keys to ManifestEntries. It is
 // serialized as a single JSON file and written atomically via tempfile +
 // rename. Safe for concurrent use within a single process.
@@ -32,6 +43,9 @@ type Manifest struct {
 	path    string
 	mu      sync.Mutex
 	entries map[string]ManifestEntry
+
+	lastMtimeNanos int64
+	lastCheckedAt  time.Time
 }
 
 // Path returns the on-disk location of the manifest's JSON file.
@@ -44,6 +58,10 @@ func NewManifest(path string) (*Manifest, error) {
 	}
 	if err := m.load(); err != nil {
 		return nil, err
+	}
+	m.lastCheckedAt = time.Now()
+	if fi, err := os.Stat(path); err == nil {
+		m.lastMtimeNanos = fi.ModTime().UnixNano()
 	}
 	return m, nil
 }
@@ -68,9 +86,37 @@ func (m *Manifest) load() error {
 	return nil
 }
 
+// refreshIfStale re-reads the manifest file if it changed on disk since
+// it was last checked, picking up entries a concurrently-running process
+// (e.g. `nebulous fetch`) wrote after this Manifest was constructed or
+// last refreshed. The stat check itself is debounced (staleCheckDebounce)
+// rather than performed on every call. Caller must hold m.mu. A stat or
+// reload failure leaves the last-known-good in-memory entries untouched
+// — staleness detection is best-effort, not a hard requirement.
+func (m *Manifest) refreshIfStale() {
+	if time.Since(m.lastCheckedAt) < staleCheckDebounce {
+		return
+	}
+	m.lastCheckedAt = time.Now()
+
+	fi, err := os.Stat(m.path)
+	if err != nil {
+		return
+	}
+	mtime := fi.ModTime().UnixNano()
+	if mtime == m.lastMtimeNanos {
+		return
+	}
+	if err := m.load(); err != nil {
+		return
+	}
+	m.lastMtimeNanos = mtime
+}
+
 func (m *Manifest) Lookup(key string) (ManifestEntry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.refreshIfStale()
 	e, ok := m.entries[key]
 	return e, ok
 }
@@ -81,6 +127,7 @@ func (m *Manifest) Lookup(key string) (ManifestEntry, bool) {
 func (m *Manifest) All() map[string]ManifestEntry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.refreshIfStale()
 	return maps.Clone(m.entries)
 }
 
@@ -152,6 +199,13 @@ func (m *Manifest) saveLocked() error {
 	if err := os.Rename(tmpName, m.path); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("manifest: rename: %w", err)
+	}
+	// Record our own write's mtime so the next same-process Lookup/All
+	// doesn't see refreshIfStale notice the change and redundantly
+	// reload data this process's in-memory entries already reflect.
+	m.lastCheckedAt = time.Now()
+	if fi, err := os.Stat(m.path); err == nil {
+		m.lastMtimeNanos = fi.ModTime().UnixNano()
 	}
 	return nil
 }

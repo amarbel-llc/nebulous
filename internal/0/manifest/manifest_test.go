@@ -55,6 +55,69 @@ func TestManifestSaveIsGroupReadable(t *testing.T) {
 	}
 }
 
+// nebulous serve mcp used to build its Manifest once at process startup
+// and never reload — a concurrently-running `nebulous fetch` process's
+// writes were invisible until the server itself restarted (confirmed
+// live on krone: nebulous://story/{hash}/original returned "not in
+// cache" for hashes a direct blob read proved were already cached).
+// This simulates that scenario directly: a SEPARATE Manifest instance
+// over the same file stands in for the independent fetch process.
+func TestManifestLookupPicksUpConcurrentWriterAfterStaleness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Record("k1", ManifestEntry{Digest: "abc", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("other.Record: %v", err)
+	}
+
+	// Force m's debounce window to have already elapsed (rather than
+	// sleeping staleCheckDebounce in the test) so the next Lookup
+	// actually rechecks the file's mtime.
+	m.mu.Lock()
+	m.lastCheckedAt = time.Time{}
+	m.mu.Unlock()
+
+	got, ok := m.Lookup("k1")
+	if !ok {
+		t.Fatal("Lookup didn't pick up the other process's write after staleness check")
+	}
+	if got.Digest != "abc" {
+		t.Errorf("Digest = %q, want %q", got.Digest, "abc")
+	}
+}
+
+// Within the debounce window, Lookup must NOT reload even if the file
+// changed underneath it — the cost-bounding half of the fix (a busy
+// fetch run rewrites the whole file on every single Record()).
+func TestManifestLookupDoesNotReloadWithinDebounceWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Record("k1", ManifestEntry{Digest: "abc", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("other.Record: %v", err)
+	}
+
+	// m's debounce window (started at construction, moments ago) hasn't
+	// elapsed — it must not see the other process's write yet.
+	if _, ok := m.Lookup("k1"); ok {
+		t.Error("Lookup picked up a concurrent write within the debounce window, want debounced")
+	}
+}
+
 func TestManifestPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manifest.json")
 
