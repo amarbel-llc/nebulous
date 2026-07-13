@@ -113,6 +113,22 @@ func (m *Manifest) refreshIfStale() {
 	m.lastMtimeNanos = mtime
 }
 
+// ForceRefresh re-reads the manifest file immediately, bypassing the
+// staleCheckDebounce gate. For a caller that already knows a rebuild is
+// warranted (e.g. a higher-layer cache's own staleness check just fired)
+// and needs Lookup/All calls made during that rebuild to observe
+// manifest state at least as fresh as right now — otherwise this
+// Manifest's own, independently-timed debounce window could still be
+// unexpired and serve pre-write data into a rebuild the outer layer
+// believes is now current, silently baking in staleness until the file's
+// mtime next changes.
+func (m *Manifest) ForceRefresh() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastCheckedAt = time.Time{}
+	m.refreshIfStale()
+}
+
 func (m *Manifest) Lookup(key string) (ManifestEntry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

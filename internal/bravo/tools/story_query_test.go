@@ -44,8 +44,10 @@ func makeTestStore() *storyStore {
 		}
 	}
 	return &storyStore{
-		snapshot:      &storyStoreSnapshot{stories: sorted, words: words},
-		lastCheckedAt: time.Now(),
+		cache: staleCache[storyStoreSnapshot]{
+			snapshot:      &storyStoreSnapshot{stories: sorted, words: words},
+			lastCheckedAt: time.Now(),
+		},
 	}
 }
 

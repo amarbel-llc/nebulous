@@ -94,6 +94,21 @@ func (c *Client) ManifestPath() string {
 	return c.cache.manifest.Path()
 }
 
+// ForceManifestRefresh bypasses the manifest's own staleness debounce
+// (internal/0/manifest's staleCheckDebounce). A caller that already
+// decided a rebuild is warranted — e.g. storyStore/feedIndex's own outer
+// staleness check just fired — calls this first so Cached*/Feeds reads
+// made during that rebuild aren't gated by the manifest's separate,
+// independently-timed debounce window, which could otherwise still be
+// open and serve pre-write data into a rebuild the caller believes is
+// now current.
+func (c *Client) ForceManifestRefresh() {
+	if c.cache == nil {
+		return
+	}
+	c.cache.manifest.ForceRefresh()
+}
+
 func (c *Client) get(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
 	if c.cache != nil {
 		cacheKey := c.cache.cacheKey(path, params)

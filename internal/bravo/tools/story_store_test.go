@@ -358,6 +358,76 @@ func TestStoryStorePicksUpConcurrentWriterAfterStaleness(t *testing.T) {
 	}
 }
 
+// The outer staleCache and the client's own underlying manifest.Manifest
+// each track their own independent debounce clock over the same file. A
+// direct Cached* read (as read_index.go's per-story reads do, bypassing
+// storyStore entirely) resets the manifest's clock without touching
+// storyStore's — so if a rebuild only forced storyStore's own debounce
+// past its window and relied on the manifest to have *naturally* elapsed
+// its own, a rebuild could read stale in-memory manifest data and then
+// believe itself caught up (recording the file's true current mtime)
+// until the file changes again. build() calls client.ForceManifestRefresh
+// specifically to close this gap; this reproduces the desync directly by
+// only clearing storyStore's clock, leaving the manifest's freshly reset.
+func TestStoryStorePicksUpConcurrentWriterDespiteManifestDebounceDesync(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	sink := newMemSink()
+
+	c := newsblur.NewClient("test-token")
+	if err := c.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	s := newStoryStore(c)
+
+	if _, err := s.current(); err != nil {
+		t.Fatalf("current (initial): %v", err)
+	}
+
+	// Direct read resets the manifest's own debounce clock to "now",
+	// independent of storyStore's clock.
+	c.CachedStarredStoryHashes()
+
+	other := newsblur.NewClient("test-token")
+	if err := other.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	manifest := json.RawMessage(`{"starred_story_hashes":["hash1"]}`)
+	if err := other.PutCachedStarredStoryHashes(manifest); err != nil {
+		t.Fatalf("other.PutCachedStarredStoryHashes: %v", err)
+	}
+	story := json.RawMessage(`{
+		"story_hash": "hash1",
+		"story_title": "First Story",
+		"story_feed_id": 1,
+		"story_date": "2024-06-15 10:00:00",
+		"story_content": "",
+		"starred": true
+	}`)
+	if err := other.PutCachedStarredStory("hash1", story); err != nil {
+		t.Fatalf("other.PutCachedStarredStory: %v", err)
+	}
+
+	// Only clear storyStore's own clock — deliberately NOT waiting out a
+	// second window for the manifest's independently-timed clock, which
+	// the direct read above just reset to "now". Without
+	// ForceManifestRefresh in build(), this would still observe pre-write
+	// data despite storyStore believing a rebuild is due.
+	s.cache.mu.Lock()
+	s.cache.lastCheckedAt = time.Time{}
+	s.cache.mu.Unlock()
+
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current (after desync): %v", err)
+	}
+	if len(snap.stories) != 1 {
+		t.Fatalf("expected 1 story despite manifest debounce desync, got %d", len(snap.stories))
+	}
+	if snap.stories[0].Hash != "hash1" {
+		t.Errorf("story hash = %q, want hash1", snap.stories[0].Hash)
+	}
+}
+
 // Within the debounce window, current() must NOT reload even if the
 // manifest changed underneath it — the cost-bounding half of the fix (a
 // busy fetch run rewrites the manifest on every single Record(), and

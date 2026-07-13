@@ -3,23 +3,11 @@ package tools
 import (
 	"encoding/json"
 	"log"
-	"os"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
-
-// staleCheckDebounce bounds how often storyStore/feedIndex stat the
-// manifest file to check for another process's writes (they used to
-// build once via sync.Once and never rebuild, so a concurrently-running
-// `nebulous fetch` was invisible until the server itself restarted).
-// Debounced rather than checked on every call for the same reason
-// internal/0/manifest's own staleCheckDebounce is: storyStore's build
-// does a full corpus scan, and a busy fetch run bumps the manifest's
-// mtime on every single write.
-const staleCheckDebounce = 1 * time.Second
 
 type storyRecord struct {
 	Hash          string
@@ -50,72 +38,41 @@ type storyStoreSnapshot struct {
 }
 
 type storyStore struct {
-	client       *newsblur.Client
-	manifestPath string
-
-	mu             sync.Mutex
-	snapshot       *storyStoreSnapshot
-	lastMtimeNanos int64
-	lastCheckedAt  time.Time
+	client *newsblur.Client
+	cache  staleCache[storyStoreSnapshot]
 }
 
 func newStoryStore(client *newsblur.Client) *storyStore {
-	return &storyStore{client: client, manifestPath: client.ManifestPath()}
+	return &storyStore{
+		client: client,
+		cache:  newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+	}
 }
 
 // current returns the up-to-date snapshot, rebuilding when the manifest
-// changed since the last check. Replaces the old sync.Once build: a
-// concurrently-running `nebulous fetch` process's newly-cached stories
-// used to be invisible to story_query/facets/tag discovery for the
-// lifetime of the serving process. The staleness check is debounced
-// (staleCheckDebounce) so a burst of reads only stats the manifest file
-// at most once per window; s.mu serializes concurrent callers onto one
-// rebuild rather than racing independent ones (the coalescing a
-// sync.Once used to give for free).
+// changed since the last check — see staleCache's doc comment for why
+// this replaced a plain sync.Once build.
 func (s *storyStore) current() (*storyStoreSnapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.snapshot != nil && time.Since(s.lastCheckedAt) < staleCheckDebounce {
-		return s.snapshot, nil
-	}
-	s.lastCheckedAt = time.Now()
-
-	if s.snapshot != nil && s.manifestPath != "" {
-		if fi, statErr := os.Stat(s.manifestPath); statErr == nil {
-			if fi.ModTime().UnixNano() == s.lastMtimeNanos {
-				return s.snapshot, nil
-			}
-		}
-	}
-
-	fresh, buildErr := s.build()
-	if buildErr != nil {
-		if s.snapshot != nil {
-			// Keep serving the last good snapshot on a transient build
-			// error rather than caching the failure forever (the old
-			// sync.Once behavior would have stuck permanently).
-			return s.snapshot, nil
-		}
-		return nil, buildErr
-	}
-	if s.manifestPath != "" {
-		if fi, statErr := os.Stat(s.manifestPath); statErr == nil {
-			s.lastMtimeNanos = fi.ModTime().UnixNano()
-		}
-	}
-	s.snapshot = fresh
-	return fresh, nil
+	return s.cache.current(s.build)
 }
 
 // ensureBuilt preserves the old call-site contract (callers only check
-// the error); the snapshot itself is fetched via current().
+// the error); the snapshot itself is fetched via current(). Kept
+// distinct from a bare current() call because facets()/query() swallow
+// build errors internally (empty-result degrade) — callers that need the
+// error surfaced (resources.go, story_query_tool.go) call this first.
 func (s *storyStore) ensureBuilt() error {
 	_, err := s.current()
 	return err
 }
 
 func (s *storyStore) build() (*storyStoreSnapshot, error) {
+	// s.cache already decided the manifest file changed; force the
+	// client's own manifest past its independent debounce window too, so
+	// the Cached* reads below can't still be gated by it and bake
+	// pre-write data into this rebuild (see staleCache's doc comment).
+	s.client.ForceManifestRefresh()
+
 	snap := &storyStoreSnapshot{
 		words:     make(map[string][]*storyRecord),
 		userTags:  make(map[string]int),

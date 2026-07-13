@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 	"unicode"
 
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
@@ -36,53 +33,24 @@ type feedIndexSnapshot struct {
 }
 
 type feedIndex struct {
-	client       *newsblur.Client
-	manifestPath string
-
-	mu             sync.Mutex
-	snapshot       *feedIndexSnapshot
-	lastMtimeNanos int64
-	lastCheckedAt  time.Time
+	client *newsblur.Client
+	cache  staleCache[feedIndexSnapshot]
 }
 
 func newFeedIndex(client *newsblur.Client) *feedIndex {
-	return &feedIndex{client: client, manifestPath: client.ManifestPath()}
+	return &feedIndex{
+		client: client,
+		cache:  newStaleCache[feedIndexSnapshot](client.ManifestPath()),
+	}
 }
 
 // current returns the up-to-date snapshot, rebuilding when the manifest
-// changed since the last check (same debounced-staleness pattern as
-// storyStore.current — see its doc comment).
+// changed since the last check — see staleCache's doc comment for why
+// this replaced a plain sync.Once build.
 func (idx *feedIndex) current(ctx context.Context) (*feedIndexSnapshot, error) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	if idx.snapshot != nil && time.Since(idx.lastCheckedAt) < staleCheckDebounce {
-		return idx.snapshot, nil
-	}
-	idx.lastCheckedAt = time.Now()
-
-	if idx.snapshot != nil && idx.manifestPath != "" {
-		if fi, statErr := os.Stat(idx.manifestPath); statErr == nil {
-			if fi.ModTime().UnixNano() == idx.lastMtimeNanos {
-				return idx.snapshot, nil
-			}
-		}
-	}
-
-	fresh, buildErr := idx.build(ctx)
-	if buildErr != nil {
-		if idx.snapshot != nil {
-			return idx.snapshot, nil
-		}
-		return nil, buildErr
-	}
-	if idx.manifestPath != "" {
-		if fi, statErr := os.Stat(idx.manifestPath); statErr == nil {
-			idx.lastMtimeNanos = fi.ModTime().UnixNano()
-		}
-	}
-	idx.snapshot = fresh
-	return fresh, nil
+	return idx.cache.current(func() (*feedIndexSnapshot, error) {
+		return idx.build(ctx)
+	})
 }
 
 // ensureBuilt preserves the old call-site contract (callers only check
@@ -93,6 +61,12 @@ func (idx *feedIndex) ensureBuilt(ctx context.Context) error {
 }
 
 func (idx *feedIndex) build(ctx context.Context) (*feedIndexSnapshot, error) {
+	// idx.cache already decided the manifest file changed; force the
+	// client's own manifest past its independent debounce window too, so
+	// the Feeds read below can't still be gated by it and bake pre-write
+	// data into this rebuild (see staleCache's doc comment).
+	idx.client.ForceManifestRefresh()
+
 	snap := &feedIndexSnapshot{
 		words:     make(map[string][]feedSummary),
 		feeds:     make(map[string]json.RawMessage),
