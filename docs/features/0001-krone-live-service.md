@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: experimental
 date: 2026-07-12
 promotion-criteria: |
   Promote to experimental when: (1) the madder shell-out perf fix (Stage 1)
@@ -9,8 +9,22 @@ promotion-criteria: |
   discoverable via a new newsblur:// leaf) has run successfully against a
   real story, even if only exercised manually rather than via a deployed
   timer.
+  DONE 2026-07-13: all three criteria met. (1)/(2) Stages 1-2 merged and
+  deployed live on krone (services.nebulous, nebulous-fetch.timer +
+  nebulous-capture.timer, mcp-origin's nebulous child all confirmed
+  running). (3) noble-teak ran `nebulous capture --formats markdown-reader
+  --store nebulous --backfill` manually on krone; confirmed a real chrest
+  capture landed and `nebulous-cg list newsblur://story/6327282:e7c3ab`
+  shows the resulting `capture/markdown-reader` leaf (nebulous#38, closed).
+  This uncovered and fixed two real bugs along the way: nebulous#41 (a bare
+  dewey Context construction in internal/0/madder.NewStore crashed the
+  whole process on any env_dir setup failure instead of returning an
+  error) and a manifest.json permission bug (os.CreateTemp's hardcoded
+  0600 blocked circus's mcp-origin from reading it over group membership).
   Promote to testing when: the systemd timer + services.nebulous module are
   deployed on krone and have completed at least one unattended cycle.
+  STILL OPEN: the capture above was a manual invocation, not yet an
+  unattended nebulous-capture.timer firing on its own schedule.
 ---
 
 # nebulous as a live krone-hosted service
