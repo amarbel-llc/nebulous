@@ -21,13 +21,18 @@ func (s *storyStore) query(q storyQuery) []*storyRecord {
 		q.Limit = 100
 	}
 
+	snap, err := s.current()
+	if err != nil || snap == nil {
+		return nil
+	}
+
 	var candidates []*storyRecord
 	usedWords := len(q.Words) > 0
 
 	if usedWords {
 		seen := make(map[string]bool)
 		for _, word := range q.Words {
-			for _, rec := range s.words[word] {
+			for _, rec := range snap.words[word] {
 				if !seen[rec.Hash] {
 					seen[rec.Hash] = true
 					candidates = append(candidates, rec)
@@ -35,7 +40,7 @@ func (s *storyStore) query(q storyQuery) []*storyRecord {
 			}
 		}
 	} else {
-		candidates = s.stories
+		candidates = snap.stories
 	}
 
 	var filtered []*storyRecord

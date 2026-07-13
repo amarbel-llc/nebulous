@@ -204,39 +204,44 @@ func TestBuildFromCachedStories(t *testing.T) {
 		t.Fatalf("ensureBuilt: %v", err)
 	}
 
-	if len(s.stories) != 2 {
-		t.Fatalf("expected 2 stories, got %d", len(s.stories))
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+
+	if len(snap.stories) != 2 {
+		t.Fatalf("expected 2 stories, got %d", len(snap.stories))
 	}
 
 	// Should be sorted by date descending: hash1 (2024-06) before hash2 (2024-03)
-	if s.stories[0].Hash != "hash1" {
-		t.Errorf("first story = %q, want hash1 (newest)", s.stories[0].Hash)
+	if snap.stories[0].Hash != "hash1" {
+		t.Errorf("first story = %q, want hash1 (newest)", snap.stories[0].Hash)
 	}
-	if s.stories[1].Hash != "hash2" {
-		t.Errorf("second story = %q, want hash2", s.stories[1].Hash)
+	if snap.stories[1].Hash != "hash2" {
+		t.Errorf("second story = %q, want hash2", snap.stories[1].Hash)
 	}
 
 	// All stories should be marked starred
-	for _, rec := range s.stories {
+	for _, rec := range snap.stories {
 		if !rec.Starred {
 			t.Errorf("story %s not marked starred", rec.Hash)
 		}
 	}
 
 	// Word index should contain words from both stories
-	if len(s.words["programming"]) == 0 {
+	if len(snap.words["programming"]) == 0 {
 		t.Error("word index missing 'programming'")
 	}
-	if len(s.words["bikes"]) == 0 {
+	if len(snap.words["bikes"]) == 0 {
 		t.Error("word index missing 'bikes'")
 	}
 
 	// User tags should be counted
-	if s.userTags["interests"] != 1 {
-		t.Errorf("userTags[interests] = %d, want 1", s.userTags["interests"])
+	if snap.userTags["interests"] != 1 {
+		t.Errorf("userTags[interests] = %d, want 1", snap.userTags["interests"])
 	}
-	if s.userTags["zz-nyc"] != 1 {
-		t.Errorf("userTags[zz-nyc] = %d, want 1", s.userTags["zz-nyc"])
+	if snap.userTags["zz-nyc"] != 1 {
+		t.Errorf("userTags[zz-nyc] = %d, want 1", snap.userTags["zz-nyc"])
 	}
 }
 
@@ -277,11 +282,128 @@ func TestBuildEmptyManifest(t *testing.T) {
 
 	// No manifest cached at all
 	s := newStoryStore(c)
-	if err := s.ensureBuilt(); err != nil {
-		t.Fatalf("ensureBuilt with no manifest: %v", err)
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current with no manifest: %v", err)
 	}
-	if len(s.stories) != 0 {
-		t.Errorf("expected 0 stories, got %d", len(s.stories))
+	if len(snap.stories) != 0 {
+		t.Errorf("expected 0 stories, got %d", len(snap.stories))
+	}
+}
+
+// storyStore used to build its index exactly once via sync.Once and never
+// rebuild — a concurrently-running `nebulous fetch` process's newly-cached
+// stories were invisible to story_query/facets/tag discovery for the
+// server's whole lifetime. This simulates that scenario directly: a
+// SEPARATE newsblur.Client instance over the same manifest file stands in
+// for the independent fetch process (mirrors
+// internal/0/manifest's TestManifestLookupPicksUpConcurrentWriterAfterStaleness).
+func TestStoryStorePicksUpConcurrentWriterAfterStaleness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	// Shared sink: production's two processes share one on-disk madder blob
+	// store, so a per-client in-memory sink would only simulate the
+	// manifest's file being shared, not the blob content behind it.
+	sink := newMemSink()
+
+	c := newsblur.NewClient("test-token")
+	if err := c.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	s := newStoryStore(c)
+
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current (initial): %v", err)
+	}
+	if len(snap.stories) != 0 {
+		t.Fatalf("expected 0 stories before any writer, got %d", len(snap.stories))
+	}
+
+	other := newsblur.NewClient("test-token")
+	if err := other.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	manifest := json.RawMessage(`{"starred_story_hashes":["hash1"]}`)
+	if err := other.PutCachedStarredStoryHashes(manifest); err != nil {
+		t.Fatalf("other.PutCachedStarredStoryHashes: %v", err)
+	}
+	story := json.RawMessage(`{
+		"story_hash": "hash1",
+		"story_title": "First Story",
+		"story_feed_id": 1,
+		"story_date": "2024-06-15 10:00:00",
+		"story_content": "",
+		"starred": true
+	}`)
+	if err := other.PutCachedStarredStory("hash1", story); err != nil {
+		t.Fatalf("other.PutCachedStarredStory: %v", err)
+	}
+
+	// Wait out both debounce windows: storyStore's own lastCheckedAt AND
+	// the underlying manifest.Manifest's independent lastCheckedAt (a
+	// separate instance owned by c's cache, unexported and unreachable
+	// from this package) — c's Lookup won't re-stat the file until its
+	// own window elapses either.
+	time.Sleep(staleCheckDebounce + 100*time.Millisecond)
+
+	snap, err = s.current()
+	if err != nil {
+		t.Fatalf("current (after concurrent write): %v", err)
+	}
+	if len(snap.stories) != 1 {
+		t.Fatalf("expected 1 story after concurrent writer + staleness check, got %d", len(snap.stories))
+	}
+	if snap.stories[0].Hash != "hash1" {
+		t.Errorf("story hash = %q, want hash1", snap.stories[0].Hash)
+	}
+}
+
+// Within the debounce window, current() must NOT reload even if the
+// manifest changed underneath it — the cost-bounding half of the fix (a
+// busy fetch run rewrites the manifest on every single Record(), and
+// storyStore's build does a full corpus scan).
+func TestStoryStoreDoesNotReloadWithinDebounceWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	sink := newMemSink()
+
+	c := newsblur.NewClient("test-token")
+	if err := c.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	s := newStoryStore(c)
+
+	if _, err := s.current(); err != nil {
+		t.Fatalf("current (initial): %v", err)
+	}
+
+	other := newsblur.NewClient("test-token")
+	if err := other.WithCache(path, time.Hour, sink); err != nil {
+		t.Fatal(err)
+	}
+	manifest := json.RawMessage(`{"starred_story_hashes":["hash1"]}`)
+	if err := other.PutCachedStarredStoryHashes(manifest); err != nil {
+		t.Fatalf("other.PutCachedStarredStoryHashes: %v", err)
+	}
+	story := json.RawMessage(`{
+		"story_hash": "hash1",
+		"story_title": "First Story",
+		"story_feed_id": 1,
+		"story_date": "2024-06-15 10:00:00",
+		"story_content": "",
+		"starred": true
+	}`)
+	if err := other.PutCachedStarredStory("hash1", story); err != nil {
+		t.Fatalf("other.PutCachedStarredStory: %v", err)
+	}
+
+	// s's debounce window (started at construction, moments ago) hasn't
+	// elapsed — it must not see the other process's write yet.
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current (within debounce window): %v", err)
+	}
+	if len(snap.stories) != 0 {
+		t.Errorf("current picked up a concurrent write within the debounce window, want debounced (0 stories, got %d)", len(snap.stories))
 	}
 }
 
@@ -309,14 +431,15 @@ func TestBuildSkipsMissingStories(t *testing.T) {
 	}
 
 	s := newStoryStore(c)
-	if err := s.ensureBuilt(); err != nil {
-		t.Fatalf("ensureBuilt: %v", err)
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current: %v", err)
 	}
 
-	if len(s.stories) != 1 {
-		t.Fatalf("expected 1 story (skipping missing), got %d", len(s.stories))
+	if len(snap.stories) != 1 {
+		t.Fatalf("expected 1 story (skipping missing), got %d", len(snap.stories))
 	}
-	if s.stories[0].Hash != "cached" {
-		t.Errorf("story hash = %q, want 'cached'", s.stories[0].Hash)
+	if snap.stories[0].Hash != "cached" {
+		t.Errorf("story hash = %q, want 'cached'", snap.stories[0].Hash)
 	}
 }

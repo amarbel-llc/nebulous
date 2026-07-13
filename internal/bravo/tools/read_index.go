@@ -60,11 +60,12 @@ type StoryRef struct {
 
 // Feeds returns every subscribed feed.
 func (r *ReadIndex) Feeds(ctx context.Context) ([]FeedRef, error) {
-	if err := r.feeds.ensureBuilt(ctx); err != nil {
+	snap, err := r.feeds.current(ctx)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]FeedRef, 0, len(r.feeds.summaries))
-	for idStr, s := range r.feeds.summaries {
+	out := make([]FeedRef, 0, len(snap.summaries))
+	for idStr, s := range snap.summaries {
 		out = append(out, FeedRef{ID: idStr, Title: s.Title, Folder: s.Folder, Active: s.Active, NT: s.NT})
 	}
 	return out, nil
@@ -72,11 +73,12 @@ func (r *ReadIndex) Feeds(ctx context.Context) ([]FeedRef, error) {
 
 // Stories returns every indexed (starred) story.
 func (r *ReadIndex) Stories() ([]StoryRef, error) {
-	if err := r.stories.ensureBuilt(); err != nil {
+	snap, err := r.stories.current()
+	if err != nil {
 		return nil, err
 	}
-	out := make([]StoryRef, 0, len(r.stories.stories))
-	for _, rec := range r.stories.stories {
+	out := make([]StoryRef, 0, len(snap.stories))
+	for _, rec := range snap.stories {
 		out = append(out, storyRefOf(rec))
 	}
 	return out, nil
@@ -84,11 +86,12 @@ func (r *ReadIndex) Stories() ([]StoryRef, error) {
 
 // FeedStories returns the indexed stories belonging to feedID.
 func (r *ReadIndex) FeedStories(feedID int) ([]StoryRef, error) {
-	if err := r.stories.ensureBuilt(); err != nil {
+	snap, err := r.stories.current()
+	if err != nil {
 		return nil, err
 	}
 	var out []StoryRef
-	for _, rec := range r.stories.stories {
+	for _, rec := range snap.stories {
 		if rec.FeedID == feedID {
 			out = append(out, storyRefOf(rec))
 		}
@@ -99,11 +102,12 @@ func (r *ReadIndex) FeedStories(feedID int) ([]StoryRef, error) {
 // StoriesByTag returns the indexed stories carrying tag in either their
 // user tags or their story (feed-assigned) tags.
 func (r *ReadIndex) StoriesByTag(tag string) ([]StoryRef, error) {
-	if err := r.stories.ensureBuilt(); err != nil {
+	snap, err := r.stories.current()
+	if err != nil {
 		return nil, err
 	}
 	var out []StoryRef
-	for _, rec := range r.stories.stories {
+	for _, rec := range snap.stories {
 		if rec.hasTag(tag) {
 			out = append(out, storyRefOf(rec))
 		}
@@ -173,14 +177,15 @@ func (r *ReadIndex) CaptureFormats() []string {
 
 // Tags returns the union of user tags and story tags across the corpus.
 func (r *ReadIndex) Tags() ([]string, error) {
-	if err := r.stories.ensureBuilt(); err != nil {
+	snap, err := r.stories.current()
+	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(r.stories.userTags)+len(r.stories.storyTags))
-	for t := range r.stories.userTags {
+	seen := make(map[string]struct{}, len(snap.userTags)+len(snap.storyTags))
+	for t := range snap.userTags {
 		seen[t] = struct{}{}
 	}
-	for t := range r.stories.storyTags {
+	for t := range snap.storyTags {
 		seen[t] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
@@ -207,10 +212,11 @@ type FeedMetadataView struct {
 // FeedMetadata returns the structured + raw views of a feed's cached
 // subscription record. ok is false when id is not indexed.
 func (r *ReadIndex) FeedMetadata(ctx context.Context, id string) (view FeedMetadataView, raw json.RawMessage, ok bool) {
-	if err := r.feeds.ensureBuilt(ctx); err != nil {
+	snap, err := r.feeds.current(ctx)
+	if err != nil {
 		return FeedMetadataView{}, nil, false
 	}
-	raw, ok = r.feeds.feeds[id]
+	raw, ok = snap.feeds[id]
 	if !ok {
 		return FeedMetadataView{}, nil, false
 	}
@@ -230,7 +236,7 @@ func (r *ReadIndex) FeedMetadata(ctx context.Context, id string) (view FeedMetad
 		return FeedMetadataView{}, nil, false
 	}
 	folder := ""
-	if s, ok := r.feeds.summaries[id]; ok {
+	if s, ok := snap.summaries[id]; ok {
 		folder = s.Folder
 	}
 	view = FeedMetadataView{

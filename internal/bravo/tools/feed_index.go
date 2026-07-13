@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
@@ -24,35 +26,82 @@ type feedSummary struct {
 	Active bool        `json:"active"`
 }
 
-type feedIndex struct {
-	client    *newsblur.Client
-	once      sync.Once
+// feedIndexSnapshot is the immutable result of one build pass — see
+// storyStoreSnapshot's doc comment for why this replaced a plain
+// sync.Once build.
+type feedIndexSnapshot struct {
 	words     map[string][]feedSummary
 	feeds     map[string]json.RawMessage
 	summaries map[string]feedSummary
-	err       error
+}
+
+type feedIndex struct {
+	client       *newsblur.Client
+	manifestPath string
+
+	mu             sync.Mutex
+	snapshot       *feedIndexSnapshot
+	lastMtimeNanos int64
+	lastCheckedAt  time.Time
 }
 
 func newFeedIndex(client *newsblur.Client) *feedIndex {
-	return &feedIndex{
-		client: client,
+	return &feedIndex{client: client, manifestPath: client.ManifestPath()}
+}
+
+// current returns the up-to-date snapshot, rebuilding when the manifest
+// changed since the last check (same debounced-staleness pattern as
+// storyStore.current — see its doc comment).
+func (idx *feedIndex) current(ctx context.Context) (*feedIndexSnapshot, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.snapshot != nil && time.Since(idx.lastCheckedAt) < staleCheckDebounce {
+		return idx.snapshot, nil
 	}
+	idx.lastCheckedAt = time.Now()
+
+	if idx.snapshot != nil && idx.manifestPath != "" {
+		if fi, statErr := os.Stat(idx.manifestPath); statErr == nil {
+			if fi.ModTime().UnixNano() == idx.lastMtimeNanos {
+				return idx.snapshot, nil
+			}
+		}
+	}
+
+	fresh, buildErr := idx.build(ctx)
+	if buildErr != nil {
+		if idx.snapshot != nil {
+			return idx.snapshot, nil
+		}
+		return nil, buildErr
+	}
+	if idx.manifestPath != "" {
+		if fi, statErr := os.Stat(idx.manifestPath); statErr == nil {
+			idx.lastMtimeNanos = fi.ModTime().UnixNano()
+		}
+	}
+	idx.snapshot = fresh
+	return fresh, nil
 }
 
+// ensureBuilt preserves the old call-site contract (callers only check
+// the error); the snapshot itself is fetched via current().
 func (idx *feedIndex) ensureBuilt(ctx context.Context) error {
-	idx.once.Do(func() {
-		idx.words = make(map[string][]feedSummary)
-		idx.feeds = make(map[string]json.RawMessage)
-		idx.summaries = make(map[string]feedSummary)
-		idx.err = idx.build(ctx)
-	})
-	return idx.err
+	_, err := idx.current(ctx)
+	return err
 }
 
-func (idx *feedIndex) build(ctx context.Context) error {
+func (idx *feedIndex) build(ctx context.Context) (*feedIndexSnapshot, error) {
+	snap := &feedIndexSnapshot{
+		words:     make(map[string][]feedSummary),
+		feeds:     make(map[string]json.RawMessage),
+		summaries: make(map[string]feedSummary),
+	}
+
 	raw, err := idx.client.Feeds(ctx, false, true, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var resp struct {
@@ -60,7 +109,7 @@ func (idx *feedIndex) build(ctx context.Context) error {
 		Folders []json.RawMessage          `json:"flat_folders_with_feeds"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Build folder lookup: feed_id -> folder name
@@ -78,7 +127,7 @@ func (idx *feedIndex) build(ctx context.Context) error {
 	}
 
 	for idStr, feedRaw := range resp.Feeds {
-		idx.feeds[idStr] = feedRaw
+		snap.feeds[idStr] = feedRaw
 
 		var feed struct {
 			ID       json.Number `json:"id"`
@@ -105,7 +154,7 @@ func (idx *feedIndex) build(ctx context.Context) error {
 			PS:     feed.PS,
 			Active: feed.Active && !feed.Disabled,
 		}
-		idx.summaries[idStr] = summary
+		snap.summaries[idStr] = summary
 
 		var sources []string
 		sources = append(sources, feed.Title)
@@ -123,13 +172,13 @@ func (idx *feedIndex) build(ctx context.Context) error {
 			for _, word := range extractWords(src) {
 				if !seen[word] {
 					seen[word] = true
-					idx.words[word] = append(idx.words[word], summary)
+					snap.words[word] = append(snap.words[word], summary)
 				}
 			}
 		}
 	}
 
-	return nil
+	return snap, nil
 }
 
 var stopWords = map[string]bool{

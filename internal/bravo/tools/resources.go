@@ -92,12 +92,13 @@ func (p *feedResourceProvider) readFeedIndexWord(
 	ctx context.Context,
 	resourceURI, word string,
 ) (*protocol.ResourceReadResult, error) {
-	if err := p.index.ensureBuilt(ctx); err != nil {
+	snap, err := p.index.current(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
 
 	word = strings.ToLower(word)
-	feeds := p.index.words[word]
+	feeds := snap.words[word]
 
 	resp := struct {
 		Word  string        `json:"word"`
@@ -131,11 +132,12 @@ func (p *feedResourceProvider) readFeed(
 	ctx context.Context,
 	resourceURI, feedID string,
 ) (*protocol.ResourceReadResult, error) {
-	if err := p.index.ensureBuilt(ctx); err != nil {
+	snap, err := p.index.current(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
 
-	raw, ok := p.index.feeds[feedID]
+	raw, ok := snap.feeds[feedID]
 	if !ok {
 		return nil, fmt.Errorf("unknown feed: %s", feedID)
 	}
@@ -153,7 +155,8 @@ func (p *feedResourceProvider) readTags(
 	ctx context.Context,
 	resourceURI string,
 ) (*protocol.ResourceReadResult, error) {
-	if err := p.stories.ensureBuilt(); err != nil {
+	snap, err := p.stories.current()
+	if err != nil {
 		return nil, fmt.Errorf("building story store: %w", err)
 	}
 
@@ -181,9 +184,9 @@ func (p *feedResourceProvider) readTags(
 		UserTags     []tagEntry `json:"user_tags"`
 		StoryTags    []tagEntry `json:"story_tags"`
 	}{
-		TotalStories: len(p.stories.stories),
-		UserTags:     sortedTags(p.stories.userTags),
-		StoryTags:    sortedTags(p.stories.storyTags),
+		TotalStories: len(snap.stories),
+		UserTags:     sortedTags(snap.userTags),
+		StoryTags:    sortedTags(snap.storyTags),
 	}
 
 	data, err := json.MarshalIndent(resp, "", "  ")
@@ -229,7 +232,8 @@ func (p *feedResourceProvider) readFeedFacets(
 	ctx context.Context,
 	resourceURI string,
 ) (*protocol.ResourceReadResult, error) {
-	if err := p.index.ensureBuilt(ctx); err != nil {
+	snap, err := p.index.current(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("building feed index: %w", err)
 	}
 
@@ -237,7 +241,7 @@ func (p *feedResourceProvider) readFeedFacets(
 	active, inactive := 0, 0
 
 	seen := make(map[string]bool)
-	for _, summaries := range p.index.words {
+	for _, summaries := range snap.words {
 		for _, s := range summaries {
 			id := s.ID.String()
 			if seen[id] {
@@ -292,7 +296,8 @@ func (p *feedResourceProvider) readFeedStories(
 		return nil, fmt.Errorf("invalid feed ID: %s", feedID)
 	}
 
-	if err := p.stories.ensureBuilt(); err != nil {
+	snap, err := p.stories.current()
+	if err != nil {
 		return nil, fmt.Errorf("building story store: %w", err)
 	}
 
@@ -307,7 +312,7 @@ func (p *feedResourceProvider) readFeedStories(
 	}
 
 	var matches []storySummary
-	for _, rec := range p.stories.stories {
+	for _, rec := range snap.stories {
 		if rec.FeedID == id {
 			matches = append(matches, storySummary{
 				Hash:      rec.Hash,
@@ -486,19 +491,20 @@ func registerResources(
 			MimeType:    "application/json",
 		},
 		func(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
-			if err := index.ensureBuilt(ctx); err != nil {
+			snap, err := index.current(ctx)
+			if err != nil {
 				return nil, fmt.Errorf("building feed index: %w", err)
 			}
 
-			words := make([]string, 0, len(index.words))
-			for w := range index.words {
+			words := make([]string, 0, len(snap.words))
+			for w := range snap.words {
 				words = append(words, w)
 			}
 			sort.Strings(words)
 
 			// Count unique feeds
 			feedsSeen := make(map[string]bool)
-			for _, summaries := range index.words {
+			for _, summaries := range snap.words {
 				for _, s := range summaries {
 					feedsSeen[s.ID.String()] = true
 				}

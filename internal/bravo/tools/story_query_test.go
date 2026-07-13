@@ -43,7 +43,10 @@ func makeTestStore() *storyStore {
 			words[word] = append(words[word], rec)
 		}
 	}
-	return &storyStore{stories: sorted, words: words}
+	return &storyStore{
+		snapshot:      &storyStoreSnapshot{stories: sorted, words: words},
+		lastCheckedAt: time.Now(),
+	}
 }
 
 func TestQueryByYear(t *testing.T) {

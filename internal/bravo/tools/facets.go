@@ -24,7 +24,12 @@ func (s *storyStore) facets() *storyFacets {
 		ByStatus: make(map[string]int),
 	}
 
-	for _, rec := range s.stories {
+	snap, err := s.current()
+	if err != nil || snap == nil {
+		return f
+	}
+
+	for _, rec := range snap.stories {
 		f.TotalStories++
 
 		f.ByYear[rec.Year]++

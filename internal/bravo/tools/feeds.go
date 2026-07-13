@@ -39,14 +39,15 @@ func registerFeedCommands(app *command.App, index *feedIndex) {
 			if len(p.Words) == 0 {
 				return command.TextErrorResult("at least one word is required"), nil
 			}
-			if err := index.ensureBuilt(ctx); err != nil {
+			snap, err := index.current(ctx)
+			if err != nil {
 				return command.TextErrorResult("building feed index: " + err.Error()), nil
 			}
 
 			seen := make(map[string]bool)
 			var results []feedSummary
 			for _, word := range p.Words {
-				for _, s := range index.words[strings.ToLower(word)] {
+				for _, s := range snap.words[strings.ToLower(word)] {
 					id := s.ID.String()
 					if !seen[id] {
 						seen[id] = true

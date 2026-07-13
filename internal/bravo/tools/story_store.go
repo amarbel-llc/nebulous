@@ -3,12 +3,23 @@ package tools
 import (
 	"encoding/json"
 	"log"
+	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 )
+
+// staleCheckDebounce bounds how often storyStore/feedIndex stat the
+// manifest file to check for another process's writes (they used to
+// build once via sync.Once and never rebuild, so a concurrently-running
+// `nebulous fetch` was invisible until the server itself restarted).
+// Debounced rather than checked on every call for the same reason
+// internal/0/manifest's own staleCheckDebounce is: storyStore's build
+// does a full corpus scan, and a busy fetch run bumps the manifest's
+// mtime on every single write.
+const staleCheckDebounce = 1 * time.Second
 
 type storyRecord struct {
 	Hash          string
@@ -28,40 +39,98 @@ type storyRecord struct {
 	ContentTokens int
 }
 
-type storyStore struct {
-	client    *newsblur.Client
-	once      sync.Once
+// storyStoreSnapshot is the immutable result of one build pass. current()
+// swaps a fresh one in under storyStore's lock, so a reader that already
+// holds a snapshot never observes a half-rebuilt index.
+type storyStoreSnapshot struct {
 	stories   []*storyRecord
 	words     map[string][]*storyRecord
 	userTags  map[string]int
 	storyTags map[string]int
-	err       error
+}
+
+type storyStore struct {
+	client       *newsblur.Client
+	manifestPath string
+
+	mu             sync.Mutex
+	snapshot       *storyStoreSnapshot
+	lastMtimeNanos int64
+	lastCheckedAt  time.Time
 }
 
 func newStoryStore(client *newsblur.Client) *storyStore {
-	return &storyStore{client: client}
+	return &storyStore{client: client, manifestPath: client.ManifestPath()}
 }
 
+// current returns the up-to-date snapshot, rebuilding when the manifest
+// changed since the last check. Replaces the old sync.Once build: a
+// concurrently-running `nebulous fetch` process's newly-cached stories
+// used to be invisible to story_query/facets/tag discovery for the
+// lifetime of the serving process. The staleness check is debounced
+// (staleCheckDebounce) so a burst of reads only stats the manifest file
+// at most once per window; s.mu serializes concurrent callers onto one
+// rebuild rather than racing independent ones (the coalescing a
+// sync.Once used to give for free).
+func (s *storyStore) current() (*storyStoreSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.snapshot != nil && time.Since(s.lastCheckedAt) < staleCheckDebounce {
+		return s.snapshot, nil
+	}
+	s.lastCheckedAt = time.Now()
+
+	if s.snapshot != nil && s.manifestPath != "" {
+		if fi, statErr := os.Stat(s.manifestPath); statErr == nil {
+			if fi.ModTime().UnixNano() == s.lastMtimeNanos {
+				return s.snapshot, nil
+			}
+		}
+	}
+
+	fresh, buildErr := s.build()
+	if buildErr != nil {
+		if s.snapshot != nil {
+			// Keep serving the last good snapshot on a transient build
+			// error rather than caching the failure forever (the old
+			// sync.Once behavior would have stuck permanently).
+			return s.snapshot, nil
+		}
+		return nil, buildErr
+	}
+	if s.manifestPath != "" {
+		if fi, statErr := os.Stat(s.manifestPath); statErr == nil {
+			s.lastMtimeNanos = fi.ModTime().UnixNano()
+		}
+	}
+	s.snapshot = fresh
+	return fresh, nil
+}
+
+// ensureBuilt preserves the old call-site contract (callers only check
+// the error); the snapshot itself is fetched via current().
 func (s *storyStore) ensureBuilt() error {
-	s.once.Do(func() {
-		s.words = make(map[string][]*storyRecord)
-		s.userTags = make(map[string]int)
-		s.storyTags = make(map[string]int)
-		s.err = s.build()
-	})
-	return s.err
+	_, err := s.current()
+	return err
 }
 
-func (s *storyStore) build() error {
+func (s *storyStore) build() (*storyStoreSnapshot, error) {
+	snap := &storyStoreSnapshot{
+		words:     make(map[string][]*storyRecord),
+		userTags:  make(map[string]int),
+		storyTags: make(map[string]int),
+	}
+
 	raw, ok := s.client.CachedStarredStoryHashes()
 	if !ok {
 		log.Printf("story store: no cached hash manifest, run 'nebulous fetch' first")
-		return nil
+		return snap, nil
 	}
 
 	hashes, err := newsblur.ParseStarredHashes(raw)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, hash := range hashes {
@@ -75,29 +144,29 @@ func (s *storyStore) build() error {
 			continue
 		}
 		rec.Starred = true
-		s.stories = append(s.stories, rec)
+		snap.stories = append(snap.stories, rec)
 
 		for word := range rec.Words {
-			s.words[word] = append(s.words[word], rec)
+			snap.words[word] = append(snap.words[word], rec)
 		}
 		for _, t := range rec.UserTags {
 			if t != "" {
-				s.userTags[t]++
+				snap.userTags[t]++
 			}
 		}
 		for _, t := range rec.Tags {
 			if t != "" {
-				s.storyTags[t]++
+				snap.storyTags[t]++
 			}
 		}
 	}
 
-	sort.Slice(s.stories, func(i, j int) bool {
-		return s.stories[i].Date.After(s.stories[j].Date)
+	sort.Slice(snap.stories, func(i, j int) bool {
+		return snap.stories[i].Date.After(snap.stories[j].Date)
 	})
 
-	log.Printf("story store: indexed %d stories, %d words", len(s.stories), len(s.words))
-	return nil
+	log.Printf("story store: indexed %d stories, %d words", len(snap.stories), len(snap.words))
+	return snap, nil
 }
 
 var storyDateFormats = []string{
@@ -186,10 +255,11 @@ func parseStoryRecord(raw json.RawMessage, client *newsblur.Client) (*storyRecor
 }
 
 func (s *storyStore) storyByHash(hash string) (*storyRecord, bool) {
-	if err := s.ensureBuilt(); err != nil {
+	snap, err := s.current()
+	if err != nil || snap == nil {
 		return nil, false
 	}
-	for _, rec := range s.stories {
+	for _, rec := range snap.stories {
 		if rec.Hash == hash {
 			return rec, true
 		}
