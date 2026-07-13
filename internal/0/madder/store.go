@@ -15,6 +15,7 @@ package madder
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
@@ -53,25 +54,52 @@ type Store struct {
 // user-XDG tree. The returned Store is not yet usable for Read/Write/Has
 // until Init has been called at least once (by this process or an
 // earlier `madder init nebulous`).
-func NewStore(ctx context.Context) *Store {
+//
+// env_dir.MakeDefault is dewey's own "bare" construction pattern (used
+// this same way by madder/go's own test helpers) — but on ANY internal
+// setup failure (e.g. MkdirAll on its per-pid temp dir failing, a stale
+// dir left by an earlier abnormal exit, a permission mismatch) it calls
+// the dewey Context's Cancel(err), which — by design — panics via a
+// deferred ContextContinueOrPanic UNLESS the call runs inside a
+// ctx.Run(...) wrapper that catches it (dewey's Run/runRetry does this
+// internally; a bare, unwrapped call like this one does not). Confirmed
+// in production (nebulous#41): a bare call here crashed the whole
+// `nebulous capture` process with an opaque `panic:
+// ContextStateSucceeded` instead of surfacing whatever the real
+// underlying error was. The recover below converts that panic back into
+// a normal Go error, retrieving the real cause via the dewey context's
+// own Cause() (set by Cancel(err) before it panics) rather than losing
+// it to an unhandled panic.
+func NewStore(ctx context.Context) (store *Store, err error) {
+	dctx := errors.MakeContextDefault()
+	defer func() {
+		if r := recover(); r != nil {
+			if cause := dctx.Cause(); cause != nil {
+				err = fmt.Errorf("madder store: env setup: %w", cause)
+			} else {
+				err = fmt.Errorf("madder store: env setup panicked: %v", r)
+			}
+		}
+	}()
+
 	cfg := env_dir.Config{EnvVarNames: madder_env.DefaultEnvVarNames}
-	env := env_dir.MakeDefault(errors.MakeContextDefault(), cfg, "madder")
+	env := env_dir.MakeDefault(dctx, cfg, "madder")
 
 	var id scoped_id.Id
 	_ = id.Set(storeName)
 
-	layout, err := directory_layout.MakeBlobStore(env.GetXDGForBlobStoreId(id))
-	if err != nil {
-		// Deferred: NewStore historically never fails (it just resolves
-		// paths). Init/Read/Write/Has surface the real error.
-		return &Store{ctx: ctx, env: env}
+	layout, layoutErr := directory_layout.MakeBlobStore(env.GetXDGForBlobStoreId(id))
+	if layoutErr != nil {
+		// Deferred: NewStore historically never fails on path resolution
+		// alone. Init/Read/Write/Has surface the real error.
+		return &Store{ctx: ctx, env: env}, nil
 	}
 
 	return &Store{
 		ctx:  ctx,
 		env:  env,
 		path: directory_layout.GetBlobStorePath(layout, id.GetName()),
-	}
+	}, nil
 }
 
 // Init ensures the nebulous blob store is present, creating it with

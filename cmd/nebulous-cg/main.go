@@ -54,7 +54,10 @@ func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
 	if manifestPath == "" {
 		return nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
 	}
-	store := madder.NewStore(ctx)
+	store, err := madder.NewStore(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("madder new store: %w", err)
+	}
 	if err := store.Init(); err != nil {
 		return nil, fmt.Errorf("madder init: %w", err)
 	}

@@ -3,6 +3,8 @@ package madder
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -21,11 +23,42 @@ func withTempXDG(t *testing.T) {
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	withTempXDG(t)
-	s := NewStore(context.Background())
+	s, err := NewStore(context.Background())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
 	if err := s.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	return s
+}
+
+// nebulous#41: env_dir.MakeDefault's internal setup panics via dewey's
+// Cancel()/ContextContinueOrPanic on ANY internal error (it's designed
+// to run inside a ctx.Run(...) wrapper that catches it; NewStore's bare
+// call doesn't have one) — crashed `nebulous capture` in production
+// with an opaque "panic: ContextStateSucceeded" instead of a real error
+// message. Forces that internal failure the same way it happened in
+// production: env_dir's cwd walk-up (permitCwdXDGOverride) finds an
+// ancestor `.madder` entry and treats it as an XDG override root; here
+// it's a plain FILE, so path resolution under it (the per-pid temp dir
+// MkdirAll in initializeXDG) fails with ENOTDIR. Confirms NewStore
+// returns a clean error instead of panicking.
+func TestNewStoreSurfacesEnvSetupErrorInsteadOfPanicking(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+
+	blockedMadderOverride := filepath.Join(dir, ".madder")
+	if err := os.WriteFile(blockedMadderOverride, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocking .madder file: %v", err)
+	}
+	t.Chdir(dir)
+
+	_, err := NewStore(context.Background())
+	if err == nil {
+		t.Fatal("NewStore err = nil, want a clean error (not a panic) when the cwd-override .madder entry is a regular file, not a directory")
+	}
+	t.Logf("NewStore correctly surfaced: %v", err)
 }
 
 func TestStoreInitIsIdempotent(t *testing.T) {

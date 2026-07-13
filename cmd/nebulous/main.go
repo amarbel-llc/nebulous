@@ -214,7 +214,10 @@ func defaultManifestPath() string {
 // buildBlobSink returns an initialized madder-backed sink bound to ctx. ctx
 // governs the lifetime of every madder process invocation.
 func buildBlobSink(ctx context.Context) (*madder.Store, error) {
-	store := madder.NewStore(ctx)
+	store, err := madder.NewStore(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("madder new store: %w", err)
+	}
 	if err := store.Init(); err != nil {
 		return nil, fmt.Errorf("madder init: %w", err)
 	}

@@ -82,7 +82,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	store := madder.NewStore(ctx)
+	store, err := madder.NewStore(ctx)
+	if err != nil {
+		log.Fatalf("madder new store: %v", err)
+	}
 	if !*dryRun {
 		if err := store.Init(); err != nil {
 			log.Fatalf("madder init: %v", err)

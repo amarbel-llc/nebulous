@@ -64,6 +64,16 @@ let
       serviceConfig = {
         Type = "oneshot";
         ExecStart = execStart;
+        # nebulous#41: internal/0/madder's env_dir.MakeDefault walks up
+        # from cwd looking for an ancestor `.madder` override directory
+        # before falling back to standard $HOME-relative XDG paths.
+        # Systemd's own default WorkingDirectory ("/") makes this
+        # cwd-dependent and, in the field, crashed the whole process
+        # when that walk-up found an unrelated `.madder` entry outside
+        # this unit's control. Pinning cwd at stateDir removes the
+        # ambiguity entirely — stateDir is purpose-built and never
+        # accidentally carries a stray `.madder`.
+        WorkingDirectory = cfg.stateDir;
         # HOME roots nebulous's own XDG resolution (internal/0/madder's
         # env_dir.MakeDefault + the response-cache manifest) under
         # stateDir, so both land under the ReadWritePaths grant below.
