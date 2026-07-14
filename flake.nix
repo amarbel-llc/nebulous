@@ -5,11 +5,11 @@
     # amarbel-llc/nixpkgs carries the gomod2nix build helpers natively
     # (pkgs.buildGoApplication, pkgs.mkGoEnv, pkgs.gomod2nix CLI). See
     # `man 7 gomod2nix` inside the devshell for the migration guide.
-    igloo.url = "github:amarbel-llc/igloo";
+    igloo.url = "git+https://code.linenisgreat.com/igloo.git";
     nixpkgs-master.url = "github:NixOS/nixpkgs/567a49d1913ce81ac6e9582e3553dd90a955875f";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     madder = {
-      url = "github:amarbel-llc/madder";
+      url = "git+https://code.linenisgreat.com/madder.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -21,13 +21,13 @@
       inputs.utils.follows = "utils";
     };
     purse-first = {
-      url = "github:amarbel-llc/purse-first";
+      url = "git+https://code.linenisgreat.com/purse-first.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
     tap = {
-      url = "github:amarbel-llc/tap";
+      url = "git+https://code.linenisgreat.com/tap.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
