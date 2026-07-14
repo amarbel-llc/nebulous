@@ -184,6 +184,38 @@
     "conformist_3": {
       "inputs": {
         "igloo": [
+          "madder",
+          "doppelgang",
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "madder",
+          "doppelgang",
+          "nixpkgs-master"
+        ],
+        "utils": [
+          "madder",
+          "doppelgang",
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783949730,
+        "narHash": "sha256-ilEJ9Wp+yrc1/3CK7NRQDdmJ0PTB+xJoS8Grslo7itg=",
+        "ref": "refs/heads/master",
+        "rev": "1985c0c5fd4197ae944526ea9700caed259e1fe8",
+        "revCount": 153,
+        "type": "git",
+        "url": "https://code.linenisgreat.com/conformist.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://code.linenisgreat.com/conformist.git"
+      }
+    },
+    "conformist_4": {
+      "inputs": {
+        "igloo": [
           "purse-first",
           "igloo"
         ],
@@ -279,6 +311,7 @@
     },
     "doppelgang": {
       "inputs": {
+        "conformist": "conformist_3",
         "igloo": [
           "madder",
           "igloo"
@@ -287,22 +320,17 @@
           "madder",
           "nixpkgs-master"
         ],
-        "treefmt-nix": [
-          "madder",
-          "bats",
-          "treefmt-nix"
-        ],
         "utils": [
           "madder",
           "utils"
         ]
       },
       "locked": {
-        "lastModified": 1783342537,
-        "narHash": "sha256-HQQc7jSRgkmTShzyOJYxJ7h/IPg3+l7hgMiFBgNYgZ0=",
+        "lastModified": 1783950862,
+        "narHash": "sha256-fsiElpufWfGHwmr2EXrvr2KAVAv95Tk3FGtgr5v9+QU=",
         "owner": "amarbel-llc",
         "repo": "doppelgang",
-        "rev": "9a66f12721463f261b17359c907f0346a70af2e9",
+        "rev": "6a807f46a4ef4b138962049bac29737055f0f397",
         "type": "github"
       },
       "original": {
@@ -493,11 +521,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783951859,
-        "narHash": "sha256-4nLZaWUFy/yqHNep6falkJeaLVeOAXhcQ6l0UnYSZoU=",
+        "lastModified": 1783983177,
+        "narHash": "sha256-Ia52JPipMMFdczaPSqKXBL2omPNzS2+dUh4SVQ6L9dI=",
         "owner": "amarbel-llc",
         "repo": "madder",
-        "rev": "97a44e6d42d932a6f3e3c00f07552d480302623a",
+        "rev": "12c44dbf8a7b66578c0fad99d64fceddf299457b",
         "type": "github"
       },
       "original": {
@@ -649,7 +677,7 @@
     },
     "purse-first_2": {
       "inputs": {
-        "conformist": "conformist_3",
+        "conformist": "conformist_4",
         "gomod2nix": "gomod2nix_2",
         "igloo": [
           "igloo"
