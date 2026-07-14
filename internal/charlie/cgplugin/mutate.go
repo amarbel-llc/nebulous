@@ -70,12 +70,20 @@ type storyPatchBody struct {
 	Read *bool `json:"read,omitempty"`
 }
 
-// feedPatchBody is PatchNode's payload for a feed node. Either field may
-// be present alone or together; a single PatchNode call therefore may
-// dispatch to RenameFeed, MoveFeed, or both.
+// feedPatchBody is PatchNode's payload for a feed node. Title and Folder
+// may be present alone or together; a single PatchNode call therefore
+// may dispatch to RenameFeed, MoveFeed, or both. InFolder is required
+// alongside Folder (see patchFeed's doc comment) -- NewsBlur's
+// move-feed-to-folder call is keyed by the feed's CURRENT folder, and
+// the local index that would otherwise supply it can lag behind live
+// NewsBlur state by up to a full fetch cycle; silently trusting it here
+// risks a folder-tree move that doesn't match what the caller intended.
+// The pre-existing bespoke move_feed MCP tool (internal/bravo/tools/
+// folders.go) already requires this explicitly for the same reason.
 type feedPatchBody struct {
-	Title  *string `json:"title,omitempty"`
-	Folder *string `json:"folder,omitempty"`
+	Title    *string `json:"title,omitempty"`
+	Folder   *string `json:"folder,omitempty"`
+	InFolder *string `json:"in_folder,omitempty"`
 }
 
 // CreateNode supports exactly one node shape: story/{hash}, which stars
@@ -192,14 +200,24 @@ func patchStory(ctx context.Context, hash string, raw []byte) error {
 	return nil
 }
 
+// patchFeed requires InFolder alongside Folder rather than deriving the
+// feed's current folder from the local index: FeedMetadata reads a
+// snapshot that only refreshes on the next `nebulous fetch` (up to a
+// full fetch cycle behind live NewsBlur state -- see feedPatchBody's own
+// doc comment), and MoveFeed's in_folder argument is load-bearing, not
+// informational -- a stale value risks a folder-tree move that silently
+// doesn't match the caller's intent, with no error surfaced (NewsBlur's
+// API treats any 200 as success regardless of body).
 func patchFeed(ctx context.Context, id string, raw []byte) error {
-	view, _, ok := index.FeedMetadata(ctx, id)
-	if !ok {
+	if _, _, ok := index.FeedMetadata(ctx, id); !ok {
 		return fmt.Errorf("newsblur plugin: feed %s not found", id)
 	}
 	var patch feedPatchBody
 	if err := json.Unmarshal(raw, &patch); err != nil {
 		return fmt.Errorf("newsblur plugin: invalid feed patch body: %w", err)
+	}
+	if patch.Folder != nil && patch.InFolder == nil {
+		return fmt.Errorf("newsblur plugin: patching feed %s: \"folder\" requires \"in_folder\" (the feed's current folder) alongside it", id)
 	}
 	if patch.Title == nil && patch.Folder == nil {
 		return nil
@@ -218,7 +236,7 @@ func patchFeed(ctx context.Context, id string, raw []byte) error {
 		}
 	}
 	if patch.Folder != nil {
-		if _, err := client.MoveFeed(ctx, feedID, view.Folder, *patch.Folder); err != nil {
+		if _, err := client.MoveFeed(ctx, feedID, *patch.InFolder, *patch.Folder); err != nil {
 			return fmt.Errorf("newsblur plugin: moving feed %s: %w", id, err)
 		}
 	}
@@ -257,6 +275,13 @@ func deleteStory(ctx context.Context, hash string) error {
 	return nil
 }
 
+// deleteFeed sources Unsubscribe's in_folder from the local index's
+// (potentially stale, see feedPatchBody's doc comment) view of the
+// feed's folder -- unlike patchFeed's move case, DeleteNode's interface
+// takes no body, so there is no way for a caller to supply an explicit
+// current folder here. Best-effort; a residual staleness risk versus
+// patchFeed's fix, accepted for lack of a better option within
+// DeleteNode's fixed signature.
 func deleteFeed(ctx context.Context, id string) error {
 	view, _, ok := index.FeedMetadata(ctx, id)
 	if !ok {

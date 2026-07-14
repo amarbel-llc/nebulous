@@ -191,10 +191,9 @@ func TestPatchNodeFeedRenameOnly(t *testing.T) {
 }
 
 func TestPatchNodeFeedMoveOnly(t *testing.T) {
-	fi, fc := setupMutateTest(t)
-	setFeedFolder(fi, "123", "old")
+	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"folder":"new"}`))
+	body := bytes.NewReader([]byte(`{"folder":"new","in_folder":"old"}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
@@ -204,11 +203,26 @@ func TestPatchNodeFeedMoveOnly(t *testing.T) {
 	}
 }
 
-func TestPatchNodeFeedRenameAndMoveBothFireFromOneBody(t *testing.T) {
-	fi, fc := setupMutateTest(t)
-	setFeedFolder(fi, "123", "old")
+// A "folder" field without an accompanying "in_folder" must error, not
+// silently fall back to the local index's (potentially stale) view of
+// the feed's current folder -- see feedPatchBody's own doc comment.
+func TestPatchNodeFeedMoveWithoutInFolderErrors(t *testing.T) {
+	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"title":"New Title","folder":"new"}`))
+	body := bytes.NewReader([]byte(`{"folder":"new"}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	if err == nil {
+		t.Fatal("PatchNode with folder but no in_folder: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (should have errored before calling the client)", fc.calls)
+	}
+}
+
+func TestPatchNodeFeedRenameAndMoveBothFireFromOneBody(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"title":"New Title","folder":"new","in_folder":"old"}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
