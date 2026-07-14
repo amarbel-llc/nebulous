@@ -61,6 +61,8 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    madder.inputs.conformist.follows = "conformist";
+    purse-first.inputs.conformist.follows = "conformist";
   };
 
   outputs =
