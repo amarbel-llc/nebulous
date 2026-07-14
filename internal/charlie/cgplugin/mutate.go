@@ -147,6 +147,11 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) erro
 	if body == nil {
 		return fmt.Errorf("newsblur plugin: PatchNode requires a body")
 	}
+	segs := pathSegments(node)
+	if len(segs) != 2 || (segs[0] != "story" && segs[0] != "feed") {
+		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash} and feed/{id}, got %s", node)
+	}
+
 	raw, err := io.ReadAll(body)
 	if err != nil {
 		return fmt.Errorf("newsblur plugin: reading PatchNode body: %w", err)
@@ -155,15 +160,10 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) erro
 		return fmt.Errorf("newsblur plugin: PatchNode body must not be empty")
 	}
 
-	segs := pathSegments(node)
-	switch {
-	case len(segs) == 2 && segs[0] == "story":
+	if segs[0] == "story" {
 		return patchStory(ctx, segs[1], raw)
-	case len(segs) == 2 && segs[0] == "feed":
-		return patchFeed(ctx, segs[1], raw)
-	default:
-		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash} and feed/{id}, got %s", node)
 	}
+	return patchFeed(ctx, segs[1], raw)
 }
 
 func patchStory(ctx context.Context, hash string, raw []byte) error {

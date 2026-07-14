@@ -26,7 +26,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	client, err := buildClient(ctx)
+	token := os.Getenv("NEWSBLUR_TOKEN")
+	client, err := buildClient(ctx, token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nebulous-cg: %v\n", err)
 		os.Exit(1)
@@ -39,7 +40,7 @@ func main() {
 	// Mutations need a live client, not just a cache-backed one — only
 	// wire NodeMutator's write path when a token was actually supplied.
 	// Read traversal keeps working unchanged either way.
-	if os.Getenv("NEWSBLUR_TOKEN") != "" {
+	if token != "" {
 		cgplugin.SetClient(client)
 	}
 
@@ -47,26 +48,17 @@ func main() {
 }
 
 // buildClient constructs the client nebulous-cg's plugin reads (and,
-// when a token is available, writes) through: a cache-only client if
-// NEWSBLUR_TOKEN is unset (today's default, unchanged), or a live+cache
-// client otherwise — the same attachCache pattern cmd/nebulous's own
+// when token is non-empty, writes) through: a cache-only client if token
+// is empty (today's default, unchanged), or a live+cache client
+// otherwise — the same attachCache pattern cmd/nebulous's own
 // `fetch`/`serve mcp` use.
-func buildClient(ctx context.Context) (*newsblur.Client, error) {
-	token := os.Getenv("NEWSBLUR_TOKEN")
-	if token == "" {
-		return buildCacheOnlyClient(ctx)
-	}
-
-	manifestPath := defaultManifestPath()
-	if manifestPath == "" {
-		return nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
-	}
-	store, err := madder.NewStore(ctx)
+func buildClient(ctx context.Context, token string) (*newsblur.Client, error) {
+	manifestPath, store, err := openStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("madder new store: %w", err)
+		return nil, err
 	}
-	if err := store.Init(); err != nil {
-		return nil, fmt.Errorf("madder init: %w", err)
+	if token == "" {
+		return newsblur.NewCacheOnlyClient(manifestPath, store)
 	}
 	client := newsblur.NewClient(token)
 	if err := client.WithCache(manifestPath, 1*time.Hour, store); err != nil {
@@ -87,19 +79,20 @@ func defaultManifestPath() string {
 	return ""
 }
 
-// buildCacheOnlyClient constructs a token-free NewsBlur client that
-// reads exclusively from the local madder-backed cache.
-func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
-	manifestPath := defaultManifestPath()
+// openStore resolves the manifest path and initializes the madder blob
+// store — the bootstrap buildClient's cache-only and live+cache branches
+// both need before diverging on which kind of newsblur.Client to build.
+func openStore(ctx context.Context) (manifestPath string, store *madder.Store, err error) {
+	manifestPath = defaultManifestPath()
 	if manifestPath == "" {
-		return nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
+		return "", nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
 	}
-	store, err := madder.NewStore(ctx)
+	store, err = madder.NewStore(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("madder new store: %w", err)
+		return "", nil, fmt.Errorf("madder new store: %w", err)
 	}
 	if err := store.Init(); err != nil {
-		return nil, fmt.Errorf("madder init: %w", err)
+		return "", nil, fmt.Errorf("madder init: %w", err)
 	}
-	return newsblur.NewCacheOnlyClient(manifestPath, store)
+	return manifestPath, store, nil
 }

@@ -74,6 +74,14 @@ func setupMutateTest(t *testing.T) (*fakeIndex, *fakeClient) {
 	return fi, fc
 }
 
+// setFeedFolder overwrites id's cached Folder, keeping every other field
+// (including the raw JSON) as newFakeIndex() set it up.
+func setFeedFolder(fi *fakeIndex, id, folder string) {
+	entry := fi.feedMetadata[id]
+	entry.view.Folder = folder
+	fi.feedMetadata[id] = entry
+}
+
 func TestCreateNodeStarsNewStory(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
@@ -184,10 +192,7 @@ func TestPatchNodeFeedRenameOnly(t *testing.T) {
 
 func TestPatchNodeFeedMoveOnly(t *testing.T) {
 	fi, fc := setupMutateTest(t)
-	fi.feedMetadata["123"] = feedMetadataEntry{
-		view: tools.FeedMetadataView{ID: "123", Title: "Example Feed", Folder: "old"},
-		raw:  fi.feedMetadata["123"].raw,
-	}
+	setFeedFolder(fi, "123", "old")
 
 	body := bytes.NewReader([]byte(`{"folder":"new"}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
@@ -201,10 +206,7 @@ func TestPatchNodeFeedMoveOnly(t *testing.T) {
 
 func TestPatchNodeFeedRenameAndMoveBothFireFromOneBody(t *testing.T) {
 	fi, fc := setupMutateTest(t)
-	fi.feedMetadata["123"] = feedMetadataEntry{
-		view: tools.FeedMetadataView{ID: "123", Title: "Example Feed", Folder: "old"},
-		raw:  fi.feedMetadata["123"].raw,
-	}
+	setFeedFolder(fi, "123", "old")
 
 	body := bytes.NewReader([]byte(`{"title":"New Title","folder":"new"}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
@@ -245,10 +247,7 @@ func TestDeleteNodeUnstarsStory(t *testing.T) {
 
 func TestDeleteNodeUnsubscribesFeed(t *testing.T) {
 	fi, fc := setupMutateTest(t)
-	fi.feedMetadata["123"] = feedMetadataEntry{
-		view: tools.FeedMetadataView{ID: "123", Title: "Example Feed", Folder: "news"},
-		raw:  fi.feedMetadata["123"].raw,
-	}
+	setFeedFolder(fi, "123", "news")
 
 	err := Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://feed/123"))
 	if err != nil {
