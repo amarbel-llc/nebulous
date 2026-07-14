@@ -9,7 +9,7 @@
     nixpkgs-master.url = "github:NixOS/nixpkgs/567a49d1913ce81ac6e9582e3553dd90a955875f";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     madder = {
-      url = "git+https://code.linenisgreat.com/madder.git";
+      url = "git+https://github.com/amarbel-llc/madder.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -21,7 +21,7 @@
       inputs.utils.follows = "utils";
     };
     purse-first = {
-      url = "git+https://code.linenisgreat.com/purse-first.git";
+      url = "git+https://github.com/amarbel-llc/purse-first.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
