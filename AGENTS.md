@@ -35,7 +35,11 @@ go-sync-wrap hook regenerates `gomod2nix.toml` automatically after `go get` /
 `serve mcp` and `fetch`. Store it in `.secrets.env` (gitignored, loaded by
 direnv via `.envrc`). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 `corpus-*`, and the `nebulous-cg` plugin read only the local store and do not
-require a token.
+require a token. `nebulous-cg` optionally becomes read-write when
+`NEWSBLUR_TOKEN` is set: its plugin gains `NodeMutator` support
+(`create_node`/`patch_node`/`delete_node`), mapping to
+star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed. Reads
+stay token-free either way.
 
 ## Architecture
 

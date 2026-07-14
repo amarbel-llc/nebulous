@@ -15,7 +15,10 @@ One Go module, two surfaces over one local store:
    local index as a structured tree under the `newsblur://` URI scheme
    (feeds / stories / tags, with a per-story content + original leaf),
    implementing the cutting-garden plugin SDK's `RootProvider` /
-   `RootLister` / `LeafReader`. Read-only; no token required.
+   `RootLister` / `LeafReader`. Read-only by default; no token required.
+   Optionally becomes read-write when `NEWSBLUR_TOKEN` is set, implementing
+   `NodeMutator` (`create_node`/`patch_node`/`delete_node` — star/unstar,
+   mark_read/mark_unread, unsubscribe, rename_feed/move_feed).
 
 ## NewsBlur MCP server
 
@@ -145,7 +148,9 @@ nebulous-cg <command>                 Drive the newsblur:// plugin (health, list
 - `NEWSBLUR_TOKEN` (NewsBlur session cookie) is required for `serve mcp` and
   `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv). The
   corpus, plugin, and `nebulous-cg` subcommands read only the local store
-  and need no token.
+  and need no token. `nebulous-cg` optionally becomes read-write (mutations
+  via `create_node`/`patch_node`/`delete_node`) when `NEWSBLUR_TOKEN` is
+  set; without it, `nebulous-cg` stays read-only exactly as before.
 
 ## Development
 
