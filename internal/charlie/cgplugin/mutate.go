@@ -34,15 +34,23 @@ var _ Client = (*newsblur.Client)(nil)
 
 // client is the write-capable NewsBlur surface this plugin's mutations
 // call directly, injected at startup alongside SetIndex (plugin.go).
-// Mutations do not touch the local manifest or force a reindex:
-// FacetVersion's manifest-mtime and per-feed NT tokens only reflect a
-// mutation after the next scheduled `nebulous fetch` -- the same
-// fetch-cadence lag already accepted elsewhere in this package (see
-// facets.go's own comment on FacetVersion), not a new class of
-// staleness. The existence checks below (StoryMetadata/FeedMetadata)
-// read that same lagging local index, so a story/feed that changed very
-// recently through another path may not be visible here yet either --
-// an accepted best-effort check, not a strict live lookup.
+// Story read/unread and star/unstar optimistically patch their cached
+// entries in place (newsblur.Client's MarkStoriesRead/MarkStoryUnread/
+// StarStory/UnstarStory each do this on success -- see
+// internal/alfa/newsblur/cache_patch.go), so a read immediately after one
+// of those mutations *usually* already reflects the change -- but the
+// patch is best-effort: a failure is swallowed at the call site (nothing
+// surfaces it), and even a successful patch's manifest write can be lost
+// to a concurrently-running `nebulous fetch` process (nebulous#42,
+// Record/RecordBatch never reload-before-merge -- pre-existing, this
+// plugin's patch calls just add more surface area to it, not a new class
+// of the same bug). Feed rename/move do not patch the cache at all yet
+// and still lag until the next `nebulous fetch`, the same fetch-cadence
+// lag accepted elsewhere in this package (see facets.go's own comment on
+// FacetVersion). The existence checks below (StoryMetadata/FeedMetadata)
+// read the local index too, so a story/feed that changed very recently
+// through another path may not be visible here yet either -- an accepted
+// best-effort check, not a strict live lookup.
 var client Client
 
 // mutateMu serializes this plugin's writes. Package-private, mirrors how

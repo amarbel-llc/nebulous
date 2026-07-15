@@ -101,13 +101,42 @@ func (c *responseCache) putImmutable(key string, body json.RawMessage) error {
 }
 
 func (c *responseCache) write(key string, body json.RawMessage, immutable bool) error {
+	entry, err := c.writeEntry(body, immutable)
+	if err != nil {
+		return err
+	}
+	return c.manifest.Record(key, entry)
+}
+
+// putImmutableBatch writes multiple immutable entries with a single
+// manifest save, instead of one save per entry -- Manifest.Record's own
+// doc comment calls the latter "the O(n^2) write pattern"; RecordBatch
+// exists specifically to avoid it for callers writing many entries at once
+// (e.g. patching every story a single mark-stories-read call touched).
+func (c *responseCache) putImmutableBatch(bodies map[string]json.RawMessage) error {
+	entries := make(map[string]manifest.ManifestEntry, len(bodies))
+	for key, body := range bodies {
+		entry, err := c.writeEntry(body, true)
+		if err != nil {
+			return err
+		}
+		entries[key] = entry
+	}
+	return c.manifest.RecordBatch(entries)
+}
+
+// writeEntry writes body to the blob sink and builds the ManifestEntry
+// pointing at it -- the shared step between write's single-entry save and
+// putImmutableBatch's per-entry loop, before they diverge on Record vs
+// RecordBatch.
+func (c *responseCache) writeEntry(body json.RawMessage, immutable bool) (manifest.ManifestEntry, error) {
 	digest, err := c.sink.Write(bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("cache write: %w", err)
+		return manifest.ManifestEntry{}, fmt.Errorf("cache write: %w", err)
 	}
-	return c.manifest.Record(key, manifest.ManifestEntry{
+	return manifest.ManifestEntry{
 		Digest:    digest,
 		WrittenAt: time.Now(),
 		Immutable: immutable,
-	})
+	}, nil
 }

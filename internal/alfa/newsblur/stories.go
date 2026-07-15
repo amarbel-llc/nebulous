@@ -24,13 +24,19 @@ func (c *Client) OriginalText(ctx context.Context, storyHash string) (json.RawMe
 	return c.get(ctx, "/rss_feeds/original_text", params)
 }
 
+// starredHashesEnvelope is the {"starred_story_hashes": [...]} shape
+// NewsBlur's own /reader/starred_story_hashes API returns. Shared between
+// ParseStarredHashes (read) and marshalStarredHashes (write) so the two
+// stay in sync by construction.
+type starredHashesEnvelope struct {
+	Hashes []string `json:"starred_story_hashes"`
+}
+
 // ParseStarredHashes parses the response from /reader/starred_story_hashes.
 // Accepts both the envelope format {"starred_story_hashes": [...]} and a flat
 // array [...].
 func ParseStarredHashes(raw json.RawMessage) ([]string, error) {
-	var envelope struct {
-		Hashes []string `json:"starred_story_hashes"`
-	}
+	var envelope starredHashesEnvelope
 	if err := json.Unmarshal(raw, &envelope); err == nil {
 		return envelope.Hashes, nil
 	}
@@ -41,4 +47,12 @@ func ParseStarredHashes(raw json.RawMessage) ([]string, error) {
 	}
 
 	return nil, fmt.Errorf("unrecognized starred_story_hashes format")
+}
+
+// marshalStarredHashes writes hashes back in the envelope format --
+// ParseStarredHashes accepts either shape on read, but the envelope is what
+// NewsBlur's own API returns, so writing it back the same way keeps the
+// cached blob indistinguishable from one `nebulous fetch` would have written.
+func marshalStarredHashes(hashes []string) (json.RawMessage, error) {
+	return json.Marshal(starredHashesEnvelope{Hashes: hashes})
 }

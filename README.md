@@ -55,7 +55,9 @@ rather than separate processes:
   `nebulous fetch`'s new data becomes visible without restarting the
   server. Mutation tools (star/unstar, mark read/unread,
   subscribe/unsubscribe, folders) are the exception and call the NewsBlur
-  API directly.
+  API directly; star/unstar and mark read/unread also patch their local
+  cache entry in place afterward so a read immediately reflects the
+  change, instead of lagging until the next `nebulous fetch`.
 
 Query surface: `feed_query` and `story_query` tools (structured filters by
 year/tag/feed/status plus word search), a facets resource

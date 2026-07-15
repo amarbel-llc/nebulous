@@ -78,22 +78,6 @@ func TestCachedStarredStoryHashesRoundTrip(t *testing.T) {
 	}
 }
 
-func TestInvalidateStarredStoryHashManifest(t *testing.T) {
-	c := testClientWithCache(t)
-	manifest := json.RawMessage(`{"starred_story_hashes":["a"]}`)
-
-	if err := c.PutCachedStarredStoryHashes(manifest); err != nil {
-		t.Fatalf("put: %v", err)
-	}
-
-	c.InvalidateStarredStoryHashManifest()
-
-	_, ok := c.CachedStarredStoryHashes()
-	if ok {
-		t.Error("CachedStarredStoryHashes returned true after invalidate")
-	}
-}
-
 // nebulous#41-followup: NewCacheOnlyClient's ttl=0 means get()'s
 // TTL-checked cache path always treats a non-immutable entry (like the
 // one client.Feeds()'s own doGet writes via the plain `put`) as expired,
@@ -169,6 +153,11 @@ func TestCachedStarredStoryNilCache(t *testing.T) {
 		t.Errorf("PutCachedStarredStoryHashes should not error with nil cache: %v", err)
 	}
 
-	// Should not panic
-	c.InvalidateStarredStoryHashManifest()
+	if err := c.PatchCachedStoryReadStatus("abc", true); err != nil {
+		t.Errorf("PatchCachedStoryReadStatus should not error with nil cache: %v", err)
+	}
+
+	if err := c.PatchCachedStarredStoryHashes("abc", ""); err != nil {
+		t.Errorf("PatchCachedStarredStoryHashes should not error with nil cache: %v", err)
+	}
 }

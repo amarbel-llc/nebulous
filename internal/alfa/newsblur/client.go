@@ -213,6 +213,19 @@ func (c *Client) PutCachedStarredStory(hash string, raw json.RawMessage) error {
 	return c.cache.putImmutable(c.starredStoryCacheKey(hash), raw)
 }
 
+// PutCachedStarredStoriesBatch writes multiple starred-story cache entries
+// with a single manifest save -- see responseCache.putImmutableBatch.
+func (c *Client) PutCachedStarredStoriesBatch(byHash map[string]json.RawMessage) error {
+	if c.cache == nil {
+		return nil
+	}
+	entries := make(map[string]json.RawMessage, len(byHash))
+	for hash, raw := range byHash {
+		entries[c.starredStoryCacheKey(hash)] = raw
+	}
+	return c.cache.putImmutableBatch(entries)
+}
+
 func (c *Client) CachedStarredStoryHashes() (json.RawMessage, bool) {
 	if c.cache == nil {
 		return nil, false
@@ -226,13 +239,6 @@ func (c *Client) PutCachedStarredStoryHashes(raw json.RawMessage) error {
 	}
 	key := c.cache.cacheKey("/reader/starred_story_hashes", nil)
 	return c.cache.putImmutable(key, raw)
-}
-
-func (c *Client) InvalidateStarredStoryHashManifest() {
-	if c.cache == nil {
-		return
-	}
-	c.cache.remove(c.cache.cacheKey("/reader/starred_story_hashes", nil))
 }
 
 func (c *Client) originalTextCacheKey(storyHash string) string {
