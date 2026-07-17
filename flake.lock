@@ -415,10 +415,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1784255248,
-        "narHash": "sha256-0tBbhr5ALdxtm5hbZbi6GnRZD39wCmxaXQVCeU77VRk=",
+        "lastModified": 1784288801,
+        "narHash": "sha256-RigTgcyS6utB936uz8Qpa65fCq1PnAQOpgp/KYj5ll4=",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/madder/archive/725011f01a675d7769b6e0be0274995388e6af01.tar.gz"
+        "url": "https://code.linenisgreat.com/madder/archive/186e1f74fff259195ef9bb3a1c58430166cf19e9.tar.gz"
       },
       "original": {
         "type": "tarball",
