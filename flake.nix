@@ -44,7 +44,6 @@
     tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
     bob.inputs.bats.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
     bob.inputs.tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
-    madder.inputs.bats.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
     tap.inputs.bats.follows = "madder/bats";
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
     madder.inputs.purse-first.follows = "purse-first";
