@@ -207,7 +207,7 @@ func serveMCP() {
 	srv, err := server.New(t, server.Options{
 		ServerName:    app.Name,
 		ServerVersion: app.Version,
-		Instructions:  "NewsBlur MCP server. Read nebulous://stories/facets first to understand the data shape (years, tags, feeds, counts), then use story_query to filter by year, tag, feed, words, or any combination. Use nebulous://story/{hash} for metadata, story/{hash}/content for text, story/{hash}/original for full articles. Delegate bulk story reads to subagents. Use feed_query for feed discovery. Bulk mutation tools (mark_read, mark_feed_read, mark_all_read, subscribe, folder management) hit the NewsBlur API directly; per-story/per-feed mutations (star/unstar, read/unread, rename/move) live on the nebulous-cg plugin's create_node/patch_node/delete_node instead.",
+		Instructions:  "NewsBlur MCP server. Read nebulous://stories/facets first to understand the data shape (years, tags, feeds, counts), then use story_query to filter by year, tag, feed, words, or any combination. Use nebulous://story/{hash} for metadata, story/{hash}/content for text, story/{hash}/original for full articles. Delegate bulk story reads to subagents. Use feed_query for feed discovery. Only bulk mutation tools live here (mark_read, mark_feed_read, mark_all_read) -- every per-node mutation (star/unstar, read/unread, subscribe/unsubscribe, rename/move, folder create/rename/delete/move) lives on the nebulous-cg plugin's create_node/patch_node/delete_node instead.",
 		Tools:         registry,
 		Resources:     resources,
 	})

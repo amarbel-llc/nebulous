@@ -38,8 +38,10 @@ direnv via `.envrc`). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 require a token. `nebulous-cg` optionally becomes read-write when
 `NEWSBLUR_TOKEN` is set: its plugin gains `NodeMutator` support
 (`create_node`/`patch_node`/`delete_node`), mapping to
-star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed. Reads
-stay token-free either way.
+star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed/folder
+create/rename/delete/move, plus `ContainerCreator` (`create_node` against
+the `feeds` root) for subscribe, since NewsBlur assigns the feed id
+server-side (cutting-garden#143). Reads stay token-free either way.
 
 ## Architecture
 
@@ -64,9 +66,9 @@ stay token-free either way.
       story_query.go               Query engine with structured filters + word search
       story_query_tool.go          story_query MCP tool handler
       facets.go                    Aggregate counts by year/tag/feed/status
-      reader.go                    Bulk mutation tools (batch mark_read, mark_feed_read, mark_all_read)
-      subscriptions.go             subscribe (unsubscribe/rename_feed retired — see cgplugin's NodeMutator)
-      folders.go                   Folder management + move_folder (move_feed retired — see cgplugin's NodeMutator)
+      reader.go                    Bulk mutation tools (batch mark_read, mark_feed_read, mark_all_read --
+                                    the only bespoke mutation tools left; everything per-node retired to
+                                    cgplugin's NodeMutator/ContainerCreator)
       import_export.go             OPML import/export
       resources.go                 MCP Resource provider with template URI resolution
       feed_index.go                In-memory word index over feed metadata
@@ -75,6 +77,9 @@ stay token-free either way.
       traversal.go                 Types / Roots / ListRoots (incl. per-format capture leaves)
       leaf.go                      ReadLeaf (story content/original/metadata/capture, feed metadata)
       facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
+      mutate.go                    NodeMutator: story/feed/folder create/patch/delete (SetClient)
+      create_child.go              ContainerCreator.CreateChild: subscribe (server-assigned feed id)
+      schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
 
 ### Three-Phase Architecture: Sync (+ Capture) + Serve

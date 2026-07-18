@@ -40,8 +40,6 @@ func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider
 	registerFeedCommands(app, feedIdx)
 	registerStoryQueryCommand(app, storyStr)
 	registerReaderCommands(app, client, ml)
-	registerSubscriptionCommands(app, client, ml)
-	registerFolderCommands(app, client, ml)
 	registerImportExportCommands(app, client, ml)
 
 	var resources server.ResourceProvider

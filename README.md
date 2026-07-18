@@ -18,7 +18,10 @@ One Go module, two surfaces over one local store:
    `RootLister` / `LeafReader`. Read-only by default; no token required.
    Optionally becomes read-write when `NEWSBLUR_TOKEN` is set, implementing
    `NodeMutator` (`create_node`/`patch_node`/`delete_node` — star/unstar,
-   mark_read/mark_unread, unsubscribe, rename_feed/move_feed).
+   mark_read/mark_unread, unsubscribe, rename_feed/move_feed, folder
+   create/rename/delete/move) and `ContainerCreator` (subscribe, via
+   `create_node` against the feeds root — cutting-garden#143's
+   server-assigned-identity shape).
 
 ## NewsBlur MCP server
 
@@ -54,14 +57,13 @@ rather than separate processes:
   mtime changes since the last check, so a concurrently-running
   `nebulous fetch`'s new data becomes visible without restarting the
   server. Mutation tools that call the NewsBlur API directly are the
-  exception; the ones with no single-node equivalent stay here — batch
-  `mark_read`, whole-feed/whole-corpus `mark_feed_read`/`mark_all_read`,
-  `subscribe` (pending cutting-garden#143's `CreateNode`-return-URI gap),
-  and folder create/rename/delete/`move_folder` (folders aren't yet
-  addressable nodes in the cutting-garden plugin below). Per-story
-  star/unstar/read/unread and per-feed rename/move retired from here —
-  they're covered by the `nebulous-cg` plugin's `NodeMutator`
-  (`create_node`/`patch_node`/`delete_node`, described below) instead.
+  exception; only the ones with no single-node equivalent remain here —
+  batch `mark_read`, whole-feed/whole-corpus `mark_feed_read`/
+  `mark_all_read` (bulk operations no single addressable node can express).
+  Every per-node mutation (star/unstar, read/unread, feed rename/move/
+  unsubscribe/subscribe, folder create/rename/delete/move) is covered by
+  the `nebulous-cg` plugin's `NodeMutator`/`ContainerCreator` (described
+  below) instead, and has retired from here.
 
 Query surface: `feed_query` and `story_query` tools (structured filters by
 year/tag/feed/status plus word search), a facets resource
@@ -97,6 +99,20 @@ madder-aware consumer resolves it further via `madder://blobs/<digest>`.
 Discover and traverse it via the cutting-garden commands, e.g.
 `nebulous-cg health` or `nebulous-cg list newsblur://feeds`. Reads only the
 local cache — no NewsBlur token needed.
+
+When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
+`NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
+`create_child.go`): `create_node`/`patch_node`/`delete_node` on
+`story/{hash}` (star/unstar, read/unread) and `feed/{id}` (rename/move/
+unsubscribe); `create_node` against the `feeds` root (subscribe, via
+cutting-garden#143's server-assigned-identity `CreateChild` — NewsBlur
+assigns the feed id, so the tool reports the resulting `feed/{id}` URI
+back). Folder nodes (`folder/{path}`, not yet listed by `ListRoots`) are
+create/rename/move/delete-able the same way; their path segment reuses
+NewsBlur's own nested-folder join convention (`"Parent - Child"`, the same
+string already in `FeedRef.Folder`) rather than a slash-hierarchical URI.
+`describe_node_types`' schema (`schema.go`) documents every writable
+type's body shape.
 
 Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
 `story_tag`, `feed`, `read`, `age_band` on stories; `folder`, `active` on
