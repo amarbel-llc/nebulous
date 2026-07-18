@@ -61,6 +61,26 @@ func (f *fakeClient) Unsubscribe(_ context.Context, feedID int, inFolder string)
 	return f.record("Unsubscribe:" + strconv.Itoa(feedID) + ":" + inFolder)
 }
 
+func (f *fakeClient) CreateFolder(_ context.Context, folderName, parentFolder string) (json.RawMessage, error) {
+	return f.record("CreateFolder:" + folderName + ":" + parentFolder)
+}
+
+func (f *fakeClient) RenameFolder(_ context.Context, folderName, newFolderName, inFolder string) (json.RawMessage, error) {
+	return f.record("RenameFolder:" + folderName + "->" + newFolderName + ":" + inFolder)
+}
+
+func (f *fakeClient) DeleteFolder(_ context.Context, folderName, inFolder string) (json.RawMessage, error) {
+	return f.record("DeleteFolder:" + folderName + ":" + inFolder)
+}
+
+func (f *fakeClient) MoveFolder(_ context.Context, folderName, inFolder, toFolder string) (json.RawMessage, error) {
+	return f.record("MoveFolder:" + folderName + ":" + inFolder + "->" + toFolder)
+}
+
+func (f *fakeClient) Subscribe(_ context.Context, feedURL, folder string) (json.RawMessage, error) {
+	return f.record("Subscribe:" + feedURL + ":" + folder)
+}
+
 func setupMutateTest(t *testing.T) (*fakeIndex, *fakeClient) {
 	t.Helper()
 	fi := newFakeIndex()
@@ -329,5 +349,141 @@ func TestPatchNodeStoryPropagatesClientError(t *testing.T) {
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err == nil {
 		t.Fatal("PatchNode: expected the client's error to propagate, got nil")
+	}
+}
+
+func TestSplitFolderPath(t *testing.T) {
+	cases := []struct {
+		in         string
+		ownName    string
+		parentPath string
+	}{
+		{"Blogs", "Blogs", ""},
+		{"Blogs - Photoblogs", "Photoblogs", "Blogs"},
+		{"A - B - C", "C", "A - B"},
+	}
+	for _, c := range cases {
+		ownName, parentPath := splitFolderPath(c.in)
+		if ownName != c.ownName || parentPath != c.parentPath {
+			t.Errorf("splitFolderPath(%q) = (%q, %q), want (%q, %q)",
+				c.in, ownName, parentPath, c.ownName, c.parentPath)
+		}
+	}
+}
+
+func TestCreateNodeCreatesTopLevelFolder(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	err := Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), bytes.NewReader(nil), typeFolder)
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "CreateFolder:Blogs:" {
+		t.Errorf("calls = %v, want [CreateFolder:Blogs:]", fc.calls)
+	}
+}
+
+func TestCreateNodeCreatesNestedFolder(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	err := Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - Photoblogs"), bytes.NewReader(nil), typeFolder)
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "CreateFolder:Photoblogs:Blogs" {
+		t.Errorf("calls = %v, want [CreateFolder:Photoblogs:Blogs]", fc.calls)
+	}
+}
+
+func TestCreateNodeRejectsWrongTypeForFolder(t *testing.T) {
+	setupMutateTest(t)
+
+	err := Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), bytes.NewReader(nil), typeStory)
+	if err == nil {
+		t.Fatal("CreateNode(folder) with typeStory: expected an error, got nil")
+	}
+}
+
+func TestPatchNodeFolderRenameOnly(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"name":"NewName"}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - OldName"), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "RenameFolder:OldName->NewName:Blogs" {
+		t.Errorf("calls = %v, want [RenameFolder:OldName->NewName:Blogs]", fc.calls)
+	}
+}
+
+func TestPatchNodeFolderMoveOnly(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"to_folder":"NewParent"}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - Photoblogs"), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "MoveFolder:Photoblogs:OldParent->NewParent" {
+		t.Errorf("calls = %v, want [MoveFolder:Photoblogs:OldParent->NewParent]", fc.calls)
+	}
+}
+
+// A rename and a move firing from one PatchNode body must apply the
+// rename first, then move using the RENAMED name -- not the original.
+func TestPatchNodeFolderRenameAndMoveUsesRenamedNameForMove(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"name":"NewName","to_folder":"NewParent"}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - OldName"), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 2 {
+		t.Fatalf("calls = %v, want 2 (rename + move)", fc.calls)
+	}
+	if fc.calls[0] != "RenameFolder:OldName->NewName:OldParent" {
+		t.Errorf("calls[0] = %q, want RenameFolder:OldName->NewName:OldParent", fc.calls[0])
+	}
+	if fc.calls[1] != "MoveFolder:NewName:OldParent->NewParent" {
+		t.Errorf("calls[1] = %q, want MoveFolder:NewName:OldParent->NewParent", fc.calls[1])
+	}
+}
+
+func TestPatchNodeFolderNoOpWhenBothFieldsAbsent(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (name/to_folder both absent)", fc.calls)
+	}
+}
+
+func TestDeleteNodeDeletesFolder(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	err := Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - Photoblogs"))
+	if err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "DeleteFolder:Photoblogs:Blogs" {
+		t.Errorf("calls = %v, want [DeleteFolder:Photoblogs:Blogs]", fc.calls)
+	}
+}
+
+func TestDeleteNodeDeletesTopLevelFolder(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	err := Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"))
+	if err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "DeleteFolder:Blogs:" {
+		t.Errorf("calls = %v, want [DeleteFolder:Blogs:]", fc.calls)
 	}
 }

@@ -19,6 +19,11 @@ const (
 	typeStoryOriginal = "newsblur-story-original-v1"
 	typeStoryMetadata = "newsblur-story-metadata-v1"
 	typeStoryCapture  = "newsblur-story-capture-v1"
+	// typeFolder is CUD-addressable (see mutate.go) but not yet listable:
+	// enumerating the folder tree would need NewsBlur's raw nested
+	// "folders" structure, not just the flattened view feed_index.go
+	// already reads -- a separate, larger read-side feature.
+	typeFolder = "newsblur-folder-v1"
 )
 
 const (
@@ -39,6 +44,7 @@ func (Plugin) Types() []cg.NodeType {
 		{Tag: typeStoryOriginal, Container: false, MimeType: htmlMime},
 		{Tag: typeStoryMetadata, Container: false, MimeType: jsonMime},
 		{Tag: typeStoryCapture, Container: false, MimeType: jsonMime},
+		{Tag: typeFolder, Container: false, MimeType: jsonMime},
 	}
 }
 

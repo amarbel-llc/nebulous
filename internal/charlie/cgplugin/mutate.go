@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
@@ -28,6 +29,11 @@ type Client interface {
 	RenameFeed(ctx context.Context, feedID int, title string) (json.RawMessage, error)
 	MoveFeed(ctx context.Context, feedID int, inFolder, toFolder string) (json.RawMessage, error)
 	Unsubscribe(ctx context.Context, feedID int, inFolder string) (json.RawMessage, error)
+	CreateFolder(ctx context.Context, folderName, parentFolder string) (json.RawMessage, error)
+	RenameFolder(ctx context.Context, folderName, newFolderName, inFolder string) (json.RawMessage, error)
+	DeleteFolder(ctx context.Context, folderName, inFolder string) (json.RawMessage, error)
+	MoveFolder(ctx context.Context, folderName, inFolder, toFolder string) (json.RawMessage, error)
+	Subscribe(ctx context.Context, feedURL, folder string) (json.RawMessage, error)
 }
 
 var _ Client = (*newsblur.Client)(nil)
@@ -94,11 +100,44 @@ type feedPatchBody struct {
 	InFolder *string `json:"in_folder,omitempty"`
 }
 
-// CreateNode supports exactly one node shape: story/{hash}, which stars
-// the story. Feeds, tags, and folders are not creatable through this
-// plugin in this pass (subscribe assigns feed_id server-side, so the
-// caller cannot name the target URI up front the way CreateNode requires;
-// folders have no URI shape in this plugin at all).
+// folderPatchBody is PatchNode's payload for a folder node. Name renames
+// the folder in place (keeping its parent); ToFolder moves it under a
+// new parent (keeping its name). Both may fire from one call: a rename
+// is applied first (against the folder's current parent), then a move
+// (against the now-renamed name) -- mirroring feedPatchBody's
+// rename-then-move order.
+type folderPatchBody struct {
+	Name     *string `json:"name,omitempty"`
+	ToFolder *string `json:"to_folder,omitempty"`
+}
+
+// folderPathSeparator is NewsBlur's own nested-folder join convention
+// (verified against samuelclay/NewsBlur's UserSubscriptionFolders.
+// flatten_folders, whose own docstring documents nested paths like
+// "Parent - Child - Grandchild"). nebulous's existing FeedRef.Folder
+// field (internal/bravo/tools/feed_index.go, via the
+// flat_folders_with_feeds API field) already uses this exact
+// convention, so folder nodes reuse it rather than inventing a
+// slash-hierarchical URI shape NewsBlur itself doesn't speak.
+const folderPathSeparator = " - "
+
+// splitFolderPath splits a folder's full path into its own (leaf) name
+// and its parent's full path -- parentPath is empty for a top-level
+// folder. A folder literally named containing " - " is ambiguous with
+// nesting; that is NewsBlur's own join convention's pre-existing
+// limitation (flatten_folders has the same ambiguity), not something
+// resolvable client-side.
+func splitFolderPath(path string) (ownName, parentPath string) {
+	if i := strings.LastIndex(path, folderPathSeparator); i >= 0 {
+		return path[i+len(folderPathSeparator):], path[:i]
+	}
+	return path, ""
+}
+
+// CreateNode supports story/{hash} (star) and folder/{path} (create a
+// folder). Feeds are not creatable this way -- subscribe assigns
+// feed_id server-side, so the caller cannot name the target URI up
+// front; see CreateChild (create_child.go) instead.
 func (Plugin) CreateNode(ctx context.Context, node *url.URL, body io.Reader, typ string) error {
 	if node == nil {
 		return fmt.Errorf("newsblur plugin: CreateNode requires a node URI")
@@ -108,14 +147,20 @@ func (Plugin) CreateNode(ctx context.Context, node *url.URL, body io.Reader, typ
 	}
 
 	segs := pathSegments(node)
-	if len(segs) != 2 || segs[0] != "story" {
-		return fmt.Errorf("newsblur plugin: CreateNode only supports story/{hash}, got %s", node)
+	switch {
+	case len(segs) == 2 && segs[0] == "story":
+		return createStory(ctx, segs[1], body, typ)
+	case len(segs) == 2 && segs[0] == "folder":
+		return createFolder(ctx, segs[1], typ)
+	default:
+		return fmt.Errorf("newsblur plugin: CreateNode only supports story/{hash} and folder/{path}, got %s", node)
 	}
+}
+
+func createStory(ctx context.Context, hash string, body io.Reader, typ string) error {
 	if typ != "" && typ != typeStory {
 		return fmt.Errorf("newsblur plugin: CreateNode: unexpected type %q for story/{hash} (want %q)", typ, typeStory)
 	}
-	hash := segs[1]
-
 	if _, _, ok := index.StoryMetadata(hash); ok {
 		return fmt.Errorf("newsblur plugin: story %s already exists", hash)
 	}
@@ -141,6 +186,29 @@ func (Plugin) CreateNode(ctx context.Context, node *url.URL, body io.Reader, typ
 	return nil
 }
 
+// createFolder needs no body: both the new folder's own name and its
+// parent are already encoded in the target URI (split via
+// splitFolderPath). Unlike createStory, there is no local existence
+// check -- nebulous's index tracks feeds' folder assignments, not
+// folder existence itself (see typeFolder's own comment in
+// traversal.go on the current no-ListRoots scope).
+func createFolder(ctx context.Context, path string, typ string) error {
+	if typ != "" && typ != typeFolder {
+		return fmt.Errorf("newsblur plugin: CreateNode: unexpected type %q for folder/{path} (want %q)", typ, typeFolder)
+	}
+	if path == "" {
+		return fmt.Errorf("newsblur plugin: CreateNode: folder path must not be empty")
+	}
+	ownName, parentPath := splitFolderPath(path)
+
+	mutateMu.Lock()
+	defer mutateMu.Unlock()
+	if _, err := client.CreateFolder(ctx, ownName, parentPath); err != nil {
+		return fmt.Errorf("newsblur plugin: creating folder %q: %w", path, err)
+	}
+	return nil
+}
+
 // PutNode is not supported by this plugin in this pass: none of
 // nebulous's current mutations need full-replace semantics -- the ones
 // that resemble an update (mark_read/unread, rename_feed, move_feed) fit
@@ -150,9 +218,10 @@ func (Plugin) PutNode(ctx context.Context, node *url.URL, body io.Reader) error 
 	return fmt.Errorf("newsblur plugin: PutNode is not supported; use PatchNode for partial updates")
 }
 
-// PatchNode supports story/{hash} (read state) and feed/{id} (title,
-// folder). Absent fields are left untouched; a valid body with no
-// recognized fields present succeeds as a no-op.
+// PatchNode supports story/{hash} (read state), feed/{id} (title,
+// folder), and folder/{path} (name, to_folder). Absent fields are left
+// untouched; a valid body with no recognized fields present succeeds as
+// a no-op.
 func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) error {
 	if node == nil {
 		return fmt.Errorf("newsblur plugin: PatchNode requires a node URI")
@@ -164,8 +233,8 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) erro
 		return fmt.Errorf("newsblur plugin: PatchNode requires a body")
 	}
 	segs := pathSegments(node)
-	if len(segs) != 2 || (segs[0] != "story" && segs[0] != "feed") {
-		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash} and feed/{id}, got %s", node)
+	if len(segs) != 2 {
+		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 
 	raw, err := io.ReadAll(body)
@@ -176,10 +245,16 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) erro
 		return fmt.Errorf("newsblur plugin: PatchNode body must not be empty")
 	}
 
-	if segs[0] == "story" {
+	switch segs[0] {
+	case "story":
 		return patchStory(ctx, segs[1], raw)
+	case "feed":
+		return patchFeed(ctx, segs[1], raw)
+	case "folder":
+		return patchFolder(ctx, segs[1], raw)
+	default:
+		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
-	return patchFeed(ctx, segs[1], raw)
 }
 
 func patchStory(ctx context.Context, hash string, raw []byte) error {
@@ -251,7 +326,41 @@ func patchFeed(ctx context.Context, id string, raw []byte) error {
 	return nil
 }
 
-// DeleteNode supports story/{hash} (unstar) and feed/{id} (unsubscribe).
+// patchFolder supports rename (name) and move (to_folder). Like
+// createFolder, there is no local existence check -- nebulous tracks no
+// folder index of its own (see typeFolder's comment in traversal.go).
+func patchFolder(ctx context.Context, path string, raw []byte) error {
+	if path == "" {
+		return fmt.Errorf("newsblur plugin: PatchNode: folder path must not be empty")
+	}
+	var patch folderPatchBody
+	if err := json.Unmarshal(raw, &patch); err != nil {
+		return fmt.Errorf("newsblur plugin: invalid folder patch body: %w", err)
+	}
+	if patch.Name == nil && patch.ToFolder == nil {
+		return nil
+	}
+
+	ownName, parentPath := splitFolderPath(path)
+
+	mutateMu.Lock()
+	defer mutateMu.Unlock()
+	if patch.Name != nil {
+		if _, err := client.RenameFolder(ctx, ownName, *patch.Name, parentPath); err != nil {
+			return fmt.Errorf("newsblur plugin: renaming folder %q: %w", path, err)
+		}
+		ownName = *patch.Name
+	}
+	if patch.ToFolder != nil {
+		if _, err := client.MoveFolder(ctx, ownName, parentPath, *patch.ToFolder); err != nil {
+			return fmt.Errorf("newsblur plugin: moving folder %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// DeleteNode supports story/{hash} (unstar), feed/{id} (unsubscribe),
+// and folder/{path} (delete).
 func (Plugin) DeleteNode(ctx context.Context, node *url.URL) error {
 	if node == nil {
 		return fmt.Errorf("newsblur plugin: DeleteNode requires a node URI")
@@ -266,8 +375,10 @@ func (Plugin) DeleteNode(ctx context.Context, node *url.URL) error {
 		return deleteStory(ctx, segs[1])
 	case len(segs) == 2 && segs[0] == "feed":
 		return deleteFeed(ctx, segs[1])
+	case len(segs) == 2 && segs[0] == "folder":
+		return deleteFolder(ctx, segs[1])
 	default:
-		return fmt.Errorf("newsblur plugin: DeleteNode only supports story/{hash} and feed/{id}, got %s", node)
+		return fmt.Errorf("newsblur plugin: DeleteNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 }
 
@@ -303,6 +414,22 @@ func deleteFeed(ctx context.Context, id string) error {
 	defer mutateMu.Unlock()
 	if _, err := client.Unsubscribe(ctx, feedID, view.Folder); err != nil {
 		return fmt.Errorf("newsblur plugin: unsubscribing from feed %s: %w", id, err)
+	}
+	return nil
+}
+
+// deleteFolder needs no local existence check for the same reason
+// createFolder/patchFolder don't -- see typeFolder's comment in
+// traversal.go.
+func deleteFolder(ctx context.Context, path string) error {
+	if path == "" {
+		return fmt.Errorf("newsblur plugin: DeleteNode: folder path must not be empty")
+	}
+	ownName, parentPath := splitFolderPath(path)
+	mutateMu.Lock()
+	defer mutateMu.Unlock()
+	if _, err := client.DeleteFolder(ctx, ownName, parentPath); err != nil {
+		return fmt.Errorf("newsblur plugin: deleting folder %q: %w", path, err)
 	}
 	return nil
 }
