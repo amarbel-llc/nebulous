@@ -98,7 +98,7 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
 			}
 			_, err := ml.call(func() (json.RawMessage, error) {
-				return client.DeleteFolder(ctx, p.FolderName)
+				return client.DeleteFolder(ctx, p.FolderName, "")
 			})
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil

@@ -17,8 +17,8 @@ func (c *Client) CreateFolder(ctx context.Context, folderName, parentFolder stri
 
 func (c *Client) RenameFolder(ctx context.Context, folderName, newFolderName, inFolder string) (json.RawMessage, error) {
 	form := url.Values{
-		"folder_name":     {folderName},
-		"new_folder_name": {newFolderName},
+		"folder_to_rename": {folderName},
+		"new_folder_name":  {newFolderName},
 	}
 	if inFolder != "" {
 		form.Set("in_folder", inFolder)
@@ -26,8 +26,11 @@ func (c *Client) RenameFolder(ctx context.Context, folderName, newFolderName, in
 	return c.post(ctx, "/reader/rename_folder", form)
 }
 
-func (c *Client) DeleteFolder(ctx context.Context, folderName string) (json.RawMessage, error) {
-	form := url.Values{"folder_name": {folderName}}
+func (c *Client) DeleteFolder(ctx context.Context, folderName, inFolder string) (json.RawMessage, error) {
+	form := url.Values{"folder_to_delete": {folderName}}
+	if inFolder != "" {
+		form.Set("in_folder", inFolder)
+	}
 	return c.post(ctx, "/reader/delete_folder", form)
 }
 
