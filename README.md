@@ -53,11 +53,15 @@ rather than separate processes:
   (word-search accelerated) rebuild themselves whenever the manifest file's
   mtime changes since the last check, so a concurrently-running
   `nebulous fetch`'s new data becomes visible without restarting the
-  server. Mutation tools (star/unstar, mark read/unread,
-  subscribe/unsubscribe, folders) are the exception and call the NewsBlur
-  API directly; star/unstar and mark read/unread also patch their local
-  cache entry in place afterward so a read immediately reflects the
-  change, instead of lagging until the next `nebulous fetch`.
+  server. Mutation tools that call the NewsBlur API directly are the
+  exception; the ones with no single-node equivalent stay here — batch
+  `mark_read`, whole-feed/whole-corpus `mark_feed_read`/`mark_all_read`,
+  `subscribe` (pending cutting-garden#143's `CreateNode`-return-URI gap),
+  and folder create/rename/delete/`move_folder` (folders aren't yet
+  addressable nodes in the cutting-garden plugin below). Per-story
+  star/unstar/read/unread and per-feed rename/move retired from here —
+  they're covered by the `nebulous-cg` plugin's `NodeMutator`
+  (`create_node`/`patch_node`/`delete_node`, described below) instead.
 
 Query surface: `feed_query` and `story_query` tools (structured filters by
 year/tag/feed/status plus word search), a facets resource

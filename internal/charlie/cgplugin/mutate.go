@@ -86,8 +86,8 @@ type storyPatchBody struct {
 // the local index that would otherwise supply it can lag behind live
 // NewsBlur state by up to a full fetch cycle; silently trusting it here
 // risks a folder-tree move that doesn't match what the caller intended.
-// The pre-existing bespoke move_feed MCP tool (internal/bravo/tools/
-// folders.go) already requires this explicitly for the same reason.
+// The retired bespoke move_feed MCP tool (formerly internal/bravo/tools/
+// folders.go, nebulous#40) required this explicitly for the same reason.
 type feedPatchBody struct {
 	Title    *string `json:"title,omitempty"`
 	Folder   *string `json:"folder,omitempty"`

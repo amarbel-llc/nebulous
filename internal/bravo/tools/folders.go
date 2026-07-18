@@ -108,36 +108,6 @@ func registerFolderCommands(app *command.App, client *newsblur.Client, ml *mutat
 	})
 
 	app.AddCommand(&command.Command{
-		Name: "move_feed",
-		Description: command.Description{
-			Short: "Move a feed to a different folder",
-		},
-		Annotations: mutationAnnotations,
-		Params: []command.Param{
-			{Name: "feed_id", Type: command.Int, Required: true, Description: "Feed ID to move"},
-			{Name: "in_folder", Type: command.String, Required: true, Description: "Current folder containing the feed"},
-			{Name: "to_folder", Type: command.String, Required: true, Description: "Destination folder"},
-		},
-		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			var p struct {
-				FeedID   int    `json:"feed_id"`
-				InFolder string `json:"in_folder"`
-				ToFolder string `json:"to_folder"`
-			}
-			if err := json.Unmarshal(args, &p); err != nil {
-				return command.TextErrorResult("invalid arguments: " + err.Error()), nil
-			}
-			_, err := ml.call(func() (json.RawMessage, error) {
-				return client.MoveFeed(ctx, p.FeedID, p.InFolder, p.ToFolder)
-			})
-			if err != nil {
-				return command.TextErrorResult(err.Error()), nil
-			}
-			return command.TextResult(fmt.Sprintf("Moved feed %d to %q.", p.FeedID, p.ToFolder)), nil
-		},
-	})
-
-	app.AddCommand(&command.Command{
 		Name: "move_folder",
 		Description: command.Description{
 			Short: "Move a folder to a different parent folder",

@@ -64,9 +64,9 @@ stay token-free either way.
       story_query.go               Query engine with structured filters + word search
       story_query_tool.go          story_query MCP tool handler
       facets.go                    Aggregate counts by year/tag/feed/status
-      reader.go                    Mutation tools (mark read/unread, star/unstar)
-      subscriptions.go             subscribe/unsubscribe/rename_feed
-      folders.go                   Folder management
+      reader.go                    Bulk mutation tools (batch mark_read, mark_feed_read, mark_all_read)
+      subscriptions.go             subscribe (unsubscribe/rename_feed retired — see cgplugin's NodeMutator)
+      folders.go                   Folder management + move_folder (move_feed retired — see cgplugin's NodeMutator)
       import_export.go             OPML import/export
       resources.go                 MCP Resource provider with template URI resolution
       feed_index.go                In-memory word index over feed metadata
