@@ -19,10 +19,18 @@ const (
 	typeStoryOriginal = "newsblur-story-original-v1"
 	typeStoryMetadata = "newsblur-story-metadata-v1"
 	typeStoryCapture  = "newsblur-story-capture-v1"
-	// typeFolder is CUD-addressable (see mutate.go) but not yet listable:
-	// enumerating the folder tree would need NewsBlur's raw nested
-	// "folders" structure, not just the flattened view feed_index.go
-	// already reads -- a separate, larger read-side feature.
+	// typeFolder is write-only in this pass: CUD-addressable (see
+	// mutate.go) but has NO read surface at all -- ListRoots' default
+	// case returns no children for it (not a declared container below),
+	// and ReadLeaf never reaches it either (it requires >=3 path
+	// segments; folder/{path} is always exactly 2). Enumerating the
+	// folder tree would need NewsBlur's raw nested "folders" structure,
+	// not just the flattened view feed_index.go already reads -- a
+	// separate, larger read-side feature. Practical consequence: an
+	// empty folder (one with no feed directly in it) is addressable
+	// only by a path the caller already knows -- from having created it,
+	// or from copying a non-empty feed's Folder facet -- there is no way
+	// to look up or confirm a folder's existence otherwise.
 	typeFolder = "newsblur-folder-v1"
 )
 
@@ -44,7 +52,11 @@ func (Plugin) Types() []cg.NodeType {
 		{Tag: typeStoryOriginal, Container: false, MimeType: htmlMime},
 		{Tag: typeStoryMetadata, Container: false, MimeType: jsonMime},
 		{Tag: typeStoryCapture, Container: false, MimeType: jsonMime},
-		{Tag: typeFolder, Container: false, MimeType: jsonMime},
+		// No MimeType: unlike the other Container:false entries above,
+		// nothing ever actually serves bytes for a folder node (see the
+		// no-read-surface comment on typeFolder's declaration) -- MimeType
+		// jsonMime would falsely promise a body ReadLeaf never returns.
+		{Tag: typeFolder, Container: false},
 	}
 }
 

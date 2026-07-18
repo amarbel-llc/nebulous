@@ -126,7 +126,13 @@ const folderPathSeparator = " - "
 // folder. A folder literally named containing " - " is ambiguous with
 // nesting; that is NewsBlur's own join convention's pre-existing
 // limitation (flatten_folders has the same ambiguity), not something
-// resolvable client-side.
+// resolvable client-side. A folder name containing "/" is a second,
+// separate limitation: nodeURL/pathSegments (url.go) split the whole
+// URI on "/", so such a name would produce more than the two segments
+// CreateNode/PatchNode/DeleteNode's folder cases match on, and the node
+// falls through to their "unsupported" error -- the same class of gap
+// nodeURL's own doc comment already flags for tags ("tags containing a
+// slash are not supported (rare)").
 func splitFolderPath(path string) (ownName, parentPath string) {
 	if i := strings.LastIndex(path, folderPathSeparator); i >= 0 {
 		return path[i+len(folderPathSeparator):], path[:i]
