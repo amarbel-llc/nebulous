@@ -126,7 +126,7 @@ func storyNodes(refs []tools.StoryRef, err error) ([]cg.Node, error) {
 			URI:    nodeURL("story", s.Hash),
 			Name:   s.Title,
 			Type:   typeStory,
-			Facets: storyFacetValues(s),
+			Facets: storyFacetValues(s, ageBandNow()),
 		})
 	}
 	return nodes, nil

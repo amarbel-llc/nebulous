@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"github.com/friedenberg/nebulous/internal/bravo/tools"
@@ -21,10 +22,46 @@ const (
 	facetStoryTag = "story_tag"
 	facetFeed     = "feed"
 	facetRead     = "read"
+	facetAgeBand  = "age_band" // VOLATILE: a story's published date vs today (§11.3)
 
 	facetFolder = "folder"
 	facetActive = "active"
 )
+
+// The age_band closed domain: a total partition of time relative to the
+// current host-local day, so every story occupies exactly one bucket at
+// every instant. Order renders recency-first (most urgent/freshest last
+// to fall out of relevance).
+const (
+	ageBandToday     = "today"
+	ageBandThisWeek  = "this-week"
+	ageBandThisMonth = "this-month"
+	ageBandOlder     = "older"
+)
+
+// ageBandOrder renders recency-first (descending Order). The literal
+// exists for stable Values ordering in DescribeFacets; the map is the
+// single source at lift time.
+var ageBandOrder = map[string]int64{
+	ageBandToday:     4,
+	ageBandThisWeek:  3,
+	ageBandThisMonth: 2,
+	ageBandOlder:     1,
+}
+
+// ageBandRevalidateAfter is the volatile window (RFC 0012 §11.3): a
+// story crosses buckets at most this + the refresher interval late.
+// Newsblur's own backend (a local index rebuilt on manifest-mtime
+// change, internal/bravo/tools/stale_cache.go) is far cheaper to
+// re-summarize than caldav's REPORT-per-component fetch, so this widens
+// caldav's 15-minute window rather than matching it.
+const ageBandRevalidateAfter = 30 * time.Minute
+
+// ageBandNow is the evaluation clock, injectable for tests. Bucketing
+// quantizes it to the host-local day start (§11.3 evaluation-instant
+// quantization), so summaries memoized at different instants within one
+// day agree exactly.
+var ageBandNow = time.Now
 
 var (
 	_ cg.FacetDescriber = Plugin{}
@@ -51,6 +88,23 @@ func (Plugin) DescribeFacets() []cg.NodeTypeFacets {
 				{
 					Key: facetRead, Label: "Read", Kind: cg.FacetCategorical,
 					Values: []cg.FacetValue{{Key: "read"}, {Key: "unread"}},
+				},
+				{
+					// VOLATILE (RFC 0012 §11.3): bucketing is a function
+					// of (published date, today). The label names the
+					// anchor zone so consumers can reconcile boundaries
+					// (host-local days — NewsBlur's story date carries
+					// no per-feed TZID; absolute times convert).
+					Key:   facetAgeBand,
+					Label: "Age (host-local days)",
+					Kind:  cg.FacetNumericBucket,
+					Values: []cg.FacetValue{
+						{Key: ageBandToday, Order: ageBandOrder[ageBandToday]},
+						{Key: ageBandThisWeek, Order: ageBandOrder[ageBandThisWeek]},
+						{Key: ageBandThisMonth, Order: ageBandOrder[ageBandThisMonth]},
+						{Key: ageBandOlder, Order: ageBandOrder[ageBandOlder]},
+					},
+					RevalidateAfter: ageBandRevalidateAfter,
 				},
 			},
 		},
@@ -215,17 +269,33 @@ func (Plugin) ResolveFacetLabels(
 
 func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter) cg.FacetResult {
 	summary := cg.FacetSummary{}
+	// One evaluation instant for the whole summary (§11.3): stories are
+	// bucketed against the same "now" regardless of where they fall in
+	// the loop, so a summary straddling local midnight can't split one
+	// atomic FacetCounts call across two different "today"s.
+	now := ageBandNow()
+	var matched bool
 	for _, s := range stories {
-		facets := storyFacetValues(s)
+		facets := storyFacetValues(s, now)
 		if !filter.Matches(facets) {
 			continue
 		}
 		liftFacets(summary, facets)
+		matched = true
+	}
+	// §11.3 emission rule: every element FacetCounts summarizes here is
+	// a story (the switch in FacetCounts only ever hands storyFacetCounts
+	// a story list), so any match at all means the volatile age_band
+	// dimension must be present with informative zeros — the
+	// memoization layer's expiry trigger stays correct even when every
+	// bucket is currently empty.
+	if matched {
+		ensureAgeBandPresence(summary)
 	}
 	return cg.FacetResult{Summary: summary, Complete: true}
 }
 
-func storyFacetValues(s tools.StoryRef) map[string][]cg.FacetValue {
+func storyFacetValues(s tools.StoryRef, now time.Time) map[string][]cg.FacetValue {
 	facets := map[string][]cg.FacetValue{
 		facetYear: {{Key: strconv.Itoa(s.Year), Order: int64(s.Year)}},
 		facetFeed: {{Key: strconv.Itoa(s.FeedID)}},
@@ -237,7 +307,66 @@ func storyFacetValues(s tools.StoryRef) map[string][]cg.FacetValue {
 	if len(s.Tags) > 0 {
 		facets[facetStoryTag] = tagFacetValues(s.Tags)
 	}
+	// Unlike caldav's due_band (gated to open VTODOs — "overdue" is
+	// meaningless once a task is done), age_band applies to every
+	// story unconditionally: a read story is exactly as old as an
+	// unread one, and `read` is already its own orthogonal dimension
+	// (§6 FacetFilter composes them) rather than a gate on this one.
+	if key, order := ageBandOf(s.Date, now); key != "" {
+		facets[facetAgeBand] = []cg.FacetValue{{Key: key, Order: order}}
+	}
 	return facets
+}
+
+// ageBandOf buckets a story's published date against the current
+// host-local day — the RFC 0012 §11.3 quantized evaluation instant, so
+// summaries computed at different times within one day agree exactly.
+// Empty key when date is the zero value (no published date recorded).
+func ageBandOf(date time.Time, now time.Time) (key string, order int64) {
+	if date.IsZero() {
+		return "", 0
+	}
+	loc := now.Location()
+	published := date.In(loc)
+	// Built in time.UTC (never DST) rather than loc: since only the
+	// calendar y/m/d is significant here, representing both day-starts
+	// in a fixed offset makes every day exactly 24h, so the day count
+	// below is exact with no DST rounding needed.
+	day := time.Date(published.Year(), published.Month(), published.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	days := int(today.Sub(day) / (24 * time.Hour))
+	switch {
+	case days <= 0:
+		key = ageBandToday
+	case days <= 6:
+		key = ageBandThisWeek
+	case days <= 30:
+		key = ageBandThisMonth
+	default:
+		key = ageBandOlder
+	}
+	return key, ageBandOrder[key]
+}
+
+// ensureAgeBandPresence implements the RFC 0012 §11.3 emission rule:
+// whenever the summarized set contains stories, the volatile age_band
+// dimension is present with informative zeros — the memoization
+// layer's expiry trigger stays correct even when every bucket is
+// currently empty (an empty bucket can fill purely by time passing; a
+// story-free subtree can only gain a story via a data change, which the
+// manifest-mtime token already catches).
+func ensureAgeBandPresence(summary cg.FacetSummary) {
+	hist := summary[facetAgeBand]
+	if hist == nil {
+		hist = cg.FacetHistogram{}
+		summary[facetAgeBand] = hist
+	}
+	for key := range ageBandOrder {
+		if _, ok := hist[key]; !ok {
+			hist[key] = 0
+		}
+	}
 }
 
 func tagFacetValues(tags []string) []cg.FacetValue {
