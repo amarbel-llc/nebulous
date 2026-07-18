@@ -3,7 +3,7 @@ module github.com/friedenberg/nebulous
 go 1.26
 
 require (
-	code.linenisgreat.com/cutting-garden v0.1.25-0.20260718121349-8bec8acfb138
+	code.linenisgreat.com/cutting-garden v0.1.25-0.20260718173229-444932d71062
 	github.com/amarbel-llc/madder/go v0.4.1-0.20260706024145-0063d397ab40
 	github.com/amarbel-llc/piggy/go v0.0.0-20260706021717-a08ad5ae28b3
 	github.com/amarbel-llc/purse-first/libs/dewey v0.3.2
