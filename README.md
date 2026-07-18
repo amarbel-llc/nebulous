@@ -95,9 +95,12 @@ Discover and traverse it via the cutting-garden commands, e.g.
 local cache — no NewsBlur token needed.
 
 Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
-`story_tag`, `feed`, `read` on stories; `folder`, `active` on feeds) via the
-cutting-garden `FacetDescriber`/`FacetCounter`/`FacetLabeler` capabilities —
-see `internal/charlie/cgplugin/facets.go`.
+`story_tag`, `feed`, `read`, `age_band` on stories; `folder`, `active` on
+feeds) via the cutting-garden `FacetDescriber`/`FacetCounter`/`FacetLabeler`
+capabilities — see `internal/charlie/cgplugin/facets.go`. `age_band` is a
+volatile dimension (RFC 0012 §11.3): it buckets a story's published date
+against the current day (`today`/`this-week`/`this-month`/`older`) rather
+than fixed data alone.
 
 ## NixOS / home-manager
 
