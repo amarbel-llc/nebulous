@@ -8,9 +8,9 @@ import (
 	"time"
 
 	cgts "code.linenisgreat.com/cutting-garden/pkgs/traversal_serve"
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
-	"github.com/friedenberg/nebulous/internal/charlie/cgplugin"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
+	"code.linenisgreat.com/nebulous/internal/charlie/cgplugin"
 )
 
 // runTraversalServe implements the RFC 0013 wire-plugin side for

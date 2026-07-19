@@ -9,7 +9,7 @@ import (
 	"time"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 )
 
 // Facet dimension keys. Story dimensions are drawn from the fields

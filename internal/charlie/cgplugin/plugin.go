@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 )
 
 // Index is the read-only NewsBlur index surface the plugin traverses,

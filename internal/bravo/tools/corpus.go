@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 )
 
 const minContentLen = 200

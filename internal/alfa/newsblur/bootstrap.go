@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/friedenberg/nebulous/internal/0/madder"
+	"code.linenisgreat.com/nebulous/internal/0/madder"
 )
 
 // DefaultManifestPath resolves the nebulous manifest location under XDG

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 	"golang.org/x/text/unicode/norm"
 )
 

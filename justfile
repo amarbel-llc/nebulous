@@ -48,7 +48,7 @@ build-go tag="debug":
   madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
   extra_ldflags=""
   if [ -n "$madder_path" ]; then
-    extra_ldflags="$extra_ldflags -X github.com/friedenberg/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
+    extra_ldflags="$extra_ldflags -X code.linenisgreat.com/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
   fi
   base_ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
   ldflags="$base_ldflags $extra_ldflags"

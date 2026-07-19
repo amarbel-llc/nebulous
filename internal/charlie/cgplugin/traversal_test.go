@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 )
 
 // fakeIndex is a canned Index for exercising the plugin's traversal and

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 )
 
 type storyRecord struct {

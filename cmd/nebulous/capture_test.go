@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 )
 
 // memSink is an in-memory newsblur.BlobSink for tests. Kept local per this

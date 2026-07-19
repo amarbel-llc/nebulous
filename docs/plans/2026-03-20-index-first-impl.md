@@ -130,7 +130,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
 type storyRecord struct {
@@ -868,7 +868,7 @@ package tools
 import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
 func RegisterAll(client *newsblur.Client) (*command.App, server.ResourceProvider) {

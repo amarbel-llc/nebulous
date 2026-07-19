@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
 
 func main() {

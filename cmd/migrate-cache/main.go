@@ -28,8 +28,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/0/madder"
-	"github.com/friedenberg/nebulous/internal/0/manifest"
+	"code.linenisgreat.com/nebulous/internal/0/madder"
+	"code.linenisgreat.com/nebulous/internal/0/manifest"
 )
 
 func main() {

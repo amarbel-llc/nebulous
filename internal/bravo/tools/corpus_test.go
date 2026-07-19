@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 )
 
 func testCacheOnlyClient(t *testing.T) *newsblur.Client {

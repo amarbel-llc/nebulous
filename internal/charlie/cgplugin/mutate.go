@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 )
 
 var _ cg.NodeMutator = Plugin{}

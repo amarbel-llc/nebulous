@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/friedenberg/nebulous/internal/alfa/capture"
-	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
-	"github.com/friedenberg/nebulous/internal/bravo/tools"
+	"code.linenisgreat.com/nebulous/internal/alfa/capture"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 )
 
 // defaultCaptureStoreId is the madder blob-store id cutting-garden

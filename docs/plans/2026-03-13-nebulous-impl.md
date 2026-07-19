@@ -23,7 +23,7 @@
 **Step 1: Create go.mod**
 
 ```
-module github.com/friedenberg/nebulous
+module code.linenisgreat.com/nebulous
 
 go 1.23.0
 
@@ -707,7 +707,7 @@ package tools
 
 import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
 func RegisterAll(client *newsblur.Client) *command.App {
@@ -732,7 +732,7 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
-	"github.com/friedenberg/nebulous/internal/newsblur"
+	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
 func registerFeedCommands(app *command.App, client *newsblur.Client) {
@@ -1030,8 +1030,8 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
-	"github.com/friedenberg/nebulous/internal/newsblur"
-	"github.com/friedenberg/nebulous/internal/tools"
+	"code.linenisgreat.com/nebulous/internal/newsblur"
+	"code.linenisgreat.com/nebulous/internal/tools"
 )
 
 func main() {
