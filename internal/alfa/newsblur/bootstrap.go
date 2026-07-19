@@ -25,7 +25,7 @@ func DefaultManifestPath() string {
 
 // NewDefaultStore initializes the madder blob store nebulous's persistent
 // cache uses, bound to ctx — the "new store, then init it" sequence
-// previously duplicated verbatim across cmd/nebulous and cmd/nebulous-cg.
+// previously duplicated verbatim across every nebulous binary.
 func NewDefaultStore(ctx context.Context) (*madder.Store, error) {
 	store, err := madder.NewStore(ctx)
 	if err != nil {
@@ -39,7 +39,7 @@ func NewDefaultStore(ctx context.Context) (*madder.Store, error) {
 
 // NewDefaultCacheOnlyClient builds a cache-only Client (no NewsBlur token,
 // no HTTP access) against the default XDG-resolved manifest + madder store —
-// the bootstrap every read-only consumer (nebulous-cg, traversal-serve,
+// the bootstrap every read-only consumer (traversal-serve,
 // corpus-list/corpus-read) needs. Unlike the live-client path, a cache-only
 // client has no fallback without a resolvable manifest, so an empty path is
 // an error here rather than a silent no-cache degrade.

@@ -39,8 +39,8 @@ var _ Index = (*tools.ReadIndex)(nil)
 
 // Plugin is the cutting-garden scheme plugin for newsblur://. It is a
 // zero-size identity; the read index it serves is injected via SetIndex
-// by the composition root (cmd/nebulous-cg), mirroring the caldav
-// plugin's SetConfiguredAccounts.
+// by the composition root (cmd/nebulous's traversal-serve mode), mirroring
+// the caldav plugin's SetConfiguredAccounts.
 type Plugin struct{}
 
 // Schemes reports the URI scheme this plugin handles.

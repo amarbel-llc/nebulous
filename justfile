@@ -34,7 +34,7 @@ lint-worktree:
 codemod-fmt-tree:
   nix fmt
 
-# Debug build of all nebulous binaries (nebulous, migrate-cache, nebulous-cg).
+# Debug build of all nebulous binaries (nebulous, migrate-cache).
 # Pass tag=release for a stripped production build.
 [group('build')]
 build-go tag="debug":
@@ -60,7 +60,6 @@ build-go tag="debug":
   if [ -n "$(echo $ldflags)" ]; then ldflags_arg=(-ldflags "$ldflags"); fi
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous       ./cmd/nebulous
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/migrate-cache  ./cmd/migrate-cache
-  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous-cg    ./cmd/nebulous-cg
 
 # Reproducible nix build — the primary release artifact.
 [group('build')]
@@ -82,7 +81,7 @@ test-bats *args: build-go
 # End-to-end RFC 0013 check: spawn `nebulous traversal-serve` as an
 # out-of-process wire plugin from a REAL cutting-garden binary (via a
 # [[plugins]] traversalPlugins stanza) and confirm newsblur:// traversal +
-# read_facets work identically to the linked nebulous-cg path — nebulous#40.
+# read_facets work — nebulous#40.
 # Usage: just debug-verify-traversal-serve /path/to/cutting-garden
 [group('debug')]
 debug-verify-traversal-serve cg_bin: build-go
@@ -131,32 +130,11 @@ debug-flake-update-input input:
 codemod-generate-facades:
   DAGNABIT_CEILING_DIRECTORIES="{{justfile_directory()}}" dagnabit export
 
-# Run the nebulous-cg cutting-garden plugin binary against the local
-# cache, e.g. `just explore-cg list newsblur://feeds`.
-# Read-only traversal of the newsblur:// scheme; no token needed.
-[group('explore')]
-explore-cg *args: build-go
-  build/debug/nebulous-cg {{args}}
-
 # Populate the local persistent store from the NewsBlur API.
 # Requires NEWSBLUR_TOKEN in the environment (set via .secrets.env / direnv).
 [group('explore')]
 explore-fetch: build-go
   ./build/debug/nebulous fetch
-
-# List the MCP tool names nebulous-cg exposes, by round-tripping
-# initialize + tools/list over stdio. Verifies tools registered by
-# cutting-garden's shared cgapp surface (e.g. read_facets) come through
-# after a dependency bump — nebulous#48.
-[group('explore')]
-explore-cg-mcp-tools: build-go
-  #!/usr/bin/env bash
-  set -euo pipefail
-  {
-    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
-    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-  } | ./build/debug/nebulous-cg mcp | tail -1 | jq -r '.result.tools[].name'
 
 # Build and install the MCP server to ~/.claude.json.
 install-dev: build-nix

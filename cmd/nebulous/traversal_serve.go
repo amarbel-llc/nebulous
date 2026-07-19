@@ -14,15 +14,15 @@ import (
 )
 
 // runTraversalServe implements the RFC 0013 wire-plugin side for
-// newsblur://: the same cgplugin.Plugin{} cmd/nebulous-cg links in-process
-// (RootProvider/LeafReader/FacetDescriber/FacetCounter/FacetVersioner/
-// FacetLabeler/NodeMutator/ContainerCreator/BodyDescriber), served
-// out-of-process so cutting-garden's main binary can dispatch newsblur://
-// through a [[plugins]] traversalPlugins stanza instead of the separate
-// nebulous-cg MCP child (nebulous#40). Capability advertisement is
-// type-assertion-driven on the SDK side, so every interface cgplugin.Plugin
-// implements is advertised automatically — no capability list to maintain
-// here.
+// newsblur://: it serves cgplugin.Plugin{} (RootProvider/LeafReader/
+// FacetDescriber/FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/
+// ContainerCreator/BodyDescriber) out-of-process, so cutting-garden's main
+// binary can dispatch newsblur:// through a [[plugins]] traversalPlugins
+// stanza — the sole way newsblur:// reaches cutting-garden, now that the
+// earlier linked-plugin binary (cmd/nebulous-cg) has been retired
+// (nebulous#40). Capability advertisement is type-assertion-driven on the
+// SDK side, so every interface cgplugin.Plugin implements is advertised
+// automatically — no capability list to maintain here.
 func runTraversalServe(ctx context.Context) int {
 	token := os.Getenv("NEWSBLUR_TOKEN")
 	client, err := buildTraversalServeClient(ctx, token)
@@ -105,11 +105,10 @@ func runTraversalServe(ctx context.Context) int {
 	return 0
 }
 
-// buildTraversalServeClient mirrors cmd/nebulous-cg's buildClient: a
-// cache-only client when no token is set (reads still work; mutation stays
-// unavailable since cgplugin.SetClient is never called), or a live+cache
-// client otherwise — the same attachCache pattern this file's other
-// subcommands (fetch, serve mcp) already use.
+// buildTraversalServeClient builds a cache-only client when no token is set
+// (reads still work; mutation stays unavailable since cgplugin.SetClient is
+// never called), or a live+cache client otherwise — the same attachCache
+// pattern this file's other subcommands (fetch, serve mcp) already use.
 func buildTraversalServeClient(ctx context.Context, token string) (*newsblur.Client, error) {
 	if token == "" {
 		return newsblur.NewDefaultCacheOnlyClient(ctx)

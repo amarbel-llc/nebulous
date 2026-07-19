@@ -11,15 +11,17 @@ One Go module, two surfaces over one local store:
 1. **NewsBlur MCP server** (`nebulous serve mcp`) — serves feeds, stories,
    subscriptions, folders, and OPML import/export from a local persistent
    index rather than the live API.
-2. **cutting-garden newsblur plugin** (`nebulous-cg`) — exposes the same
-   local index as a structured tree under the `newsblur://` URI scheme
-   (feeds / stories / tags, with a per-story content + original leaf),
+2. **cutting-garden newsblur plugin** (`nebulous traversal-serve`) — exposes
+   the same local index as a structured tree under the `newsblur://` URI
+   scheme (feeds / stories / tags, with a per-story content + original leaf),
    implementing the cutting-garden plugin SDK's `RootProvider` /
-   `RootLister` / `LeafReader`. Read-only by default; no token required.
-   Optionally becomes read-write when `NEWSBLUR_TOKEN` is set, implementing
-   `NodeMutator` (`create_node`/`patch_node`/`delete_node` — star/unstar,
-   mark_read/mark_unread, unsubscribe, rename_feed/move_feed, folder
-   create/rename/delete/move) and `ContainerCreator` (subscribe, via
+   `RootLister` / `LeafReader`. Served as an RFC 0013 wire plugin —
+   cutting-garden's own main binary spawns it over an AF_UNIX rendezvous
+   socket per a `[[plugins]]` config stanza. Read-only by default; no token
+   required. Optionally becomes read-write when `NEWSBLUR_TOKEN` is set,
+   implementing `NodeMutator` (`create_node`/`patch_node`/`delete_node` —
+   star/unstar, mark_read/mark_unread, unsubscribe, rename_feed/move_feed,
+   folder create/rename/delete/move) and `ContainerCreator` (subscribe, via
    `create_node` against the feeds root — cutting-garden#143's
    server-assigned-identity shape).
 
@@ -62,8 +64,8 @@ rather than separate processes:
   `mark_all_read` (bulk operations no single addressable node can express).
   Every per-node mutation (star/unstar, read/unread, feed rename/move/
   unsubscribe/subscribe, folder create/rename/delete/move) is covered by
-  the `nebulous-cg` plugin's `NodeMutator`/`ContainerCreator` (described
-  below) instead, and has retired from here.
+  the `nebulous traversal-serve` plugin's `NodeMutator`/`ContainerCreator`
+  (described below) instead, and has retired from here.
 
 Query surface: `feed_query` and `story_query` tools (structured filters by
 year/tag/feed/status plus word search), a facets resource
@@ -72,9 +74,13 @@ year/tag/feed/status plus word search), a facets resource
 
 ## cutting-garden newsblur plugin
 
-`nebulous-cg` is a cutting-garden CLI with the `newsblur://` scheme plugin
-baked in (`internal/charlie/cgplugin`, over the `tools.ReadIndex` façade).
-It serves the same local index as a content-addressable traversal tree:
+`nebulous traversal-serve` serves the `newsblur://` scheme plugin
+(`internal/charlie/cgplugin`, over the `tools.ReadIndex` façade) as an RFC
+0013 wire plugin — cutting-garden's own main binary spawns it per a
+`[[plugins]]` config stanza (`command = ["nebulous"]`, `schemes =
+["newsblur"]`) and dispatches `newsblur://` through it, so the tools appear
+under cutting-garden's own MCP surface rather than a separate child. It
+serves the same local index as a content-addressable traversal tree:
 
 ```
 newsblur://feeds                  the subscription list (→ feeds)
@@ -96,9 +102,12 @@ for uncaptured formats. It exposes the receipt's markl-id and when it was
 captured; it does not walk the RFC 0002 receipt merkle tree itself — a
 madder-aware consumer resolves it further via `madder://blobs/<digest>`.
 
-Discover and traverse it via the cutting-garden commands, e.g.
-`nebulous-cg health` or `nebulous-cg list newsblur://feeds`. Reads only the
-local cache — no NewsBlur token needed.
+Discover and traverse it via the cutting-garden commands once the plugin is
+wired up, e.g. `cutting-garden health` or `cutting-garden list
+newsblur://feeds`. Reads only the local cache — no NewsBlur token needed.
+`just debug-verify-traversal-serve /path/to/cutting-garden` drives the same
+path locally against a real `cutting-garden` binary for a quick sanity
+check.
 
 When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
 `NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
@@ -127,8 +136,8 @@ than fixed data alone.
 The flake exports producer modules (`circus-host-integration(7)`'s
 self-passing convention, mirroring `cutting-garden`'s own module shape):
 
-- `nixosModules.default` (`services.nebulous`) — installs `nebulous` +
-  `nebulous-cg`, and runs `nebulous fetch` on a single periodic systemd
+- `nixosModules.default` (`services.nebulous`) — installs `nebulous`, and
+  runs `nebulous fetch` on a single periodic systemd
   timer (`fetchInterval`, default `1h`) so a host's local cache stays
   warm without a manual invocation. `environmentFile` is the secret seam
   for `NEWSBLUR_TOKEN` (a path to `VAR=value` lines — the value never
@@ -165,17 +174,19 @@ nebulous capture [--formats f1,f2] [--store id] [--backfill]
 nebulous corpus-list / corpus-read    Starred-story corpus access (for maneater)
 nebulous generate-plugin | hook | install-mcp
                                       Plugin/install plumbing (no token needed)
-nebulous-cg <command>                 Drive the newsblur:// plugin (health, list, …)
+nebulous traversal-serve              RFC 0013 wire plugin: serve newsblur:// for a
+                                      cutting-garden [[plugins]] stanza (not meant for
+                                      direct interactive use — cutting-garden spawns it)
 ```
 
 ## Auth & configuration
 
 - `NEWSBLUR_TOKEN` (NewsBlur session cookie) is required for `serve mcp` and
   `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv). The
-  corpus, plugin, and `nebulous-cg` subcommands read only the local store
-  and need no token. `nebulous-cg` optionally becomes read-write (mutations
+  corpus and `traversal-serve` subcommands read only the local store and
+  need no token. `traversal-serve` optionally becomes read-write (mutations
   via `create_node`/`patch_node`/`delete_node`) when `NEWSBLUR_TOKEN` is
-  set; without it, `nebulous-cg` stays read-only exactly as before.
+  set; without it, it stays read-only exactly as before.
 
 ## Development
 
@@ -183,11 +194,12 @@ The build entrypoint is the justfile:
 
 ```sh
 just build          # build-go + build-nix
-just build-go       # debug build → build/debug/{nebulous,migrate-cache,nebulous-cg}
+just build-go       # debug build → build/debug/{nebulous,migrate-cache}
 just build-nix      # reproducible Nix build (buildGoApplication + gomod2nix)
 just test           # go tests + bats lanes (zz-tests_bats/)
 just install-dev    # nix build + install MCP server config
-just cg ...         # run nebulous-cg against the local cache (e.g. just cg list newsblur://feeds)
+just debug-verify-traversal-serve /path/to/cutting-garden
+                    # RFC 0013 wire-plugin check against a real cutting-garden binary
 ```
 
 After changing Go dependencies: `go mod tidy && gomod2nix` (the devShell's

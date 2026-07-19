@@ -1,6 +1,6 @@
-# home-manager module: install nebulous (+ nebulous-cg) into a user
-# environment. `nebulous fetch`/`nebulous-cg`/`nebulous serve mcp` are run
-# interactively or launched by an MCP client (claude/clown, or a user moxy
+# home-manager module: install nebulous into a user
+# environment. `nebulous fetch`/`nebulous traversal-serve`/`nebulous serve mcp`
+# are run interactively or launched by an MCP client (claude/clown, or a user moxy
 # child) on a personal workstation, so this module manages the package
 # only — there is no long-running or periodic unit to define here (the
 # periodic-fetch timer is a host concern; see nix/nixos-module.nix). This

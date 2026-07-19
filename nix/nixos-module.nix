@@ -1,4 +1,4 @@
-# NixOS module: install nebulous (+ nebulous-cg) on PATH and run `nebulous
+# NixOS module: install nebulous on PATH and run `nebulous
 # fetch` on a single periodic systemd timer, so a host keeps its local
 # NewsBlur cache warm without a manual `nebulous fetch` invocation.
 # `nebulous fetch` itself now folds in the multi-format capture-via-chrest
@@ -134,7 +134,7 @@ in
       type = types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "nebulous.packages.\${system}.default";
-      description = "The nebulous package to install (provides nebulous + nebulous-cg).";
+      description = "The nebulous package to install.";
     };
 
     environmentFile = mkOption {

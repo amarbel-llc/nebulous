@@ -132,7 +132,6 @@
 
           subPackages = [
             "cmd/nebulous"
-            "cmd/nebulous-cg"
           ];
 
           postInstall = ''

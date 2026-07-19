@@ -10,18 +10,18 @@ from a local persistent index, enabling Claude to interact with feeds, stories,
 subscriptions, folders, and OPML import/export over JSON-RPC stdio. The same
 local index is also exposed as a structured `newsblur://` tree to the
 [cutting-garden](https://github.com/amarbel-llc/cutting-garden) capture/traversal
-framework via the `nebulous-cg` plugin binary.
+framework via `nebulous traversal-serve`, an RFC 0013 wire plugin cutting-garden's
+own main binary spawns.
 
 Built on `go-mcp` from `github.com/amarbel-llc/purse-first/libs/go-mcp`.
 
 ## Build & Run
 
 ``` sh
-just build-go            # Debug build → build/debug/{nebulous,migrate-cache,nebulous-cg}
+just build-go            # Debug build → build/debug/{nebulous,migrate-cache}
 just build-go release    # Release build (stripped)
 just build-nix           # Nix build (reproducible, generates plugin.json)
 just install-dev         # Nix build + install MCP server to ~/.claude.json
-just cg list newsblur://feeds   # Drive the cutting-garden newsblur plugin
 just debug-verify-traversal-serve /path/to/cutting-garden  # RFC 0013 wire-plugin check
 ```
 
@@ -35,8 +35,8 @@ go-sync-wrap hook regenerates `gomod2nix.toml` automatically after `go get` /
 `NEWSBLUR_TOKEN` env var (NewsBlur session cookie) is required at runtime for
 `serve mcp` and `fetch`. Store it in `.secrets.env` (gitignored, loaded by
 direnv via `.envrc`). The subcommands `generate-plugin`, `hook`, `install-mcp`,
-`corpus-*`, and the `nebulous-cg` plugin read only the local store and do not
-require a token. `nebulous-cg` optionally becomes read-write when
+`corpus-*`, and `traversal-serve` read only the local store and do not
+require a token. `traversal-serve` optionally becomes read-write when
 `NEWSBLUR_TOKEN` is set: its plugin gains `NodeMutator` support
 (`create_node`/`patch_node`/`delete_node`), mapping to
 star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed/folder
@@ -49,11 +49,11 @@ server-side (cutting-garden#143). Reads stay token-free either way.
     cmd/nebulous/main.go           Entry point: parses args, creates client, starts MCP server
     cmd/nebulous/capture.go        `nebulous capture` subcommand: the gap-filling capture scan
     cmd/nebulous/traversal_serve.go `nebulous traversal-serve`: RFC 0013 wire-plugin mode ---
-                                    serves the same cgplugin.Plugin out-of-process, for a
-                                    cutting-garden `[[plugins]]` stanza (`command = ["nebulous"]`,
-                                    `schemes = ["newsblur"]`) instead of the linked nebulous-cg
-                                    binary below
-    cmd/nebulous-cg/main.go        cutting-garden CLI with the newsblur:// plugin baked in
+                                    serves cgplugin.Plugin out-of-process, for a cutting-garden
+                                    `[[plugins]]` stanza (`command = ["nebulous"]`,
+                                    `schemes = ["newsblur"]`); the sole way newsblur:// reaches
+                                    cutting-garden (cmd/nebulous-cg, the earlier linked-plugin
+                                    binary, has been retired, nebulous#40)
     internal/0/madder/             In-process madder/go blob store (nebulous's named store)
     internal/0/manifest/           SHA256 manifest tracking (leaf package)
     internal/alfa/newsblur/        HTTP client wrapping NewsBlur REST API
@@ -61,7 +61,7 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       cache.go                     Madder-backed persistent store keyed by a SHA256 manifest
       bootstrap.go                 Shared "resolve XDG manifest path, init madder store" helpers
                                     (DefaultManifestPath/NewDefaultStore/NewDefaultCacheOnlyClient)
-                                    every binary (nebulous, nebulous-cg, traversal-serve) bootstraps through
+                                    every nebulous subcommand bootstraps through
       capture_state.go             Capture watermark + per-(hash,format) completion records
       feeds.go, stories.go, ...    One file per API domain
     internal/alfa/capture/         cutting-garden subprocess client for `nebulous capture`
@@ -91,26 +91,22 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
 
-### Two Ways to Expose cgplugin: Linked vs. Wire Plugin
+### cgplugin as a Wire Plugin
 
-`internal/charlie/cgplugin` is served two ways, both wrapping the identical
-`Plugin{}` value (same capabilities: RootProvider/LeafReader/FacetDescriber/
+`internal/charlie/cgplugin.Plugin{}` (RootProvider/LeafReader/FacetDescriber/
 FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/ContainerCreator/
-BodyDescriber):
+BodyDescriber) is served out-of-process via `nebulous traversal-serve` (RFC
+0013): cutting-garden's own main binary spawns it over an AF_UNIX rendezvous
+socket per a `[[plugins]]` config stanza and dispatches `newsblur://` through
+it, so the tools appear as `cutting-garden_*` on cutting-garden's own MCP
+child rather than a separate one. Capability advertisement is
+type-assertion-driven on the cutting-garden SDK side (`pkgs/traversal_serve`),
+so nothing here maintains its own capability list.
 
-- **Linked** (`cmd/nebulous-cg`): injected in-process into cutting-garden's
-  `cgapp.Build()`, served as its own MCP child (`nebulous-cg_*` tools).
-- **Wire plugin** (`nebulous traversal-serve`, RFC 0013): served
-  out-of-process over an AF_UNIX rendezvous socket; cutting-garden's own
-  main binary spawns it per a `[[plugins]]` config stanza and dispatches
-  `newsblur://` through it, so the tools appear as `cutting-garden_*` rather
-  than a separate child. Capability advertisement is type-assertion-driven
-  on the cutting-garden SDK side (`pkgs/traversal_serve`), so both paths
-  advertise identically with no capability list to keep in sync.
-
-`nebulous-cg` remains until the wire-plugin path is cut over and verified in
-production (nebulous#40); the bespoke `nebulous` MCP (story_query/mark_*/
-opml) is a separate, unrelated child either way.
+An earlier linked-plugin binary (`cmd/nebulous-cg`, injected in-process into
+cutting-garden's `cgapp.Build()`) has been retired now that the wire-plugin
+path is verified in production (nebulous#40). The bespoke `nebulous` MCP
+(story_query/mark_*/opml) remains a separate, unrelated child either way.
 
 ### Three-Phase Architecture: Sync (+ Capture) + Serve
 
@@ -147,8 +143,8 @@ phases of the same `fetch` command rather than separate processes:
   concurrently-running `nebulous fetch`'s new data becomes visible without
   restarting the server --- they no longer build once via `sync.Once` and
   never again. All query tools and resources operate against these local
-  indices. The `nebulous-cg` cutting-garden plugin reads the same indices
-  through `tools.ReadIndex`.
+  indices. `nebulous traversal-serve`'s cutting-garden plugin reads the same
+  indices through `tools.ReadIndex`.
 
 ### Data Flow
 
@@ -165,9 +161,10 @@ off stdout → completion record in the same persistent store.
 Serve: MCP JSON-RPC (stdio) → `command.App` → `tools/*` handlers → in-memory
 index (built from persistent store) → MCP response.
 
-Traverse: `nebulous-cg <cmd>` → cutting-garden SDK → `cgplugin` (RootProvider /
-LeafReader) → `tools.ReadIndex` → in-memory index → cutting-garden node/leaf
-(including `.../capture/{format}` once a receipt is recorded).
+Traverse: `cutting-garden <cmd>` → RFC 0013 wire call → `nebulous traversal-serve`
+→ cutting-garden SDK → `cgplugin` (RootProvider/LeafReader) → `tools.ReadIndex`
+→ in-memory index → cutting-garden node/leaf (including `.../capture/{format}`
+once a receipt is recorded).
 
 ### Key Patterns
 
