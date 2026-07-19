@@ -56,7 +56,7 @@ func runCapture(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	client, err := buildCacheOnlyClient(ctx)
+	client, err := newsblur.NewDefaultCacheOnlyClient(ctx)
 	if err != nil {
 		log.Fatalf("capture: %v", err)
 	}

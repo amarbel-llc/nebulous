@@ -22,6 +22,7 @@ just build-go release    # Release build (stripped)
 just build-nix           # Nix build (reproducible, generates plugin.json)
 just install-dev         # Nix build + install MCP server to ~/.claude.json
 just cg list newsblur://feeds   # Drive the cutting-garden newsblur plugin
+just debug-verify-traversal-serve /path/to/cutting-garden  # RFC 0013 wire-plugin check
 ```
 
 The Nix build uses `buildGoApplication` with `gomod2nix.toml` (not vendorHash).
@@ -47,12 +48,20 @@ server-side (cutting-garden#143). Reads stay token-free either way.
 
     cmd/nebulous/main.go           Entry point: parses args, creates client, starts MCP server
     cmd/nebulous/capture.go        `nebulous capture` subcommand: the gap-filling capture scan
+    cmd/nebulous/traversal_serve.go `nebulous traversal-serve`: RFC 0013 wire-plugin mode ---
+                                    serves the same cgplugin.Plugin out-of-process, for a
+                                    cutting-garden `[[plugins]]` stanza (`command = ["nebulous"]`,
+                                    `schemes = ["newsblur"]`) instead of the linked nebulous-cg
+                                    binary below
     cmd/nebulous-cg/main.go        cutting-garden CLI with the newsblur:// plugin baked in
     internal/0/madder/             In-process madder/go blob store (nebulous's named store)
     internal/0/manifest/           SHA256 manifest tracking (leaf package)
     internal/alfa/newsblur/        HTTP client wrapping NewsBlur REST API
       client.go                    Client struct, request helpers, cache access
       cache.go                     Madder-backed persistent store keyed by a SHA256 manifest
+      bootstrap.go                 Shared "resolve XDG manifest path, init madder store" helpers
+                                    (DefaultManifestPath/NewDefaultStore/NewDefaultCacheOnlyClient)
+                                    every binary (nebulous, nebulous-cg, traversal-serve) bootstraps through
       capture_state.go             Capture watermark + per-(hash,format) completion records
       feeds.go, stories.go, ...    One file per API domain
     internal/alfa/capture/         cutting-garden subprocess client for `nebulous capture`
@@ -81,6 +90,27 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       create_child.go              ContainerCreator.CreateChild: subscribe (server-assigned feed id)
       schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
+
+### Two Ways to Expose cgplugin: Linked vs. Wire Plugin
+
+`internal/charlie/cgplugin` is served two ways, both wrapping the identical
+`Plugin{}` value (same capabilities: RootProvider/LeafReader/FacetDescriber/
+FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/ContainerCreator/
+BodyDescriber):
+
+- **Linked** (`cmd/nebulous-cg`): injected in-process into cutting-garden's
+  `cgapp.Build()`, served as its own MCP child (`nebulous-cg_*` tools).
+- **Wire plugin** (`nebulous traversal-serve`, RFC 0013): served
+  out-of-process over an AF_UNIX rendezvous socket; cutting-garden's own
+  main binary spawns it per a `[[plugins]]` config stanza and dispatches
+  `newsblur://` through it, so the tools appear as `cutting-garden_*` rather
+  than a separate child. Capability advertisement is type-assertion-driven
+  on the cutting-garden SDK side (`pkgs/traversal_serve`), so both paths
+  advertise identically with no capability list to keep in sync.
+
+`nebulous-cg` remains until the wire-plugin path is cut over and verified in
+production (nebulous#40); the bespoke `nebulous` MCP (story_query/mark_*/
+opml) is a separate, unrelated child either way.
 
 ### Three-Phase Architecture: Sync (+ Capture) + Serve
 

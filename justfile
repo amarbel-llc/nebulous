@@ -79,6 +79,34 @@ test-bats *args: build-go
   NEBULOUS_BIN="$(pwd)/build/debug/nebulous" \
     nix develop -c bats {{args}} zz-tests_bats/
 
+# End-to-end RFC 0013 check: spawn `nebulous traversal-serve` as an
+# out-of-process wire plugin from a REAL cutting-garden binary (via a
+# [[plugins]] traversalPlugins stanza) and confirm newsblur:// traversal +
+# read_facets work identically to the linked nebulous-cg path — nebulous#40.
+# Usage: just debug-verify-traversal-serve /path/to/cutting-garden
+[group('debug')]
+debug-verify-traversal-serve cg_bin: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cfgdir="$(mktemp -d)"
+  trap 'rm -rf "$cfgdir"' EXIT
+  mkdir -p "$cfgdir/cutting-garden"
+  cat > "$cfgdir/cutting-garden/config.toml" <<EOF
+  [[plugins]]
+  name = "nebulous"
+  command = ["$(pwd)/build/debug/nebulous"]
+  schemes = ["newsblur"]
+  protocols = ["traversal"]
+  EOF
+  echo "=== cutting-garden list newsblur://feeds (via wire plugin) ==="
+  XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} list newsblur://feeds | head -5
+  echo "=== tools/list + read_facets over MCP (via wire plugin) ==="
+  {
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_facets","arguments":{"uri":"newsblur://feeds"}}}'
+  } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 | jq .
+
 # Verify the flake-pinned madder path is ldflags-injected into the debug build.
 [group('debug')]
 debug-inject-check:

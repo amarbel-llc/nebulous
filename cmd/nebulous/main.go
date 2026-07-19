@@ -10,13 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
-	"github.com/friedenberg/nebulous/internal/0/madder"
 	"github.com/friedenberg/nebulous/internal/alfa/newsblur"
 	"github.com/friedenberg/nebulous/internal/bravo/tools"
 )
@@ -36,7 +34,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous capture [-formats f1,f2] [-store id] [-backfill]\n")
 		fmt.Fprintf(os.Stderr, "                                Run the capture phase standalone, ignoring the interval gate\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
-		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n\n")
+		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n")
+		fmt.Fprintf(os.Stderr, "  nebulous traversal-serve      RFC 0013 wire plugin: serve newsblur:// out-of-process\n")
+		fmt.Fprintf(os.Stderr, "                                for a cutting-garden [[plugins]] traversalPlugins stanza\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME              honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n")
@@ -81,7 +81,7 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
-		client, err := buildCacheOnlyClient(ctx)
+		client, err := newsblur.NewDefaultCacheOnlyClient(ctx)
 		if err != nil {
 			log.Fatalf("corpus-list: %v", err)
 		}
@@ -99,7 +99,7 @@ func main() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
-		client, err := buildCacheOnlyClient(ctx)
+		client, err := newsblur.NewDefaultCacheOnlyClient(ctx)
 		if err != nil {
 			log.Fatalf("corpus-read: %v", err)
 		}
@@ -147,6 +147,12 @@ func main() {
 	if flag.NArg() >= 1 && flag.Arg(0) == "capture" {
 		runCapture(flag.Args()[1:])
 		return
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "traversal-serve" {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+		os.Exit(runTraversalServe(ctx))
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "serve" {
@@ -220,55 +226,21 @@ func serveMCP() {
 	}
 }
 
-// defaultManifestPath resolves the nebulous manifest location under XDG
-// conventions. Returns "" if no home can be resolved (run without cache).
-func defaultManifestPath() string {
-	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
-		return filepath.Join(x, "nebulous", "manifest.json")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share", "nebulous", "manifest.json")
-	}
-	return ""
-}
-
-// buildBlobSink returns an initialized madder-backed sink bound to ctx. ctx
-// governs the lifetime of every madder process invocation.
-func buildBlobSink(ctx context.Context) (*madder.Store, error) {
-	store, err := madder.NewStore(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("madder new store: %w", err)
-	}
-	if err := store.Init(); err != nil {
-		return nil, fmt.Errorf("madder init: %w", err)
-	}
-	return store, nil
-}
-
-// attachCache wires a madder-backed response cache onto client. ctx bounds
-// the lifetime of madder invocations initiated via the cache.
+// attachCache wires a madder-backed response cache onto client, tolerating
+// an unresolvable manifest path by running without a cache (unlike the
+// cache-only path, a live client can still serve reads via the API
+// directly). ctx bounds the lifetime of madder invocations initiated via
+// the cache.
 func attachCache(ctx context.Context, client *newsblur.Client, ttl time.Duration) error {
-	manifestPath := defaultManifestPath()
+	manifestPath := newsblur.DefaultManifestPath()
 	if manifestPath == "" {
 		return nil // no HOME/XDG_DATA_HOME; run without cache
 	}
-	sink, err := buildBlobSink(ctx)
+	store, err := newsblur.NewDefaultStore(ctx)
 	if err != nil {
 		return err
 	}
-	return client.WithCache(manifestPath, ttl, sink)
-}
-
-func buildCacheOnlyClient(ctx context.Context) (*newsblur.Client, error) {
-	manifestPath := defaultManifestPath()
-	if manifestPath == "" {
-		return nil, fmt.Errorf("cannot resolve nebulous manifest path (set HOME or XDG_DATA_HOME)")
-	}
-	sink, err := buildBlobSink(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return newsblur.NewCacheOnlyClient(manifestPath, sink)
+	return client.WithCache(manifestPath, ttl, store)
 }
 
 // defaultCaptureInterval is how often fetchAll's folded-in capture phase
