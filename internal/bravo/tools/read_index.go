@@ -129,6 +129,18 @@ func storyRefOf(rec *storyRecord) StoryRef {
 	}
 }
 
+// SeenFeedTitles returns the accumulating registry of every feed title
+// ever observed via a live /reader/feeds fetch, keyed by feed id
+// (internal/alfa/newsblur's PutSeenFeedTitles). Unlike Feeds, which only
+// reflects the current subscription list, this also resolves feeds the
+// user has since unsubscribed from — the fallback ResolveFacetLabels needs
+// to keep labelling the `feed` facet dimension for stories starred while a
+// feed was still subscribed (nebulous#49). Callers resolving many ids
+// should fetch this once rather than looking up one id at a time.
+func (r *ReadIndex) SeenFeedTitles() map[string]string {
+	return r.client.SeenFeedTitles()
+}
+
 // ManifestPath returns the on-disk location of the persistent cache
 // manifest — a cheap freshness proxy for the whole story corpus (its
 // mtime changes exactly when a fetch run writes new data).

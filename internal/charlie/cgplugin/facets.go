@@ -240,10 +240,13 @@ func manifestVersionToken(manifestPath string) (string, bool, error) {
 	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), true, nil
 }
 
-// ResolveFacetLabels resolves the feed dimension's opaque feed-id keys
-// to their feed titles. No cutting-garden consumer resolves labels yet
-// (cutting-garden#124); this exists so the newsblur plugin is ready the
-// moment one does.
+// ResolveFacetLabels resolves the feed dimension's opaque feed-id keys to
+// their feed titles: the live subscription list first, falling back to
+// SeenFeedTitles' accumulating registry for a feed no longer subscribed —
+// stories starred years ago routinely reference feeds since unsubscribed
+// from, which the live list alone can never resolve (nebulous#49). No
+// cutting-garden consumer resolves labels yet (cutting-garden#124); this
+// exists so the newsblur plugin is ready the moment one does.
 func (Plugin) ResolveFacetLabels(
 	ctx context.Context, dimension string, keys []string,
 ) (map[string]string, error) {
@@ -258,9 +261,17 @@ func (Plugin) ResolveFacetLabels(
 	for _, f := range feeds {
 		titleByID[f.ID] = f.Title
 	}
+	// Fetched once up front rather than per key: keys can run into the
+	// hundreds (every unresolved feed id in a large corpus), and this
+	// registry only grows larger over a store's lifetime.
+	seenTitles := index.SeenFeedTitles()
 	labels := make(map[string]string, len(keys))
 	for _, k := range keys {
 		if title, ok := titleByID[k]; ok {
+			labels[k] = title
+			continue
+		}
+		if title, ok := seenTitles[k]; ok {
 			labels[k] = title
 		}
 	}

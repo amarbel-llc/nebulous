@@ -224,6 +224,46 @@ func TestFacetCounts_NoStoriesNoAgeBand(t *testing.T) {
 	}
 }
 
+// TestResolveFacetLabels_LiveFeedTakesPrecedence pins the common case:
+// a currently-subscribed feed resolves from the live snapshot.
+func TestResolveFacetLabels_LiveFeedTakesPrecedence(t *testing.T) {
+	fi := newFakeIndex()
+	fi.feeds = []tools.FeedRef{{ID: "1", Title: "Live Title"}}
+	fi.seenFeedTitles = map[string]string{"1": "Stale Title"}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	labels, err := Plugin{}.ResolveFacetLabels(context.Background(), facetFeed, []string{"1"})
+	if err != nil {
+		t.Fatalf("ResolveFacetLabels: %v", err)
+	}
+	if got := labels["1"]; got != "Live Title" {
+		t.Errorf("labels[1] = %q, want the live snapshot's title %q", got, "Live Title")
+	}
+}
+
+// TestResolveFacetLabels_FallsBackToSeenFeedTitle pins nebulous#49: a
+// feed id absent from the live subscription list (unsubscribed since)
+// still resolves via SeenFeedTitle's accumulating registry.
+func TestResolveFacetLabels_FallsBackToSeenFeedTitle(t *testing.T) {
+	fi := newFakeIndex()
+	fi.feeds = nil // no longer subscribed to anything
+	fi.seenFeedTitles = map[string]string{"42": "Retired Feed"}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	labels, err := Plugin{}.ResolveFacetLabels(context.Background(), facetFeed, []string{"42", "999"})
+	if err != nil {
+		t.Fatalf("ResolveFacetLabels: %v", err)
+	}
+	if got := labels["42"]; got != "Retired Feed" {
+		t.Errorf("labels[42] = %q, want the seen-titles fallback %q", got, "Retired Feed")
+	}
+	if _, present := labels["999"]; present {
+		t.Errorf("labels[999] present, want absent (no live or seen title for it)")
+	}
+}
+
 func assertFacetCount(
 	t *testing.T,
 	summary cg.FacetSummary,

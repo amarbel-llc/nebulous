@@ -63,6 +63,10 @@ server-side (cutting-garden#143). Reads stay token-free either way.
                                     (DefaultManifestPath/NewDefaultStore/NewDefaultCacheOnlyClient)
                                     every nebulous subcommand bootstraps through
       capture_state.go             Capture watermark + per-(hash,format) completion records
+      feed_titles.go               Accumulating feed-id-to-title registry
+                                    (SeenFeedTitles/PutSeenFeedTitles) that survives a feed
+                                    dropping out of a later /reader/feeds fetch, unlike the
+                                    request cache itself
       feeds.go, stories.go, ...    One file per API domain
     internal/alfa/capture/         cutting-garden subprocess client for `nebulous capture`
       capture.go                   Shells out to `cutting-garden capture`, reads the receipt

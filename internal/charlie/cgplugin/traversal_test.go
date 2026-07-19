@@ -24,6 +24,7 @@ type fakeIndex struct {
 	manifestPath   string
 	captureRecords map[string]tools.CaptureRecordView // key: hash+"/"+format
 	captureFormats []string
+	seenFeedTitles map[string]string
 }
 
 type contentEntry struct {
@@ -71,6 +72,8 @@ func (f *fakeIndex) StoryMetadata(h string) (tools.StoryMetadataView, []byte, bo
 }
 
 func (f *fakeIndex) ManifestPath() string { return f.manifestPath }
+
+func (f *fakeIndex) SeenFeedTitles() map[string]string { return f.seenFeedTitles }
 
 func (f *fakeIndex) CaptureRecord(hash, format string) (tools.CaptureRecordView, bool) {
 	rec, ok := f.captureRecords[hash+"/"+format]

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"regexp"
 	"strings"
@@ -150,6 +151,23 @@ func (idx *feedIndex) build(ctx context.Context) (*feedIndexSnapshot, error) {
 				}
 			}
 		}
+	}
+
+	// Persisted so a feed that later drops out of /reader/feeds
+	// (unsubscribe) keeps its title resolvable from stories starred while
+	// it was subscribed (nebulous#49). Derived from snap.summaries — built
+	// above from the same response — rather than accumulated separately.
+	// This is the only place client.Feeds's response gets persisted this
+	// way; a future direct caller of client.Feeds bypassing feedIndex
+	// would need its own call to PutSeenFeedTitles.
+	titles := make(map[string]string, len(snap.summaries))
+	for id, s := range snap.summaries {
+		if s.Title != "" {
+			titles[id] = s.Title
+		}
+	}
+	if err := idx.client.PutSeenFeedTitles(titles); err != nil {
+		log.Printf("feed index: recording seen feed titles: %v (continuing)", err)
 	}
 
 	return snap, nil

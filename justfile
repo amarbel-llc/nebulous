@@ -81,7 +81,8 @@ test-bats *args: build-go
 # End-to-end RFC 0013 check: spawn `nebulous traversal-serve` as an
 # out-of-process wire plugin from a REAL cutting-garden binary (via a
 # [[plugins]] traversalPlugins stanza) and confirm newsblur:// traversal +
-# read_facets work — nebulous#40.
+# read_facets work (nebulous#40), including the `feed` facet dimension's
+# label coverage (nebulous#49).
 # Usage: just debug-verify-traversal-serve /path/to/cutting-garden
 [group('debug')]
 debug-verify-traversal-serve cg_bin: build-go
@@ -105,6 +106,13 @@ debug-verify-traversal-serve cg_bin: build-go
     printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_facets","arguments":{"uri":"newsblur://feeds"}}}'
   } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 | jq .
+  echo "=== feed label coverage on newsblur://stories (nebulous#49) ==="
+  {
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_facets","arguments":{"uri":"newsblur://stories"}}}'
+  } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 \
+    | jq -r '.result.content[0].text | fromjson | (.facets.feed | length) as $total | (.labels.feed | length) as $labelled | "\($labelled)/\($total) feed ids labelled"'
 
 # Verify the flake-pinned madder path is ldflags-injected into the debug build.
 [group('debug')]

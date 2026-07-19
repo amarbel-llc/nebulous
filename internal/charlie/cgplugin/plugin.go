@@ -30,6 +30,7 @@ type Index interface {
 	StoryContent(hash string) (tools.StoryContentView, []byte, bool)
 	StoryOriginal(hash string) ([]byte, bool)
 	StoryMetadata(hash string) (tools.StoryMetadataView, []byte, bool)
+	SeenFeedTitles() map[string]string
 	ManifestPath() string
 	CaptureRecord(storyHash, format string) (tools.CaptureRecordView, bool)
 	CaptureFormats() []string
