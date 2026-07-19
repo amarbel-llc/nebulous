@@ -247,6 +247,13 @@ func manifestVersionToken(manifestPath string) (string, bool, error) {
 // from, which the live list alone can never resolve (nebulous#49). No
 // cutting-garden consumer resolves labels yet (cutting-garden#124); this
 // exists so the newsblur plugin is ready the moment one does.
+//
+// Coverage is permanently partial, not a bug to chase: a feed unsubscribed
+// before this fallback existed was never recorded anywhere, so its stories'
+// feed ids resolve to nothing and fall back to the bare numeric key
+// (RFC 0012 §7 — labelling is presentation-only and non-fatal). Only feeds
+// seen live *after* this shipped are guaranteed to stay resolvable once
+// unsubscribed.
 func (Plugin) ResolveFacetLabels(
 	ctx context.Context, dimension string, keys []string,
 ) (map[string]string, error) {
