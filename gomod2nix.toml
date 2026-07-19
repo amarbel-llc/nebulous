@@ -2,8 +2,8 @@ schema = 3
 
 [mod]
   [mod.'code.linenisgreat.com/cutting-garden']
-    version = 'v0.1.25-0.20260718173229-444932d71062'
-    hash = 'sha256-/Ehc/waN4aAnZAUouKmxRwY3DomsmONS6307HVRKRwI='
+    version = 'v0.1.25-0.20260719094949-020cc3fbbc1d'
+    hash = 'sha256-i+T4bNL1PdWthSH5ONiJ1CPnTuA34LlbwImPGkItahY='
     goVersion = '1.26'
 
   [mod.'filippo.io/age']

@@ -116,6 +116,20 @@ explore-cg *args: build-go
 explore-fetch: build-go
   ./build/debug/nebulous fetch
 
+# List the MCP tool names nebulous-cg exposes, by round-tripping
+# initialize + tools/list over stdio. Verifies tools registered by
+# cutting-garden's shared cgapp surface (e.g. read_facets) come through
+# after a dependency bump — nebulous#48.
+[group('explore')]
+explore-cg-mcp-tools: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  {
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  } | ./build/debug/nebulous-cg mcp | tail -1 | jq -r '.result.tools[].name'
+
 # Build and install the MCP server to ~/.claude.json.
 install-dev: build-nix
   ./result/bin/nebulous install-mcp
