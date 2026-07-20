@@ -9,7 +9,7 @@ Nebulous is a NewsBlur MCP server written in Go. It serves feed and story data
 from a local persistent index, enabling Claude to interact with feeds, stories,
 subscriptions, folders, and OPML import/export over JSON-RPC stdio. The same
 local index is also exposed as a structured `newsblur://` tree to the
-[cutting-garden](https://github.com/amarbel-llc/cutting-garden) capture/traversal
+[cutting-garden](https://code.linenisgreat.com/cutting-garden) capture/traversal
 framework via `nebulous traversal-serve`, an RFC 0013 wire plugin cutting-garden's
 own main binary spawns.
 

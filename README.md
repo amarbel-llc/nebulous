@@ -3,7 +3,7 @@
 NewsBlur MCP server and cutting-garden plugin — a local-first feed/story
 index that serves NewsBlur data to Claude over JSON-RPC stdio, and exposes
 that same index as a structured `newsblur://` tree to the
-[cutting-garden](https://github.com/amarbel-llc/cutting-garden) capture/
+[cutting-garden](https://code.linenisgreat.com/cutting-garden) capture/
 traversal framework.
 
 One Go module, two surfaces over one local store:

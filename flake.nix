@@ -140,7 +140,7 @@
 
           meta = with pkgs.lib; {
             description = "NewsBlur MCP server";
-            homepage = "https://github.com/friedenberg/nebulous";
+            homepage = "https://code.linenisgreat.com/nebulous";
             license = licenses.mit;
           };
         };
