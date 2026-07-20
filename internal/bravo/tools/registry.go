@@ -5,8 +5,8 @@ import (
 	"sync"
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 )
 
 // mutationLock serializes API mutations to prevent concurrent writes

@@ -6,7 +6,7 @@
 
 **Architecture:** Standalone Go module with two internal packages: `newsblur` (HTTP client wrapping the NewsBlur REST API) and `tools` (MCP tool registration and handlers). Entry point creates a `newsblur.Client` from `NEWSBLUR_TOKEN` env var, registers all tools, starts MCP server on stdio.
 
-**Tech Stack:** Go, go-mcp (`github.com/amarbel-llc/purse-first/libs/go-mcp`), `net/http`, Nix flake with purse-first devenvs.
+**Tech Stack:** Go, go-mcp (`code.linenisgreat.com/purse-first/libs/go-mcp`), `net/http`, Nix flake with purse-first devenvs.
 
 **Rollback:** N/A — new project.
 
@@ -27,7 +27,7 @@ module code.linenisgreat.com/nebulous
 
 go 1.23.0
 
-require github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.3
+require code.linenisgreat.com/purse-first/libs/go-mcp v0.0.3
 ```
 
 Run: `cd /home/sasha/eng/repos/nebulous && go mod tidy` (will fetch go-mcp and populate go.sum)
@@ -706,7 +706,7 @@ git commit -m "Add OPML import/export API methods"
 package tools
 
 import (
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
@@ -730,8 +730,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/nebulous/internal/newsblur"
 )
 
@@ -1028,8 +1028,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 	"code.linenisgreat.com/nebulous/internal/newsblur"
 	"code.linenisgreat.com/nebulous/internal/tools"
 )

@@ -27,7 +27,7 @@ One Go module, two surfaces over one local store:
 
 ## NewsBlur MCP server
 
-Built on `go-mcp` from `amarbel-llc/purse-first`. Operates in two distinct
+Built on `go-mcp` from `purse-first` (`code.linenisgreat.com/purse-first`). Operates in two distinct
 modes; sync and capture are now both phases of the same `fetch` command
 rather than separate processes:
 

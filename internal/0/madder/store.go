@@ -28,7 +28,7 @@ import (
 	"code.linenisgreat.com/madder/go/pkgs/madder_env"
 	_ "code.linenisgreat.com/madder/go/pkgs/markl_registrations" // registers the config-digest markl purpose; EncodeWithDigest panics without it
 	"code.linenisgreat.com/madder/go/pkgs/scoped_id"
-	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/errors"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 
 	// The markl interface vocabulary (including the concrete Id type) was
 	// moved upstream to piggy (piggy#183 ownership inversion); madder's

@@ -108,7 +108,7 @@ NewsBlur API → JSON response → command.JSONResult.
 ## Build & Packaging
 
 - Standalone Go module: `code.linenisgreat.com/nebulous`
-- Single dependency: `github.com/amarbel-llc/purse-first/libs/go-mcp`
+- Single dependency: `code.linenisgreat.com/purse-first/libs/go-mcp`
 - Nix flake with stable-first nixpkgs convention, `buildGoModule`
 - `postInstall` runs `$out/bin/nebulous generate-plugin $out`
 - Produces `plugin.json` and `mappings.json` for purse-first marketplace

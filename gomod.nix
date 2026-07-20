@@ -26,7 +26,7 @@
       src = tap.packages.${system}.go-pkgs;
       subPath = "go";
     };
-    "github.com/amarbel-llc/purse-first/libs/go-mcp" = {
+    "code.linenisgreat.com/purse-first/libs/go-mcp" = {
       src = purse-first.packages.${system}.go-pkgs;
       subPath = "libs/go-mcp";
     };

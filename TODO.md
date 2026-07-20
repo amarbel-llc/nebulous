@@ -1,6 +1,6 @@
 - [ ] purse-first go-cli-framework skill references `go-lib-mcp` throughout ---
   should say `go-mcp` (module is
-  `github.com/amarbel-llc/purse-first/libs/go-mcp`)
+  `code.linenisgreat.com/purse-first/libs/go-mcp`)
 - [ ] Add `/api/login` support: accept NEWSBLUR_USER + NEWSBLUR_PASS env vars,
   auto-login and persist session cookie (currently requires pre-obtained session
   cookie via NEWSBLUR_TOKEN)

@@ -13,7 +13,7 @@ local index is also exposed as a structured `newsblur://` tree to the
 framework via `nebulous traversal-serve`, an RFC 0013 wire plugin cutting-garden's
 own main binary spawns.
 
-Built on `go-mcp` from `github.com/amarbel-llc/purse-first/libs/go-mcp`.
+Built on `go-mcp` from `code.linenisgreat.com/purse-first/libs/go-mcp`.
 
 ## Build & Run
 

@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 )
 
 func registerReaderCommands(app *command.App, client *newsblur.Client, ml *mutationLock) {

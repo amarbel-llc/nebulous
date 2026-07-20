@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 )
 
 // feedResourceProvider wraps a ResourceRegistry to handle template URIs

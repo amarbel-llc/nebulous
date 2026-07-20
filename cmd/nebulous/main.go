@@ -15,8 +15,8 @@ import (
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 )
 
 func main() {
