@@ -2,8 +2,23 @@ schema = 3
 
 [mod]
   [mod.'code.linenisgreat.com/cutting-garden']
-    version = 'v0.1.25-0.20260719094949-020cc3fbbc1d'
-    hash = 'sha256-i+T4bNL1PdWthSH5ONiJ1CPnTuA34LlbwImPGkItahY='
+    version = 'v0.1.25-0.20260720113653-19798c5cd386'
+    hash = 'sha256-EWrnpNtSsbUR06sMKMpQxpUhireQmGIKfaC6dXuLFY0='
+    goVersion = '1.26'
+
+  [mod.'code.linenisgreat.com/hyphence/go']
+    version = 'v0.3.0'
+    hash = 'sha256-O6G/2ZXT7JfOrKZISKoxpGTThHG/vQh5JQIfL/ImGoE='
+    goVersion = '1.26'
+
+  [mod.'code.linenisgreat.com/madder/go']
+    version = 'v0.4.5-0.20260720110107-3b9fcba5ddae'
+    hash = 'sha256-pE5abwpLtbZcaQX/JUBQKfun0CZlZSvSyy/4BFtdc0k='
+    goVersion = '1.26'
+
+  [mod.'code.linenisgreat.com/piggy/go']
+    version = 'v0.0.0-20260719231529-e5adf0d2047c'
+    hash = 'sha256-yGDxPSG24fmICY0FjT3yJilXaCmDPhkt7jtrN7sBQto='
     goVersion = '1.26'
 
   [mod.'filippo.io/age']
@@ -20,21 +35,6 @@ schema = 3
     version = 'v1.5.7'
     hash = 'sha256-GlSZOyix7Ct7tOKmSKpGckDjMhTtiYPBTpoWdwGLx5M='
     goVersion = '1.14'
-
-  [mod.'github.com/amarbel-llc/hyphence/go']
-    version = 'v0.2.0'
-    hash = 'sha256-MUI7bEdFr6OMHwzxs/DIjyin+37B4pfs3ICzEWaQwyw='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/madder/go']
-    version = 'v0.4.1-0.20260706024145-0063d397ab40'
-    hash = 'sha256-qOC8D3S1EH+Z55yzgl68uZs36RWym/vtgiKvEHXQLD4='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/piggy/go']
-    version = 'v0.0.0-20260706021717-a08ad5ae28b3'
-    hash = 'sha256-mhy75JxJnJJJyVjVj+g0OckrhspQTF97sJempRh8phs='
-    goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/purse-first/libs/dewey']
     version = 'v0.3.2'

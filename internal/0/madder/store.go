@@ -1,4 +1,4 @@
-// Package madder wraps github.com/amarbel-llc/madder/go as an in-process
+// Package madder wraps code.linenisgreat.com/madder/go as an in-process
 // content-addressed blob store. Nebulous's blobs live in a dedicated
 // named store ("nebulous") inside madder's shared user-XDG tree
 // (~/.local/share/madder/blob_stores/nebulous) — the same store the
@@ -19,21 +19,21 @@ import (
 	"io"
 	"os"
 
-	"github.com/amarbel-llc/madder/go/pkgs/blob_io"
-	"github.com/amarbel-llc/madder/go/pkgs/blob_store_configs"
-	"github.com/amarbel-llc/madder/go/pkgs/blob_stores"
-	"github.com/amarbel-llc/madder/go/pkgs/directory_layout"
-	"github.com/amarbel-llc/madder/go/pkgs/domain_interfaces"
-	"github.com/amarbel-llc/madder/go/pkgs/env_dir"
-	"github.com/amarbel-llc/madder/go/pkgs/madder_env"
-	_ "github.com/amarbel-llc/madder/go/pkgs/markl_registrations" // registers the config-digest markl purpose; EncodeWithDigest panics without it
-	"github.com/amarbel-llc/madder/go/pkgs/scoped_id"
+	"code.linenisgreat.com/madder/go/pkgs/blob_io"
+	"code.linenisgreat.com/madder/go/pkgs/blob_store_configs"
+	"code.linenisgreat.com/madder/go/pkgs/blob_stores"
+	"code.linenisgreat.com/madder/go/pkgs/directory_layout"
+	"code.linenisgreat.com/madder/go/pkgs/domain_interfaces"
+	"code.linenisgreat.com/madder/go/pkgs/env_dir"
+	"code.linenisgreat.com/madder/go/pkgs/madder_env"
+	_ "code.linenisgreat.com/madder/go/pkgs/markl_registrations" // registers the config-digest markl purpose; EncodeWithDigest panics without it
+	"code.linenisgreat.com/madder/go/pkgs/scoped_id"
 	"github.com/amarbel-llc/purse-first/libs/dewey/pkgs/errors"
 
 	// The markl interface vocabulary (including the concrete Id type) was
 	// moved upstream to piggy (piggy#183 ownership inversion); madder's
 	// own domain_interfaces.MarklId is now a type alias into this package.
-	"github.com/amarbel-llc/piggy/go/pkgs/markl"
+	"code.linenisgreat.com/piggy/go/pkgs/markl"
 )
 
 // storeName is the fixed named store nebulous's blobs live in within
