@@ -67,6 +67,24 @@ var mutateMu sync.Mutex
 // root calls it once at startup, alongside SetIndex.
 func SetClient(c Client) { client = c }
 
+// strictUnmarshal decodes a caller-supplied create/patch body strictly: a
+// field json.Unmarshal would otherwise silently drop is instead a
+// rejected, actionable error (cutting-garden#180). Every *PatchBody struct
+// below gates its mutation on "was a recognized field present" -- with a
+// plain json.Unmarshal, a body containing ONLY unrecognized fields (e.g.
+// {"user_tags":[...]} against storyPatchBody, which only recognizes
+// "read") decoded to a struct with every field absent, so patchStory
+// returned nil having called nothing: a false success indistinguishable
+// from a legitimate no-op like {}. DisallowUnknownFields makes that same
+// body a decode error instead, while a body with zero fields (the
+// legitimate no-op case) still decodes cleanly -- there's nothing in it to
+// reject.
+func strictUnmarshal(raw []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
 // storyCreateBody is CreateNode's payload for a story node -- starring it.
 // A genuine creation payload, not a read-shape echo: nebulous's local
 // index only ever holds starred stories (see facets.go's own comment,
@@ -80,6 +98,11 @@ type storyCreateBody struct {
 // patchable in this pass; Starred is deliberately absent -- unstarring
 // goes through DeleteNode instead, since a not-starred story isn't an
 // addressable node this plugin's local index can represent at all.
+// user_tags is create_node-only (storyCreateBody): this Client interface
+// has no method to update tags on an already-starred story independent of
+// starring it (whether re-calling StarStory on one would even change its
+// tags server-side is untested, not just unwired here) -- a body naming
+// it is rejected by strictUnmarshal, not silently ignored (cutting-garden#180).
 type storyPatchBody struct {
 	Read *bool `json:"read,omitempty"`
 }
@@ -178,7 +201,7 @@ func createStory(ctx context.Context, hash string, body io.Reader, typ string) e
 			return fmt.Errorf("newsblur plugin: reading CreateNode body: %w", err)
 		}
 		if len(bytes.TrimSpace(raw)) > 0 {
-			if err := json.Unmarshal(raw, &payload); err != nil {
+			if err := strictUnmarshal(raw, &payload); err != nil {
 				return fmt.Errorf("newsblur plugin: invalid CreateNode body: %w", err)
 			}
 		}
@@ -268,7 +291,7 @@ func patchStory(ctx context.Context, hash string, raw []byte) error {
 		return fmt.Errorf("newsblur plugin: story %s not found", hash)
 	}
 	var patch storyPatchBody
-	if err := json.Unmarshal(raw, &patch); err != nil {
+	if err := strictUnmarshal(raw, &patch); err != nil {
 		return fmt.Errorf("newsblur plugin: invalid story patch body: %w", err)
 	}
 	if patch.Read == nil {
@@ -302,7 +325,7 @@ func patchFeed(ctx context.Context, id string, raw []byte) error {
 		return fmt.Errorf("newsblur plugin: feed %s not found", id)
 	}
 	var patch feedPatchBody
-	if err := json.Unmarshal(raw, &patch); err != nil {
+	if err := strictUnmarshal(raw, &patch); err != nil {
 		return fmt.Errorf("newsblur plugin: invalid feed patch body: %w", err)
 	}
 	if patch.Folder != nil && patch.InFolder == nil {
@@ -340,7 +363,7 @@ func patchFolder(ctx context.Context, path string, raw []byte) error {
 		return fmt.Errorf("newsblur plugin: PatchNode: folder path must not be empty")
 	}
 	var patch folderPatchBody
-	if err := json.Unmarshal(raw, &patch); err != nil {
+	if err := strictUnmarshal(raw, &patch); err != nil {
 		return fmt.Errorf("newsblur plugin: invalid folder patch body: %w", err)
 	}
 	if patch.Name == nil && patch.ToFolder == nil {

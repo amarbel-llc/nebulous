@@ -74,7 +74,7 @@ func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reade
 		if len(bytes.TrimSpace(raw)) == 0 {
 			return nil, fmt.Errorf("newsblur plugin: CreateChild requires a body with a \"url\" field")
 		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
+		if err := strictUnmarshal(raw, &payload); err != nil {
 			return nil, fmt.Errorf("newsblur plugin: invalid CreateChild body: %w", err)
 		}
 	}

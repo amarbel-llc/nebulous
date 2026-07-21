@@ -116,6 +116,20 @@ func TestCreateNodeStarsNewStory(t *testing.T) {
 	}
 }
 
+func TestCreateNodeStoryRejectsUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	const newHash = "123:new"
+	body := bytes.NewReader([]byte(`{"userTags":["a","b"]}`)) // wrong key: user_tags is correct
+	err := Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://story/"+newHash), body, typeStory)
+	if err == nil {
+		t.Fatal("CreateNode with an unrecognized field: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (should have errored before calling the client)", fc.calls)
+	}
+}
+
 func TestCreateNodeErrorsIfStoryExists(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
@@ -194,6 +208,67 @@ func TestPatchNodeStoryErrorsIfAbsent(t *testing.T) {
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/does-not-exist"), body)
 	if err == nil {
 		t.Fatal("PatchNode on a missing story: expected an error, got nil")
+	}
+}
+
+// cutting-garden#180: patch_node on a story with {"user_tags":[...]} used
+// to report success while calling the client zero times -- json.Unmarshal
+// silently drops a field storyPatchBody doesn't recognize (it only has
+// "read"), so `patch.Read == nil` and patchStory returned nil having done
+// nothing. This is the exact reported reproduction: the fix must reject
+// it, not just decode leniently and skip it.
+func TestPatchNodeStoryRejectsUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"user_tags":["a","b"]}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err == nil {
+		t.Fatal("PatchNode with only unrecognized fields: expected an error, got nil (this is cutting-garden#180 -- reporting success while doing nothing)")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (should have errored before calling the client)", fc.calls)
+	}
+}
+
+// A body mixing a recognized field with an unrecognized one must reject
+// the whole body rather than silently applying the recognized half --
+// partial, unannounced fulfillment is its own flavor of false success.
+func TestPatchNodeStoryRejectsUnrecognizedFieldEvenAlongsideRecognizedOne(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"]}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err == nil {
+		t.Fatal("PatchNode with a mix of recognized and unrecognized fields: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (should have errored before calling the client, not partially applied \"read\")", fc.calls)
+	}
+}
+
+func TestPatchNodeFeedRejectsUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"active":false}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	if err == nil {
+		t.Fatal("PatchNode(feed) with an unrecognized field: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
+	}
+}
+
+func TestCreateChildRejectsUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"url":"https://example.com/feed","folderr":"Blogs"}`)) // typo'd field
+	_, err := Plugin{}.CreateChild(context.Background(), mustURL(t, "newsblur://feeds"), body, typeFeed)
+	if err == nil {
+		t.Fatal("CreateChild with an unrecognized field: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none (should have errored before calling the client)", fc.calls)
 	}
 }
 
@@ -448,6 +523,19 @@ func TestPatchNodeFolderRenameAndMoveUsesRenamedNameForMove(t *testing.T) {
 	}
 	if fc.calls[1] != "MoveFolder:NewName:OldParent->NewParent" {
 		t.Errorf("calls[1] = %q, want MoveFolder:NewName:OldParent->NewParent", fc.calls[1])
+	}
+}
+
+func TestPatchNodeFolderRejectsUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"parent":"NewParent"}`)) // wrong key: to_folder is correct
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
+	if err == nil {
+		t.Fatal("PatchNode(folder) with an unrecognized field: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
 	}
 }
 
