@@ -20,8 +20,9 @@ One Go module, two surfaces over one local store:
    socket per a `[[plugins]]` config stanza. Read-only by default; no token
    required. Optionally becomes read-write when `NEWSBLUR_TOKEN` is set,
    implementing `NodeMutator` (`create_node`/`patch_node`/`delete_node` —
-   star/unstar, mark_read/mark_unread, unsubscribe, rename_feed/move_feed,
-   folder create/rename/delete/move) and `ContainerCreator` (subscribe, via
+   star/unstar, mark_read/mark_unread, replace/clear a story's user tags,
+   unsubscribe, rename_feed/move_feed, folder create/rename/delete/move)
+   and `ContainerCreator` (subscribe, via
    `create_node` against the feeds root — cutting-garden#143's
    server-assigned-identity shape).
 
@@ -112,7 +113,10 @@ check.
 When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
 `NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
 `create_child.go`): `create_node`/`patch_node`/`delete_node` on
-`story/{hash}` (star/unstar, read/unread) and `feed/{id}` (rename/move/
+`story/{hash}` (star/unstar, read/unread, and `user_tags` — patch_node
+REPLACES the tag set, an empty array clears it, verified against a real
+NewsBlur account: re-starring with a different tag set drops the old one
+rather than merging) and `feed/{id}` (rename/move/
 unsubscribe); `create_node` against the `feeds` root (subscribe, via
 cutting-garden#143's server-assigned-identity `CreateChild` — NewsBlur
 assigns the feed id, so the tool reports the resulting `feed/{id}` URI

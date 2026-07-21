@@ -15,7 +15,8 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 			Tag: typeStory,
 			Accepts: []string{
 				"application/json (create_node: {\"user_tags\":[...]} to star the story)",
-				"application/json (patch_node: {\"read\":bool} to mark read/unread)",
+				"application/json (patch_node: {\"read\":bool} to mark read/unread; " +
+					"{\"user_tags\":[...]} to REPLACE the tag set, an empty array clears it)",
 			},
 			Example: storyCreateBody{UserTags: []string{"cooking", "blogs"}},
 		},

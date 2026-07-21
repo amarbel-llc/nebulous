@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
@@ -28,6 +29,10 @@ func (f *fakeClient) record(call string) (json.RawMessage, error) {
 
 func (f *fakeClient) StarStory(_ context.Context, hash string, tags []string) (json.RawMessage, error) {
 	return f.record("StarStory:" + hash)
+}
+
+func (f *fakeClient) SetStoryUserTags(_ context.Context, hash string, tags []string) (json.RawMessage, error) {
+	return f.record("SetStoryUserTags:" + hash + ":" + strings.Join(tags, ","))
 }
 
 func (f *fakeClient) UnstarStory(_ context.Context, hash string) (json.RawMessage, error) {
@@ -186,6 +191,93 @@ func TestPatchNodeStoryMarksUnread(t *testing.T) {
 	}
 }
 
+// nebulous#50: patch_node's user_tags REPLACES the story's tag set --
+// verified live against a real account (starring with ["a"] then ["b"]
+// left only "b", not both).
+func TestPatchNodeStorySetsUserTags(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"user_tags":["a","b"]}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "SetStoryUserTags:"+sampleHash+":a,b" {
+		t.Errorf("calls = %v, want [SetStoryUserTags:%s:a,b]", fc.calls, sampleHash)
+	}
+}
+
+// An explicitly-present-but-empty user_tags array clears all tags --
+// distinct from user_tags being absent (TestPatchNodeStoryNoOpWhenUserTags
+// Absent below), the whole reason UserTags is a *[]string rather than a
+// plain []string on storyPatchBody.
+func TestPatchNodeStoryEmptyUserTagsClearsTags(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"user_tags":[]}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 1 || fc.calls[0] != "SetStoryUserTags:"+sampleHash+":" {
+		t.Errorf("calls = %v, want [SetStoryUserTags:%s:] (empty tags)", fc.calls, sampleHash)
+	}
+}
+
+// user_tags absent from the body must leave tags untouched: no
+// SetStoryUserTags call at all, not a call with an empty tag list (that's
+// TestPatchNodeStoryEmptyUserTagsClearsTags' job, a different body).
+func TestPatchNodeStoryNoOpWhenUserTagsAbsent(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"read":true}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	for _, c := range fc.calls {
+		if strings.HasPrefix(c, "SetStoryUserTags:") {
+			t.Errorf("calls = %v, want no SetStoryUserTags call (user_tags was absent)", fc.calls)
+		}
+	}
+}
+
+// read and user_tags both present in one body both fire, same as feed's
+// rename+move combination.
+func TestPatchNodeStoryReadAndUserTagsBothFireFromOneBody(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"]}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
+	}
+	if len(fc.calls) != 2 {
+		t.Fatalf("calls = %v, want 2 (mark read + set tags)", fc.calls)
+	}
+	if fc.calls[0] != "MarkStoriesRead:"+sampleHash {
+		t.Errorf("calls[0] = %q, want MarkStoriesRead:%s", fc.calls[0], sampleHash)
+	}
+	if fc.calls[1] != "SetStoryUserTags:"+sampleHash+":a" {
+		t.Errorf("calls[1] = %q, want SetStoryUserTags:%s:a", fc.calls[1], sampleHash)
+	}
+}
+
+// A non-array user_tags value is a decode error, surfaced with field
+// context rather than a generic "invalid body" message.
+func TestPatchNodeStoryUserTagsWrongTypeErrors(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"user_tags":"not-an-array"}`))
+	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err == nil {
+		t.Fatal("PatchNode with user_tags as a string: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
+	}
+}
+
 // A patch body with `read` absent must be a true no-op: no client call at
 // all, not a degenerate "unread unchanged" call.
 func TestPatchNodeStoryNoOpWhenReadAbsent(t *testing.T) {
@@ -211,16 +303,19 @@ func TestPatchNodeStoryErrorsIfAbsent(t *testing.T) {
 	}
 }
 
-// cutting-garden#180: patch_node on a story with {"user_tags":[...]} used
-// to report success while calling the client zero times -- json.Unmarshal
-// silently drops a field storyPatchBody doesn't recognize (it only has
-// "read"), so `patch.Read == nil` and patchStory returned nil having done
-// nothing. This is the exact reported reproduction: the fix must reject
-// it, not just decode leniently and skip it.
+// cutting-garden#180: patch_node on a story with a field storyPatchBody
+// doesn't declare used to report success while calling the client zero
+// times -- a plain (non-strict) struct decode silently drops fields it
+// doesn't declare, so the mutation-gating check saw nothing to do and
+// returned nil having done nothing. This is the shape of the original
+// reported reproduction (which used "user_tags" -- since promoted to a
+// real patchable field by nebulous#50, so a still-unrecognized name is
+// used here instead): the fix must reject it, not just decode leniently
+// and skip it.
 func TestPatchNodeStoryRejectsUnrecognizedField(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"user_tags":["a","b"]}`))
+	body := bytes.NewReader([]byte(`{"starred":true}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err == nil {
 		t.Fatal("PatchNode with only unrecognized fields: expected an error, got nil (this is cutting-garden#180 -- reporting success while doing nothing)")
@@ -236,7 +331,7 @@ func TestPatchNodeStoryRejectsUnrecognizedField(t *testing.T) {
 func TestPatchNodeStoryRejectsUnrecognizedFieldEvenAlongsideRecognizedOne(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"]}`))
+	body := bytes.NewReader([]byte(`{"read":true,"starred":true}`))
 	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err == nil {
 		t.Fatal("PatchNode with a mix of recognized and unrecognized fields: expected an error, got nil")

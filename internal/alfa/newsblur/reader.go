@@ -49,6 +49,28 @@ func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []str
 	return raw, err
 }
 
+// SetStoryUserTags replaces an already-starred story's tags by re-calling
+// NewsBlur's star endpoint (nebulous#50): mark_story_hash_as_starred
+// REPLACES the existing user_tags with whatever's sent, rather than
+// merging (verified live against a real account: starring with ["a"]
+// then ["b"] left only "b", not both). Unlike StarStory, which omits the
+// user_tags param entirely when userTags is empty (fine for a first
+// star -- there's nothing yet to clear), this always sends the param
+// explicitly, including an explicit empty value, since a caller passing
+// an empty slice here means "clear all tags" and an omitted param does
+// not clear an already-tagged story (verified: an explicit empty value
+// does; whether an omitted param instead leaves existing tags untouched
+// was not directly tested, so this deliberately never relies on that
+// omit behavior at all).
+func (c *Client) SetStoryUserTags(ctx context.Context, storyHash string, userTags []string) (json.RawMessage, error) {
+	form := url.Values{"story_hash": {storyHash}, "user_tags": {strings.Join(userTags, ",")}}
+	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
+	if err == nil {
+		_ = c.PatchCachedStarredStoryHashes(storyHash, "")
+	}
+	return raw, err
+}
+
 func (c *Client) UnstarStory(ctx context.Context, storyHash string) (json.RawMessage, error) {
 	form := url.Values{"story_hash": {storyHash}}
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_unstarred", form)

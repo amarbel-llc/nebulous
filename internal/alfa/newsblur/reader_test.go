@@ -107,6 +107,58 @@ func TestStarStoryPatchesCachedHashList(t *testing.T) {
 	}
 }
 
+// nebulous#50: SetStoryUserTags must send an explicit user_tags= param
+// even when clearing all tags -- unlike StarStory, which omits the param
+// entirely when tags is empty (fine for a first star, since there's
+// nothing yet to clear; verified live against a real account that an
+// omitted param does not clear an already-tagged story's tags the way an
+// explicit empty value does).
+func TestSetStoryUserTagsSendsExplicitEmptyParam(t *testing.T) {
+	var gotForm string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		if !r.PostForm.Has("user_tags") {
+			gotForm = "MISSING"
+		} else {
+			gotForm = "present:" + r.PostForm.Get("user_tags")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	if _, err := c.SetStoryUserTags(context.Background(), "abc", nil); err != nil {
+		t.Fatalf("SetStoryUserTags: %v", err)
+	}
+	if gotForm != "present:" {
+		t.Errorf("user_tags form param = %q, want an explicit empty value sent", gotForm)
+	}
+}
+
+func TestSetStoryUserTagsPatchesCachedHashList(t *testing.T) {
+	server := okServer(t)
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	if err := c.PutCachedStarredStoryHashes(json.RawMessage(`{"starred_story_hashes":["existing"]}`)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := c.SetStoryUserTags(context.Background(), "existing", []string{"a", "b"}); err != nil {
+		t.Fatalf("SetStoryUserTags: %v", err)
+	}
+
+	raw, ok := c.CachedStarredStoryHashes()
+	if !ok {
+		t.Fatal("CachedStarredStoryHashes returned false")
+	}
+	hashes, _ := ParseStarredHashes(raw)
+	if want := []string{"existing"}; !slices.Equal(hashes, want) {
+		t.Errorf("hashes = %v, want %v (SetStoryUserTags on an already-starred story shouldn't duplicate its hash)", hashes, want)
+	}
+}
+
 func TestUnstarStoryPatchesCachedHashList(t *testing.T) {
 	server := okServer(t)
 	defer server.Close()

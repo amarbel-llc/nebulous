@@ -23,6 +23,7 @@ var _ cg.NodeMutator = Plugin{}
 // without a live newsblur.Client.
 type Client interface {
 	StarStory(ctx context.Context, hash string, tags []string) (json.RawMessage, error)
+	SetStoryUserTags(ctx context.Context, hash string, tags []string) (json.RawMessage, error)
 	UnstarStory(ctx context.Context, hash string) (json.RawMessage, error)
 	MarkStoriesRead(ctx context.Context, hashes []string) (json.RawMessage, error)
 	MarkStoryUnread(ctx context.Context, hash string) (json.RawMessage, error)
@@ -50,10 +51,14 @@ var _ Client = (*newsblur.Client)(nil)
 // to a concurrently-running `nebulous fetch` process (nebulous#42,
 // Record/RecordBatch never reload-before-merge -- pre-existing, this
 // plugin's patch calls just add more surface area to it, not a new class
-// of the same bug). Feed rename/move do not patch the cache at all yet
-// and still lag until the next `nebulous fetch`, the same fetch-cadence
-// lag accepted elsewhere in this package (see facets.go's own comment on
-// FacetVersion). The existence checks below (StoryMetadata/FeedMetadata)
+// of the same bug). Feed rename/move and SetStoryUserTags (nebulous#50) do
+// not patch the cache at all yet and still lag until the next `nebulous
+// fetch` -- SetStoryUserTags only patches the cached starred-hash LIST
+// (so the story stays discoverable), not the cached story blob's own
+// user_tags field, so an immediate re-read through cgplugin sees the OLD
+// tags -- the same fetch-cadence lag accepted elsewhere in this package
+// (see facets.go's own comment on FacetVersion). The existence checks
+// below (StoryMetadata/FeedMetadata)
 // read the local index too, so a story/feed that changed very recently
 // through another path may not be visible here yet either -- an accepted
 // best-effort check, not a strict live lookup.
@@ -94,17 +99,25 @@ type storyCreateBody struct {
 	UserTags []string `json:"user_tags,omitempty"`
 }
 
-// storyPatchBody is PatchNode's payload for a story node. Only Read is
-// patchable in this pass; Starred is deliberately absent -- unstarring
-// goes through DeleteNode instead, since a not-starred story isn't an
-// addressable node this plugin's local index can represent at all.
-// user_tags is create_node-only (storyCreateBody): this Client interface
-// has no method to update tags on an already-starred story independent of
-// starring it (whether re-calling StarStory on one would even change its
-// tags server-side is untested, not just unwired here) -- a body naming
-// it is rejected by strictUnmarshal, not silently ignored (cutting-garden#180).
+// storyPatchBody is PatchNode's payload for a story node. Read is a plain
+// *bool (absent vs present is all it needs). UserTags is a *[]string, not
+// []string, because it needs a THIRD state a bare slice can't express:
+// absent (nil pointer, leave tags untouched) vs present-and-empty
+// (non-nil pointer to a zero-length slice, clear all tags) vs
+// present-and-populated (REPLACES the existing set -- verified live
+// against a real account, nebulous#50: re-starring with a different tag
+// set drops the old one rather than merging). A plain []string field
+// can't distinguish the first two: json.Unmarshal leaves an absent
+// field's slice nil, indistinguishable from an explicit empty array
+// decoding to nil too -- confirmed empirically before relying on this,
+// since encoding/json's exact absent-vs-null-vs-empty-array behavior
+// for a slice-typed pointer field is easy to get backwards from memory.
+// Starred is deliberately absent -- unstarring goes through DeleteNode
+// instead, since a not-starred story isn't an addressable node this
+// plugin's local index can represent at all.
 type storyPatchBody struct {
-	Read *bool `json:"read,omitempty"`
+	Read     *bool     `json:"read,omitempty"`
+	UserTags *[]string `json:"user_tags,omitempty"`
 }
 
 // feedPatchBody is PatchNode's payload for a feed node. Title and Folder
@@ -294,21 +307,32 @@ func patchStory(ctx context.Context, hash string, raw []byte) error {
 	if err := strictUnmarshal(raw, &patch); err != nil {
 		return fmt.Errorf("newsblur plugin: invalid story patch body: %w", err)
 	}
-	if patch.Read == nil {
+	if patch.Read == nil && patch.UserTags == nil {
 		return nil
 	}
 
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
-	if *patch.Read {
-		if _, err := client.MarkStoriesRead(ctx, []string{hash}); err != nil {
-			return fmt.Errorf("newsblur plugin: marking %s read: %w", hash, err)
+
+	if patch.Read != nil {
+		if *patch.Read {
+			if _, err := client.MarkStoriesRead(ctx, []string{hash}); err != nil {
+				return fmt.Errorf("newsblur plugin: marking %s read: %w", hash, err)
+			}
+		} else if _, err := client.MarkStoryUnread(ctx, hash); err != nil {
+			return fmt.Errorf("newsblur plugin: marking %s unread: %w", hash, err)
 		}
-		return nil
 	}
-	if _, err := client.MarkStoryUnread(ctx, hash); err != nil {
-		return fmt.Errorf("newsblur plugin: marking %s unread: %w", hash, err)
+
+	// REPLACES the story's tags, including clearing them all when UserTags
+	// is present-but-empty -- see storyPatchBody's doc comment for how the
+	// *[]string distinguishes that from UserTags being absent.
+	if patch.UserTags != nil {
+		if _, err := client.SetStoryUserTags(ctx, hash, *patch.UserTags); err != nil {
+			return fmt.Errorf("newsblur plugin: setting tags for %s: %w", hash, err)
+		}
 	}
+
 	return nil
 }
 
