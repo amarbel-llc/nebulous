@@ -107,6 +107,28 @@ func setFeedFolder(fi *fakeIndex, id, folder string) {
 	fi.feedMetadata[id] = entry
 }
 
+// assertApplied checks PatchNode's applied return against an exact,
+// ordered want -- cutting-garden#182: applied must be non-nil on every
+// successful call (nebulous always reports, never opts out), so a nil
+// got is itself a failure, not just a length mismatch.
+func assertApplied(t *testing.T, got, want []string) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("applied = nil, want %v (non-nil)", want)
+		return
+	}
+	if len(got) != len(want) {
+		t.Errorf("applied = %v, want %v", got, want)
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("applied = %v, want %v", got, want)
+			return
+		}
+	}
+}
+
 func TestCreateNodeStarsNewStory(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
@@ -169,10 +191,11 @@ func TestPatchNodeStoryMarksRead(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"read"})
 	if len(fc.calls) != 1 || fc.calls[0] != "MarkStoriesRead:"+sampleHash {
 		t.Errorf("calls = %v, want [MarkStoriesRead:%s]", fc.calls, sampleHash)
 	}
@@ -182,10 +205,11 @@ func TestPatchNodeStoryMarksUnread(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":false}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"read"})
 	if len(fc.calls) != 1 || fc.calls[0] != "MarkStoryUnread:"+sampleHash {
 		t.Errorf("calls = %v, want [MarkStoryUnread:%s]", fc.calls, sampleHash)
 	}
@@ -198,10 +222,11 @@ func TestPatchNodeStorySetsUserTags(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"user_tags":["a","b"]}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"user_tags"})
 	if len(fc.calls) != 1 || fc.calls[0] != "SetStoryUserTags:"+sampleHash+":a,b" {
 		t.Errorf("calls = %v, want [SetStoryUserTags:%s:a,b]", fc.calls, sampleHash)
 	}
@@ -215,10 +240,11 @@ func TestPatchNodeStoryEmptyUserTagsClearsTags(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"user_tags":[]}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"user_tags"})
 	if len(fc.calls) != 1 || fc.calls[0] != "SetStoryUserTags:"+sampleHash+":" {
 		t.Errorf("calls = %v, want [SetStoryUserTags:%s:] (empty tags)", fc.calls, sampleHash)
 	}
@@ -231,10 +257,11 @@ func TestPatchNodeStoryNoOpWhenUserTagsAbsent(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"read"})
 	for _, c := range fc.calls {
 		if strings.HasPrefix(c, "SetStoryUserTags:") {
 			t.Errorf("calls = %v, want no SetStoryUserTags call (user_tags was absent)", fc.calls)
@@ -248,10 +275,11 @@ func TestPatchNodeStoryReadAndUserTagsBothFireFromOneBody(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"]}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"read", "user_tags"})
 	if len(fc.calls) != 2 {
 		t.Fatalf("calls = %v, want 2 (mark read + set tags)", fc.calls)
 	}
@@ -264,14 +292,39 @@ func TestPatchNodeStoryReadAndUserTagsBothFireFromOneBody(t *testing.T) {
 }
 
 // A non-array user_tags value is a decode error, surfaced with field
-// context rather than a generic "invalid body" message.
+// context rather than a generic "invalid body" message. cutting-garden#182:
+// a recognized key with an unusable value is a caller bug, not a
+// forward-compatibility concern -- tolerance only ever covers keys this
+// plugin has never heard of, never a bad value for one it does.
 func TestPatchNodeStoryUserTagsWrongTypeErrors(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"user_tags":"not-an-array"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err == nil {
 		t.Fatal("PatchNode with user_tags as a string: expected an error, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
+	}
+}
+
+// An unrecognized key alongside a recognized key with a bad value must
+// still error on the bad value -- tolerance for unknown keys doesn't
+// extend to masking a real decode failure elsewhere in the same body.
+func TestPatchNodeStoryWrongTypeErrorsEvenAlongsideUnrecognizedField(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"read":"not-a-bool","starred":true}`))
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err == nil {
+		t.Fatal("PatchNode with read as a string, alongside an unrecognized field: expected an error, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
 	}
 	if len(fc.calls) != 0 {
 		t.Errorf("calls = %v, want none", fc.calls)
@@ -279,15 +332,18 @@ func TestPatchNodeStoryUserTagsWrongTypeErrors(t *testing.T) {
 }
 
 // A patch body with `read` absent must be a true no-op: no client call at
-// all, not a degenerate "unread unchanged" call.
+// all, not a degenerate "unread unchanged" call. applied must still be
+// non-nil (empty, not nil) -- cutting-garden#182's authoritative "nothing
+// applied" signal, distinct from a plugin that doesn't report at all.
 func TestPatchNodeStoryNoOpWhenReadAbsent(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{})
 	if len(fc.calls) != 0 {
 		t.Errorf("calls = %v, want none (read absent from body)", fc.calls)
 	}
@@ -297,57 +353,76 @@ func TestPatchNodeStoryErrorsIfAbsent(t *testing.T) {
 	setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/does-not-exist"), body)
+	_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/does-not-exist"), body)
 	if err == nil {
 		t.Fatal("PatchNode on a missing story: expected an error, got nil")
 	}
 }
 
-// cutting-garden#180: patch_node on a story with a field storyPatchBody
-// doesn't declare used to report success while calling the client zero
-// times -- a plain (non-strict) struct decode silently drops fields it
-// doesn't declare, so the mutation-gating check saw nothing to do and
-// returned nil having done nothing. This is the shape of the original
-// reported reproduction (which used "user_tags" -- since promoted to a
-// real patchable field by nebulous#50, so a still-unrecognized name is
-// used here instead): the fix must reject it, not just decode leniently
-// and skip it.
-func TestPatchNodeStoryRejectsUnrecognizedField(t *testing.T) {
+// cutting-garden#182 (following directly from #180): a field storyPatchBody
+// doesn't declare is now TOLERATED, not rejected -- a newer caller naming
+// a field this build doesn't know about must still succeed. The
+// forward-compatibility #180's blanket rejection gave up is recovered
+// here; #180's actual defect (reporting plain success for a request that
+// changed nothing) stays fixed via the authoritative empty applied
+// instead of an error.
+func TestPatchNodeStoryToleratesUnrecognizedField(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"starred":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
-	if err == nil {
-		t.Fatal("PatchNode with only unrecognized fields: expected an error, got nil (this is cutting-garden#180 -- reporting success while doing nothing)")
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode with only an unrecognized field: expected no error (tolerated), got %v", err)
 	}
+	assertApplied(t, applied, []string{})
 	if len(fc.calls) != 0 {
-		t.Errorf("calls = %v, want none (should have errored before calling the client)", fc.calls)
+		t.Errorf("calls = %v, want none (nothing recognized to apply)", fc.calls)
 	}
 }
 
-// A body mixing a recognized field with an unrecognized one must reject
-// the whole body rather than silently applying the recognized half --
-// partial, unannounced fulfillment is its own flavor of false success.
-func TestPatchNodeStoryRejectsUnrecognizedFieldEvenAlongsideRecognizedOne(t *testing.T) {
+// A body mixing a recognized field with an unrecognized one applies the
+// recognized one and reports it in applied; the unrecognized one is
+// silently dropped, not reported and not an error.
+func TestPatchNodeStoryAppliesRecognizedFieldIgnoringUnrecognizedOne(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"read":true,"starred":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
-	if err == nil {
-		t.Fatal("PatchNode with a mix of recognized and unrecognized fields: expected an error, got nil")
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	if err != nil {
+		t.Fatalf("PatchNode: %v", err)
 	}
-	if len(fc.calls) != 0 {
-		t.Errorf("calls = %v, want none (should have errored before calling the client, not partially applied \"read\")", fc.calls)
+	assertApplied(t, applied, []string{"read"})
+	if len(fc.calls) != 1 || fc.calls[0] != "MarkStoriesRead:"+sampleHash {
+		t.Errorf("calls = %v, want [MarkStoriesRead:%s]", fc.calls, sampleHash)
 	}
 }
 
-func TestPatchNodeFeedRejectsUnrecognizedField(t *testing.T) {
+func TestPatchNodeFeedToleratesUnrecognizedField(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"active":false}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	if err != nil {
+		t.Fatalf("PatchNode(feed) with only an unrecognized field: expected no error (tolerated), got %v", err)
+	}
+	assertApplied(t, applied, []string{})
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
+	}
+}
+
+// A recognized field with an unusable value is still a hard error --
+// cutting-garden#182's tolerance covers unknown KEYS only.
+func TestPatchNodeFeedTitleWrongTypeErrors(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	body := bytes.NewReader([]byte(`{"title":123}`))
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err == nil {
-		t.Fatal("PatchNode(feed) with an unrecognized field: expected an error, got nil")
+		t.Fatal("PatchNode(feed) with title as a number: expected an error, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
 	}
 	if len(fc.calls) != 0 {
 		t.Errorf("calls = %v, want none", fc.calls)
@@ -371,10 +446,11 @@ func TestPatchNodeFeedRenameOnly(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"title":"New Title"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"title"})
 	if len(fc.calls) != 1 || fc.calls[0] != "RenameFeed:123:New Title" {
 		t.Errorf("calls = %v, want [RenameFeed:123:New Title]", fc.calls)
 	}
@@ -384,10 +460,11 @@ func TestPatchNodeFeedMoveOnly(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"folder":"new","in_folder":"old"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"folder"})
 	if len(fc.calls) != 1 || fc.calls[0] != "MoveFeed:123:old->new" {
 		t.Errorf("calls = %v, want [MoveFeed:123:old->new]", fc.calls)
 	}
@@ -400,7 +477,7 @@ func TestPatchNodeFeedMoveWithoutInFolderErrors(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"folder":"new"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err == nil {
 		t.Fatal("PatchNode with folder but no in_folder: expected an error, got nil")
 	}
@@ -413,10 +490,11 @@ func TestPatchNodeFeedRenameAndMoveBothFireFromOneBody(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"title":"New Title","folder":"new","in_folder":"old"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"title", "folder"})
 	if len(fc.calls) != 2 {
 		t.Fatalf("calls = %v, want 2 (rename + move)", fc.calls)
 	}
@@ -431,7 +509,7 @@ func TestPatchNodeFeedRenameAndMoveBothFireFromOneBody(t *testing.T) {
 func TestPatchNodeEmptyBodyErrors(t *testing.T) {
 	setupMutateTest(t)
 
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader(nil))
+	_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader(nil))
 	if err == nil {
 		t.Fatal("PatchNode with an empty body: expected an error, got nil")
 	}
@@ -478,7 +556,7 @@ func TestMutatorsErrorWhenNotInitialized(t *testing.T) {
 	if err := (Plugin{}).CreateNode(context.Background(), mustURL(t, "newsblur://story/x"), bytes.NewReader(nil), typeStory); err == nil {
 		t.Error("CreateNode with no client/index: expected an error, got nil")
 	}
-	if err := (Plugin{}).PatchNode(context.Background(), mustURL(t, "newsblur://story/x"), bytes.NewReader([]byte(`{}`))); err == nil {
+	if _, err := (Plugin{}).PatchNode(context.Background(), mustURL(t, "newsblur://story/x"), bytes.NewReader([]byte(`{}`))); err == nil {
 		t.Error("PatchNode with no client/index: expected an error, got nil")
 	}
 	if err := (Plugin{}).DeleteNode(context.Background(), mustURL(t, "newsblur://story/x")); err == nil {
@@ -516,9 +594,40 @@ func TestPatchNodeStoryPropagatesClientError(t *testing.T) {
 	fc.err = errors.New("newsblur: rate limited")
 
 	body := bytes.NewReader([]byte(`{"read":true}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err == nil {
 		t.Fatal("PatchNode: expected the client's error to propagate, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
+	}
+}
+
+func TestPatchNodeFeedPropagatesClientError(t *testing.T) {
+	_, fc := setupMutateTest(t)
+	fc.err = errors.New("newsblur: rate limited")
+
+	body := bytes.NewReader([]byte(`{"title":"New Title"}`))
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), body)
+	if err == nil {
+		t.Fatal("PatchNode: expected the client's error to propagate, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
+	}
+}
+
+func TestPatchNodeFolderPropagatesClientError(t *testing.T) {
+	_, fc := setupMutateTest(t)
+	fc.err = errors.New("newsblur: rate limited")
+
+	body := bytes.NewReader([]byte(`{"name":"NewName"}`))
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - OldName"), body)
+	if err == nil {
+		t.Fatal("PatchNode: expected the client's error to propagate, got nil")
+	}
+	if applied != nil {
+		t.Errorf("applied = %v, want nil on error", applied)
 	}
 }
 
@@ -578,10 +687,11 @@ func TestPatchNodeFolderRenameOnly(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"name":"NewName"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - OldName"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs - OldName"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"name"})
 	if len(fc.calls) != 1 || fc.calls[0] != "RenameFolder:OldName->NewName:Blogs" {
 		t.Errorf("calls = %v, want [RenameFolder:OldName->NewName:Blogs]", fc.calls)
 	}
@@ -591,10 +701,11 @@ func TestPatchNodeFolderMoveOnly(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"to_folder":"NewParent"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - Photoblogs"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - Photoblogs"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"to_folder"})
 	if len(fc.calls) != 1 || fc.calls[0] != "MoveFolder:Photoblogs:OldParent->NewParent" {
 		t.Errorf("calls = %v, want [MoveFolder:Photoblogs:OldParent->NewParent]", fc.calls)
 	}
@@ -606,10 +717,11 @@ func TestPatchNodeFolderRenameAndMoveUsesRenamedNameForMove(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"name":"NewName","to_folder":"NewParent"}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - OldName"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/OldParent - OldName"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{"name", "to_folder"})
 	if len(fc.calls) != 2 {
 		t.Fatalf("calls = %v, want 2 (rename + move)", fc.calls)
 	}
@@ -621,14 +733,15 @@ func TestPatchNodeFolderRenameAndMoveUsesRenamedNameForMove(t *testing.T) {
 	}
 }
 
-func TestPatchNodeFolderRejectsUnrecognizedField(t *testing.T) {
+func TestPatchNodeFolderToleratesUnrecognizedField(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{"parent":"NewParent"}`)) // wrong key: to_folder is correct
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
-	if err == nil {
-		t.Fatal("PatchNode(folder) with an unrecognized field: expected an error, got nil")
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
+	if err != nil {
+		t.Fatalf("PatchNode(folder) with only an unrecognized field: expected no error (tolerated), got %v", err)
 	}
+	assertApplied(t, applied, []string{})
 	if len(fc.calls) != 0 {
 		t.Errorf("calls = %v, want none", fc.calls)
 	}
@@ -638,10 +751,11 @@ func TestPatchNodeFolderNoOpWhenBothFieldsAbsent(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
 	body := bytes.NewReader([]byte(`{}`))
-	err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
+	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
 	}
+	assertApplied(t, applied, []string{})
 	if len(fc.calls) != 0 {
 		t.Errorf("calls = %v, want none (name/to_folder both absent)", fc.calls)
 	}

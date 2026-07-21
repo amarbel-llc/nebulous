@@ -72,18 +72,16 @@ var mutateMu sync.Mutex
 // root calls it once at startup, alongside SetIndex.
 func SetClient(c Client) { client = c }
 
-// strictUnmarshal decodes a caller-supplied create/patch body strictly: a
-// field json.Unmarshal would otherwise silently drop is instead a
-// rejected, actionable error (cutting-garden#180). Every *PatchBody struct
-// below gates its mutation on "was a recognized field present" -- with a
-// plain json.Unmarshal, a body containing ONLY unrecognized fields (e.g.
-// {"user_tags":[...]} against storyPatchBody, which only recognizes
-// "read") decoded to a struct with every field absent, so patchStory
-// returned nil having called nothing: a false success indistinguishable
-// from a legitimate no-op like {}. DisallowUnknownFields makes that same
-// body a decode error instead, while a body with zero fields (the
-// legitimate no-op case) still decodes cleanly -- there's nothing in it to
-// reject.
+// strictUnmarshal decodes a caller-supplied CREATE body strictly: a field
+// json.Unmarshal would otherwise silently drop is instead a rejected,
+// actionable error. Used by createStory/CreateChild, which have no
+// partial-application concept to fall back on -- a create either fully
+// succeeds or errors, so an unrecognized field can only mean a caller
+// mistake worth surfacing immediately.
+//
+// PATCH bodies (storyPatchBody/feedPatchBody/folderPatchBody) do NOT use
+// this anymore -- see PatchNode's own doc comment for why tolerance was
+// restored there (cutting-garden#182).
 func strictUnmarshal(raw []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -260,31 +258,46 @@ func (Plugin) PutNode(ctx context.Context, node *url.URL, body io.Reader) error 
 	return fmt.Errorf("newsblur plugin: PutNode is not supported; use PatchNode for partial updates")
 }
 
-// PatchNode supports story/{hash} (read state), feed/{id} (title,
-// folder), and folder/{path} (name, to_folder). Absent fields are left
-// untouched; a valid body with no recognized fields present succeeds as
-// a no-op.
-func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) error {
+// PatchNode supports story/{hash} (read state, user_tags), feed/{id}
+// (title, folder), and folder/{path} (name, to_folder). Absent fields are
+// left untouched. A field this plugin doesn't recognize is tolerated, not
+// rejected -- a newer caller naming a field an older nebulous build
+// doesn't know about must still succeed -- but the applied return reports
+// exactly which recognized fields actually changed, so a caller can tell
+// a body that landed from one that was silently ignored
+// (cutting-garden#182, following directly from #180: tolerating unknown
+// fields with a bare error return is what let a patch call the backend
+// zero times and still report plain success). A field this plugin DOES
+// recognize but with an unusable value (e.g. {"read":"yes"}) is a
+// different case -- a caller bug, not forward-compatibility -- and still
+// errors; only unrecognized KEYS are tolerated, never a bad value for a
+// known one.
+//
+// applied is non-nil on every successful call: empty when nothing in the
+// body was recognized (the caller-visible signal that the patch changed
+// nothing, RFC 0013 §Mutation), populated with exactly the field names
+// that landed otherwise. Order is unspecified.
+func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) ([]string, error) {
 	if node == nil {
-		return fmt.Errorf("newsblur plugin: PatchNode requires a node URI")
+		return nil, fmt.Errorf("newsblur plugin: PatchNode requires a node URI")
 	}
 	if index == nil || client == nil {
-		return fmt.Errorf("newsblur plugin: not initialized")
+		return nil, fmt.Errorf("newsblur plugin: not initialized")
 	}
 	if body == nil {
-		return fmt.Errorf("newsblur plugin: PatchNode requires a body")
+		return nil, fmt.Errorf("newsblur plugin: PatchNode requires a body")
 	}
 	segs := pathSegments(node)
 	if len(segs) != 2 {
-		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return nil, fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 
 	raw, err := io.ReadAll(body)
 	if err != nil {
-		return fmt.Errorf("newsblur plugin: reading PatchNode body: %w", err)
+		return nil, fmt.Errorf("newsblur plugin: reading PatchNode body: %w", err)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return fmt.Errorf("newsblur plugin: PatchNode body must not be empty")
+		return nil, fmt.Errorf("newsblur plugin: PatchNode body must not be empty")
 	}
 
 	switch segs[0] {
@@ -295,33 +308,43 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) erro
 	case "folder":
 		return patchFolder(ctx, segs[1], raw)
 	default:
-		return fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return nil, fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 }
 
-func patchStory(ctx context.Context, hash string, raw []byte) error {
+func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) {
 	if _, _, ok := index.StoryMetadata(hash); !ok {
-		return fmt.Errorf("newsblur plugin: story %s not found", hash)
+		return nil, fmt.Errorf("newsblur plugin: story %s not found", hash)
 	}
+	// Plain json.Unmarshal, not strictUnmarshal: an unrecognized field is
+	// tolerated (dropped silently, exactly like any other absent field),
+	// while a recognized field with the wrong JSON type still fails here
+	// -- json.Unmarshal's ordinary type-checking, unaffected by whether
+	// unknown fields are disallowed, is exactly the "tolerate unknown
+	// keys, reject bad values for known ones" split cutting-garden#182
+	// wants.
 	var patch storyPatchBody
-	if err := strictUnmarshal(raw, &patch); err != nil {
-		return fmt.Errorf("newsblur plugin: invalid story patch body: %w", err)
+	if err := json.Unmarshal(raw, &patch); err != nil {
+		return nil, fmt.Errorf("newsblur plugin: invalid story patch body: %w", err)
 	}
 	if patch.Read == nil && patch.UserTags == nil {
-		return nil
+		return []string{}, nil
 	}
 
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
 
+	var applied []string
+
 	if patch.Read != nil {
 		if *patch.Read {
 			if _, err := client.MarkStoriesRead(ctx, []string{hash}); err != nil {
-				return fmt.Errorf("newsblur plugin: marking %s read: %w", hash, err)
+				return nil, fmt.Errorf("newsblur plugin: marking %s read: %w", hash, err)
 			}
 		} else if _, err := client.MarkStoryUnread(ctx, hash); err != nil {
-			return fmt.Errorf("newsblur plugin: marking %s unread: %w", hash, err)
+			return nil, fmt.Errorf("newsblur plugin: marking %s unread: %w", hash, err)
 		}
+		applied = append(applied, "read")
 	}
 
 	// REPLACES the story's tags, including clearing them all when UserTags
@@ -329,11 +352,12 @@ func patchStory(ctx context.Context, hash string, raw []byte) error {
 	// *[]string distinguishes that from UserTags being absent.
 	if patch.UserTags != nil {
 		if _, err := client.SetStoryUserTags(ctx, hash, *patch.UserTags); err != nil {
-			return fmt.Errorf("newsblur plugin: setting tags for %s: %w", hash, err)
+			return nil, fmt.Errorf("newsblur plugin: setting tags for %s: %w", hash, err)
 		}
+		applied = append(applied, "user_tags")
 	}
 
-	return nil
+	return applied, nil
 }
 
 // patchFeed requires InFolder alongside Folder rather than deriving the
@@ -344,72 +368,82 @@ func patchStory(ctx context.Context, hash string, raw []byte) error {
 // informational -- a stale value risks a folder-tree move that silently
 // doesn't match the caller's intent, with no error surfaced (NewsBlur's
 // API treats any 200 as success regardless of body).
-func patchFeed(ctx context.Context, id string, raw []byte) error {
+func patchFeed(ctx context.Context, id string, raw []byte) ([]string, error) {
 	if _, _, ok := index.FeedMetadata(ctx, id); !ok {
-		return fmt.Errorf("newsblur plugin: feed %s not found", id)
+		return nil, fmt.Errorf("newsblur plugin: feed %s not found", id)
 	}
+	// Plain json.Unmarshal -- see patchStory's identical comment.
 	var patch feedPatchBody
-	if err := strictUnmarshal(raw, &patch); err != nil {
-		return fmt.Errorf("newsblur plugin: invalid feed patch body: %w", err)
+	if err := json.Unmarshal(raw, &patch); err != nil {
+		return nil, fmt.Errorf("newsblur plugin: invalid feed patch body: %w", err)
 	}
 	if patch.Folder != nil && patch.InFolder == nil {
-		return fmt.Errorf("newsblur plugin: patching feed %s: \"folder\" requires \"in_folder\" (the feed's current folder) alongside it", id)
+		return nil, fmt.Errorf("newsblur plugin: patching feed %s: \"folder\" requires \"in_folder\" (the feed's current folder) alongside it", id)
 	}
 	if patch.Title == nil && patch.Folder == nil {
-		return nil
+		return []string{}, nil
 	}
 
 	feedID, err := strconv.Atoi(id)
 	if err != nil {
-		return fmt.Errorf("newsblur plugin: invalid feed id %q: %w", id, err)
+		return nil, fmt.Errorf("newsblur plugin: invalid feed id %q: %w", id, err)
 	}
 
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
+
+	var applied []string
 	if patch.Title != nil {
 		if _, err := client.RenameFeed(ctx, feedID, *patch.Title); err != nil {
-			return fmt.Errorf("newsblur plugin: renaming feed %s: %w", id, err)
+			return nil, fmt.Errorf("newsblur plugin: renaming feed %s: %w", id, err)
 		}
+		applied = append(applied, "title")
 	}
 	if patch.Folder != nil {
 		if _, err := client.MoveFeed(ctx, feedID, *patch.InFolder, *patch.Folder); err != nil {
-			return fmt.Errorf("newsblur plugin: moving feed %s: %w", id, err)
+			return nil, fmt.Errorf("newsblur plugin: moving feed %s: %w", id, err)
 		}
+		applied = append(applied, "folder")
 	}
-	return nil
+	return applied, nil
 }
 
 // patchFolder supports rename (name) and move (to_folder). Like
 // createFolder, there is no local existence check -- nebulous tracks no
 // folder index of its own (see typeFolder's comment in traversal.go).
-func patchFolder(ctx context.Context, path string, raw []byte) error {
+func patchFolder(ctx context.Context, path string, raw []byte) ([]string, error) {
 	if path == "" {
-		return fmt.Errorf("newsblur plugin: PatchNode: folder path must not be empty")
+		return nil, fmt.Errorf("newsblur plugin: PatchNode: folder path must not be empty")
 	}
+	// Plain json.Unmarshal -- see patchStory's identical comment.
 	var patch folderPatchBody
-	if err := strictUnmarshal(raw, &patch); err != nil {
-		return fmt.Errorf("newsblur plugin: invalid folder patch body: %w", err)
+	if err := json.Unmarshal(raw, &patch); err != nil {
+		return nil, fmt.Errorf("newsblur plugin: invalid folder patch body: %w", err)
 	}
 	if patch.Name == nil && patch.ToFolder == nil {
-		return nil
+		return []string{}, nil
 	}
 
 	ownName, parentPath := splitFolderPath(path)
 
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
+
+	var applied []string
 	if patch.Name != nil {
 		if _, err := client.RenameFolder(ctx, ownName, *patch.Name, parentPath); err != nil {
-			return fmt.Errorf("newsblur plugin: renaming folder %q: %w", path, err)
+			return nil, fmt.Errorf("newsblur plugin: renaming folder %q: %w", path, err)
 		}
+		applied = append(applied, "name")
 		ownName = *patch.Name
 	}
 	if patch.ToFolder != nil {
 		if _, err := client.MoveFolder(ctx, ownName, parentPath, *patch.ToFolder); err != nil {
-			return fmt.Errorf("newsblur plugin: moving folder %q: %w", path, err)
+			return nil, fmt.Errorf("newsblur plugin: moving folder %q: %w", path, err)
 		}
+		applied = append(applied, "to_folder")
 	}
-	return nil
+	return applied, nil
 }
 
 // DeleteNode supports story/{hash} (unstar), feed/{id} (unsubscribe),
