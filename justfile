@@ -169,6 +169,39 @@ debug-restore-cache:
 codemod-migrate-cache *args:
   go run ./cmd/migrate-cache {{args}}
 
+# MUTATES the live NewsBlur account: (re-)stars story_hash and REPLACES its
+# user_tags with exactly what's passed (matching SetStoryUserTags's own
+# semantics -- an empty/absent tags arg CLEARS all existing tags on an
+# already-starred story, it does not leave them alone). No default for tags:
+# a silent-empty default here would be the exact live-account footgun this
+# recipe exists to help debug in the first place. Bypasses nebulous entirely
+# (cutting-garden#180 / nebulous#53 investigation): client.go's post() only
+# checks the HTTP status code, never the response BODY, so a body-level
+# failure (HTTP 200 with an error/code field inside) would currently be
+# invisible to nebulous's own SetStoryUserTags/StarStory -- this prints
+# exactly what NewsBlur returns, letting you check that layer directly.
+# Requires NEWSBLUR_TOKEN in the environment.
+[group('debug')]
+debug-probe-star-response story_hash tags:
+  curl -sS -X POST https://www.newsblur.com/reader/mark_story_hash_as_starred \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "story_hash={{story_hash}}" \
+    --data-urlencode "user_tags={{tags}}" \
+  | jq .
+
+# Probe the RAW response body of /reader/starred_stories for one hash,
+# bypassing nebulous entirely (cutting-garden#180 / nebulous#53
+# investigation, H2): does the endpoint nebulous's fetch pipeline actually
+# reads from even include user_tags per story at all? Requires
+# NEWSBLUR_TOKEN in the environment.
+[group('debug')]
+debug-probe-starred-story story_hash:
+  curl -sS -G https://www.newsblur.com/reader/starred_stories \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+    --data-urlencode "h={{story_hash}}" \
+  | jq .
+
 # Sample the local corpus: list the first 5 keys, total count, and first entry body.
 [group('explore')]
 explore-corpus: build-go

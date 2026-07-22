@@ -55,6 +55,43 @@ func (c *Client) PatchCachedStoriesReadStatus(hashes []string, read bool) error 
 	return c.PutCachedStarredStoriesBatch(patched)
 }
 
+// PatchCachedStoryUserTags updates one cached starred story's user_tags
+// field in place, immediately after a successful SetStoryUserTags call.
+// Without this, the cached blob doesn't just lag until the next `nebulous
+// fetch` (PatchCachedStoryReadStatus's own case) -- it stays stale
+// PERMANENTLY: cmd/nebulous/main.go's Phase 2 only ever fetches a starred
+// story hash ONCE (HasCachedStarredStory gates it out of every later
+// fetch run), an immutable-content assumption user_tags breaks since it's
+// re-settable after the initial star. Confirmed live against a real
+// account: an already-cached story's tag patch stayed invisible through
+// unlimited fetch cycles, not just until the next one (cutting-garden#180
+// / nebulous#53's verification investigation -- the write itself was
+// proven to reach NewsBlur by reading /reader/starred_stories directly,
+// bypassing nebulous; the cache simply never had a path back to it).
+// Best-effort like every other optimistic-cache-patch call site in this
+// file: a hash that isn't cached locally, or whose cached blob fails to
+// unmarshal, is skipped rather than erroring.
+func (c *Client) PatchCachedStoryUserTags(hash string, userTags []string) error {
+	raw, ok := c.CachedStarredStory(hash)
+	if !ok {
+		return nil
+	}
+	var story map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &story); err != nil {
+		return nil
+	}
+	encoded, err := json.Marshal(userTags)
+	if err != nil {
+		return nil
+	}
+	story["user_tags"] = encoded
+	body, err := json.Marshal(story)
+	if err != nil {
+		return nil
+	}
+	return c.PutCachedStarredStory(hash, body)
+}
+
 // PatchCachedStarredStoryHashes adds or removes one hash from the cached
 // starred-story-hashes list in place, immediately after a successful
 // star/unstar call. Pass the hash being added as add, the hash being

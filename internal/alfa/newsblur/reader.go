@@ -67,6 +67,7 @@ func (c *Client) SetStoryUserTags(ctx context.Context, storyHash string, userTag
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
 	if err == nil {
 		_ = c.PatchCachedStarredStoryHashes(storyHash, "")
+		_ = c.PatchCachedStoryUserTags(storyHash, userTags)
 	}
 	return raw, err
 }

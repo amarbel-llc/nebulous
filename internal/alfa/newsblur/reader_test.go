@@ -159,6 +159,38 @@ func TestSetStoryUserTagsPatchesCachedHashList(t *testing.T) {
 	}
 }
 
+// nebulous#53: without patching the cached story blob's own user_tags
+// field (not just the hash list above), a read immediately after this call
+// stays stale not just until the next fetch but permanently, since
+// cmd/nebulous/main.go's fetch never re-fetches an already-cached hash.
+func TestSetStoryUserTagsPatchesCachedStoryBlob(t *testing.T) {
+	server := okServer(t)
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	if err := c.PutCachedStarredStory("existing", json.RawMessage(`{"story_hash":"existing","user_tags":["old"]}`)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := c.SetStoryUserTags(context.Background(), "existing", []string{"a", "b"}); err != nil {
+		t.Fatalf("SetStoryUserTags: %v", err)
+	}
+
+	raw, ok := c.CachedStarredStory("existing")
+	if !ok {
+		t.Fatal("CachedStarredStory returned false")
+	}
+	var decoded struct {
+		UserTags []string `json:"user_tags"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal cached story: %v", err)
+	}
+	if want := []string{"a", "b"}; !slices.Equal(decoded.UserTags, want) {
+		t.Errorf("cached story user_tags = %v, want %v immediately after SetStoryUserTags", decoded.UserTags, want)
+	}
+}
+
 func TestUnstarStoryPatchesCachedHashList(t *testing.T) {
 	server := okServer(t)
 	defer server.Close()

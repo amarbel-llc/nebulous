@@ -62,27 +62,31 @@ var _ Client = (*newsblur.Client)(nil)
 
 // client is the write-capable NewsBlur surface this plugin's mutations
 // call directly, injected at startup alongside SetIndex (plugin.go).
-// Story read/unread and star/unstar optimistically patch their cached
-// entries in place (newsblur.Client's MarkStoriesRead/MarkStoryUnread/
-// StarStory/UnstarStory each do this on success -- see
-// internal/alfa/newsblur/cache_patch.go), so a read immediately after one
-// of those mutations *usually* already reflects the change -- but the
-// patch is best-effort: a failure is swallowed at the call site (nothing
-// surfaces it), and even a successful patch's manifest write can be lost
-// to a concurrently-running `nebulous fetch` process (nebulous#42,
-// Record/RecordBatch never reload-before-merge -- pre-existing, this
-// plugin's patch calls just add more surface area to it, not a new class
-// of the same bug). Feed rename/move and SetStoryUserTags (nebulous#50) do
-// not patch the cache at all yet and still lag until the next `nebulous
-// fetch` -- SetStoryUserTags only patches the cached starred-hash LIST
-// (so the story stays discoverable), not the cached story blob's own
-// user_tags field, so an immediate re-read through cgplugin sees the OLD
-// tags -- the same fetch-cadence lag accepted elsewhere in this package
-// (see facets.go's own comment on FacetVersion). The existence checks
-// below (StoryMetadata/FeedMetadata)
-// read the local index too, so a story/feed that changed very recently
-// through another path may not be visible here yet either -- an accepted
-// best-effort check, not a strict live lookup.
+// Story read/unread, star/unstar, and user_tags all optimistically patch
+// their cached entries in place (newsblur.Client's MarkStoriesRead/
+// MarkStoryUnread/StarStory/UnstarStory/SetStoryUserTags each do this on
+// success -- see internal/alfa/newsblur/cache_patch.go), so a read
+// immediately after one of those mutations *usually* already reflects the
+// change -- but the patch is best-effort: a failure is swallowed at the
+// call site (nothing surfaces it), and even a successful patch's manifest
+// write can be lost to a concurrently-running `nebulous fetch` process
+// (nebulous#42, Record/RecordBatch never reload-before-merge --
+// pre-existing, this plugin's patch calls just add more surface area to
+// it, not a new class of the same bug). user_tags's cache patch matters
+// more than the others: cmd/nebulous/main.go's fetch only ever fetches a
+// starred story hash ONCE (an immutable-content assumption user_tags
+// breaks, since it's re-settable after the initial star), so without an
+// optimistic patch a tag change would stay invisible PERMANENTLY, not
+// just until the next fetch -- confirmed live, cutting-garden#180 /
+// nebulous#53. Feed rename/move do not patch the cache at all yet and
+// still lag until the next `nebulous fetch` -- the same fetch-cadence lag
+// accepted elsewhere in this package (see facets.go's own comment on
+// FacetVersion), though feed metadata IS refetched every cycle (unlike
+// starred stories), so that lag is bounded, not permanent. The existence
+// checks below (StoryMetadata/FeedMetadata) read the local index too, so
+// a story/feed that changed very recently through another path may not
+// be visible here yet either -- an accepted best-effort check, not a
+// strict live lookup.
 var client Client
 
 // mutateMu serializes this plugin's writes. Package-private, mirrors how
