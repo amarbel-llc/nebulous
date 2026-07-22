@@ -224,6 +224,126 @@ func TestFacetCounts_NoStoriesNoAgeBand(t *testing.T) {
 	}
 }
 
+// TestFacetCounts_ByContainerAttributesStoriesToFeeds pins RFC 0012 §13's
+// adoption on the stories/ root: a multi-feed summary reports which feeds
+// the matches came from, sorted by descending count (ties broken
+// ascending URI, SortAndLimitContainerBreakdown's own rule).
+func TestFacetCounts_ByContainerAttributesStoriesToFeeds(t *testing.T) {
+	fi := newFakeIndex()
+	fi.stories = []tools.StoryRef{
+		{Hash: "1", FeedID: 1, Year: 2026},
+		{Hash: "2", FeedID: 1, Year: 2026},
+		{Hash: "3", FeedID: 2, Year: 2026},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	result, ok, err := Plugin{}.FacetCounts(context.Background(), mustURL(t, "newsblur://stories"), nil)
+	if err != nil || !ok {
+		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
+	}
+
+	if len(result.ByContainer) != 2 {
+		t.Fatalf("ByContainer = %+v, want 2 entries", result.ByContainer)
+	}
+	if got, want := result.ByContainer[0], (cg.FacetContainerBreakdown{URI: "newsblur://feed/1", Count: 2}); got != want {
+		t.Errorf("ByContainer[0] = %+v, want %+v (highest count first)", got, want)
+	}
+	if got, want := result.ByContainer[1], (cg.FacetContainerBreakdown{URI: "newsblur://feed/2", Count: 1}); got != want {
+		t.Errorf("ByContainer[1] = %+v, want %+v", got, want)
+	}
+	if result.ByContainerTruncated {
+		t.Error("ByContainerTruncated = true for only 2 containers, want false")
+	}
+}
+
+// TestFacetCounts_ByContainerRespectsFilter pins the RFC's attribution-scope
+// rule: ByContainer counts only the (possibly filter-narrowed) matches
+// Summary itself aggregates, not every story regardless of filter.
+func TestFacetCounts_ByContainerRespectsFilter(t *testing.T) {
+	fi := newFakeIndex()
+	fi.stories = []tools.StoryRef{
+		{Hash: "1", FeedID: 1, Year: 2026, Read: true},
+		{Hash: "2", FeedID: 2, Year: 2026, Read: false},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	filter := cg.FacetFilter{{Dimension: facetRead, Value: "unread"}}
+	result, ok, err := Plugin{}.FacetCounts(context.Background(), mustURL(t, "newsblur://stories"), filter)
+	if err != nil || !ok {
+		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
+	}
+
+	if len(result.ByContainer) != 1 || result.ByContainer[0].URI != "newsblur://feed/2" {
+		t.Errorf("ByContainer = %+v, want exactly [feed/2] (the read story's feed/1 must not appear)", result.ByContainer)
+	}
+}
+
+// TestFacetCounts_FeedHasNoByContainer pins the single-container case
+// (RFC 0012 §13): feed/{id} summarizes ITS OWN stories, so there is
+// nothing further to attribute across -- ByContainer stays nil, matching
+// caldav's own single-calendar case.
+func TestFacetCounts_FeedHasNoByContainer(t *testing.T) {
+	fi := newFakeIndex()
+	fi.feeds = []tools.FeedRef{{ID: "1", Title: "Feed One"}}
+	fi.feedStories = map[int][]tools.StoryRef{
+		1: {{Hash: "1", FeedID: 1, Year: 2026}},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	result, ok, err := Plugin{}.FacetCounts(context.Background(), mustURL(t, "newsblur://feed/1"), nil)
+	if err != nil || !ok {
+		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
+	}
+	if result.ByContainer != nil {
+		t.Errorf("ByContainer = %+v, want nil (a single feed has nothing to attribute across)", result.ByContainer)
+	}
+}
+
+// TestFacetCounts_TagByContainerAttributesToFeeds pins tag/{tag}'s wiring
+// to the same per-feed attribution stories/ gets -- a distinct FacetCounts
+// call site sharing storyFacetCounts's byContainer=true path.
+func TestFacetCounts_TagByContainerAttributesToFeeds(t *testing.T) {
+	fi := newFakeIndex()
+	fi.tagStories = map[string][]tools.StoryRef{
+		"golang": {
+			{Hash: "1", FeedID: 1, Year: 2026, Tags: []string{"golang"}},
+			{Hash: "2", FeedID: 2, Year: 2026, Tags: []string{"golang"}},
+		},
+	}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	result, ok, err := Plugin{}.FacetCounts(context.Background(), mustURL(t, "newsblur://tag/golang"), nil)
+	if err != nil || !ok {
+		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
+	}
+	if len(result.ByContainer) != 2 {
+		t.Errorf("ByContainer = %+v, want 2 entries (one per feed)", result.ByContainer)
+	}
+}
+
+// TestFacetCounts_FeedsRootHasNoByContainer pins that feedFacetCounts was
+// deliberately left untouched by the ByContainer adoption: there is no
+// addressable, list_nodes-reachable container to break feeds down BY yet
+// (folder nodes aren't listed by ListRoots -- see README's own caveat).
+func TestFacetCounts_FeedsRootHasNoByContainer(t *testing.T) {
+	fi := newFakeIndex()
+	fi.feeds = []tools.FeedRef{{ID: "1", Title: "Feed One"}, {ID: "2", Title: "Feed Two"}}
+	index = fi
+	t.Cleanup(func() { index = nil })
+
+	result, ok, err := Plugin{}.FacetCounts(context.Background(), mustURL(t, "newsblur://feeds"), nil)
+	if err != nil || !ok {
+		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
+	}
+	if result.ByContainer != nil {
+		t.Errorf("ByContainer = %+v, want nil (no addressable container to break feeds down by)", result.ByContainer)
+	}
+}
+
 // TestResolveFacetLabels_LiveFeedTakesPrecedence pins the common case:
 // a currently-subscribed feed resolves from the live snapshot.
 func TestResolveFacetLabels_LiveFeedTakesPrecedence(t *testing.T) {

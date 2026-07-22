@@ -149,7 +149,7 @@ func (Plugin) FacetCounts(
 		if err != nil {
 			return cg.FacetResult{}, false, err
 		}
-		return storyFacetCounts(stories, filter), true, nil
+		return storyFacetCounts(stories, filter, true), true, nil
 	case len(segs) == 2 && segs[0] == "feed":
 		id, err := strconv.Atoi(segs[1])
 		if err != nil {
@@ -159,13 +159,17 @@ func (Plugin) FacetCounts(
 		if err != nil {
 			return cg.FacetResult{}, false, err
 		}
-		return storyFacetCounts(stories, filter), true, nil
+		// byContainer=false: node IS the one feed being summarized, no
+		// further per-feed breakdown to offer -- same "single-container
+		// node has nothing to attribute across" case caldav's own
+		// FacetCounts leaves nil for a single calendar (RFC 0012 §13).
+		return storyFacetCounts(stories, filter, false), true, nil
 	case len(segs) == 2 && segs[0] == "tag":
 		stories, err := index.StoriesByTag(segs[1])
 		if err != nil {
 			return cg.FacetResult{}, false, err
 		}
-		return storyFacetCounts(stories, filter), true, nil
+		return storyFacetCounts(stories, filter, true), true, nil
 	default:
 		return cg.FacetResult{}, false, nil
 	}
@@ -285,7 +289,25 @@ func (Plugin) ResolveFacetLabels(
 	return labels, nil
 }
 
-func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter) cg.FacetResult {
+// storyFacetCounts summarizes stories into one FacetResult. byContainer
+// requests a per-feed ByContainer breakdown (RFC 0012 §13) alongside the
+// summary -- pass true for a multi-feed set (stories/, tag/{tag}) where
+// "which feeds hold the matches" is informative, false for a single feed's
+// own stories (feed/{id}), which has nothing further to attribute across.
+// Recovering the per-feed match count is free here: storyFacetValues
+// already computes each story's feed id for the facetFeed dimension, so
+// counting into a second map alongside liftFacets is the SAME loop, not an
+// extra fetch (cutting-garden#170/nebulous adoption).
+//
+// Note on "container": feed/{id} is NOT a literal ListRoots child of
+// stories/ or tag/{tag} (ListRoots on either returns story/{hash} leaves
+// directly, per traversal.go) -- this attributes to the addressable
+// container for the facetFeed dimension's value instead, a semantically
+// equivalent grouping a caller can still list_nodes/read_facets into.
+// RFC 0012 §13's own bounding-rationale text names "a newsblur account's
+// feed list" as its motivating large-fan-out example, which is why this
+// reading rather than a stricter literal-child one was adopted.
+func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter, byContainer bool) cg.FacetResult {
 	summary := cg.FacetSummary{}
 	// One evaluation instant for the whole summary (§11.3): stories are
 	// bucketed against the same "now" regardless of where they fall in
@@ -293,6 +315,10 @@ func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter) cg.FacetR
 	// atomic FacetCounts call across two different "today"s.
 	now := ageBandNow()
 	var matched bool
+	var perFeed map[string]int64
+	if byContainer {
+		perFeed = make(map[string]int64)
+	}
 	for _, s := range stories {
 		facets := storyFacetValues(s, now)
 		if !filter.Matches(facets) {
@@ -300,6 +326,9 @@ func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter) cg.FacetR
 		}
 		liftFacets(summary, facets)
 		matched = true
+		if byContainer {
+			perFeed[strconv.Itoa(s.FeedID)]++
+		}
 	}
 	// §11.3 emission rule: every element FacetCounts summarizes here is
 	// a story (the switch in FacetCounts only ever hands storyFacetCounts
@@ -310,7 +339,25 @@ func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter) cg.FacetR
 	if matched {
 		ensureAgeBandPresence(summary)
 	}
-	return cg.FacetResult{Summary: summary, Complete: true}
+	result := cg.FacetResult{Summary: summary, Complete: true}
+	if len(perFeed) > 0 {
+		breakdown := make([]cg.FacetContainerBreakdown, 0, len(perFeed))
+		for id, count := range perFeed {
+			// Name left empty (RFC 0012 §13: "MAY be empty") -- resolving
+			// feed titles here would need a separate index.Feeds(ctx)
+			// call this loop doesn't otherwise make, unlike the count
+			// itself, which is a byproduct of the fold already running.
+			// ResolveFacetLabels (facetFeed is already a labelled
+			// dimension) covers title resolution once a consumer adopts
+			// it (cutting-garden#124).
+			breakdown = append(breakdown, cg.FacetContainerBreakdown{
+				URI:   nodeURL("feed", id).String(),
+				Count: count,
+			})
+		}
+		result.ByContainer, result.ByContainerTruncated = cg.SortAndLimitContainerBreakdown(breakdown)
+	}
+	return result
 }
 
 func storyFacetValues(s tools.StoryRef, now time.Time) map[string][]cg.FacetValue {
