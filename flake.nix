@@ -14,8 +14,8 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-    bob = {
-      url = "github:amarbel-llc/bob";
+    bats = {
+      url = "https://code.linenisgreat.com/bats/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -32,28 +32,14 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-    bob.inputs.tap.inputs.bats.follows = "bob/bats";
-    bob.inputs.gomod2nix.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
-    bob.inputs.purse-first.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
-    bob.inputs.tap.inputs.nixpkgs-master.follows = "bob/bats/nixpkgs-master";
-    bob.inputs.purse-first.inputs.gomod2nix.follows = "bob/gomod2nix";
-    bob.inputs.tap.inputs.gomod2nix.follows = "bob/gomod2nix";
-    bob.inputs.tap.inputs.purse-first.follows = "bob/purse-first";
-    bob.inputs.tap.inputs.rust-overlay.follows = "bob/rust-overlay";
     utils.inputs.systems.follows = "igloo/systems";
     tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
-    bob.inputs.bats.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
-    bob.inputs.tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
     tap.inputs.bats.follows = "madder/bats";
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
     madder.inputs.purse-first.follows = "purse-first";
     tap.inputs.purse-first.follows = "purse-first";
     tap.inputs.gomod2nix.follows = "purse-first/gomod2nix";
     madder.inputs.tap.follows = "tap";
-    bob.inputs.bats.inputs.utils.follows = "utils";
-    bob.inputs.gomod2nix.inputs.flake-utils.follows = "utils";
-    bob.inputs.purse-first.inputs.utils.follows = "utils";
-    bob.inputs.tap.inputs.utils.follows = "utils";
     conformist = {
       url = "https://code.linenisgreat.com/conformist/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
@@ -62,6 +48,7 @@
     };
     madder.inputs.conformist.follows = "conformist";
     purse-first.inputs.conformist.follows = "conformist";
+    bats.inputs.conformist.follows = "conformist";
   };
 
   outputs =
@@ -72,7 +59,7 @@
       utils,
       nixpkgs-master,
       madder,
-      bob,
+      bats,
       purse-first,
       tap,
     }:
@@ -104,6 +91,18 @@
         go = pkgs-master.go_1_26;
 
         madderPkg = madder.packages.${system}.default;
+
+        # bats no longer reaches nebulous through the bob flake input
+        # (nebulous#52 -- bob was a thin wrapper: its own `batman` package
+        # was literally `bats.lib.${system}.mkBats { tap-dancer-go = ...;
+        # }.default`). Calling mkBats directly here, with the same
+        # tap-dancer-go nebulous's own `tap` input already builds, drops
+        # the bob input and its dedup lines while keeping tap-dancer-go
+        # pinned to the rest of this flake's `tap` rather than bats's own
+        # vendored FOD.
+        batmanPkgs = bats.lib.${system}.mkBats {
+          tap-dancer-go = tap.packages.${system}.tap-dancer-go;
+        };
 
         gomod = import ./gomod.nix {
           inherit
@@ -307,14 +306,14 @@
             pkgs.shfmt
             madderPkg
             purse-first.packages.${system}.dagnabit
-            bob.packages.${system}.batman
+            batmanPkgs.default
             conformistPkg
             conformistEval.config.build.preCommit
             conformistEval.config.build.repair
           ];
 
           shellHook = ''
-            export BATS_LIB_PATH=${bob.packages.${system}.batman}/share/bats
+            export BATS_LIB_PATH=${batmanPkgs.default}/share/bats
           '';
         };
 
