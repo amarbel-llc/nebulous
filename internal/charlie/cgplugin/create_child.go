@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
 var _ cg.ContainerCreator = Plugin{}
@@ -51,7 +52,7 @@ type subscribeResponse struct {
 // that assigns identity server-side.
 func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reader, typ string) (*url.URL, error) {
 	if container == nil {
-		return nil, fmt.Errorf("newsblur plugin: CreateChild requires a container URI")
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild requires a container URI")
 	}
 	if client == nil {
 		return nil, fmt.Errorf("newsblur plugin: not initialized")
@@ -59,10 +60,10 @@ func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reade
 
 	segs := pathSegments(container)
 	if len(segs) != 1 || segs[0] != "feeds" {
-		return nil, fmt.Errorf("newsblur plugin: CreateChild only supports the feeds root (newsblur://feeds), got %s", container)
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild only supports the feeds root (newsblur://feeds), got %s", container)
 	}
 	if typ != "" && typ != typeFeed {
-		return nil, fmt.Errorf("newsblur plugin: CreateChild: unexpected type %q for the feeds root (want %q)", typ, typeFeed)
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: unexpected type %q for the feeds root (want %q)", typ, typeFeed)
 	}
 
 	var payload subscribeCreateBody
@@ -72,14 +73,14 @@ func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reade
 			return nil, fmt.Errorf("newsblur plugin: reading CreateChild body: %w", err)
 		}
 		if len(bytes.TrimSpace(raw)) == 0 {
-			return nil, fmt.Errorf("newsblur plugin: CreateChild requires a body with a \"url\" field")
+			return nil, errors.BadRequestf("newsblur plugin: CreateChild requires a body with a \"url\" field")
 		}
 		if err := strictUnmarshal(raw, &payload); err != nil {
-			return nil, fmt.Errorf("newsblur plugin: invalid CreateChild body: %w", err)
+			return nil, errors.BadRequestf("newsblur plugin: invalid CreateChild body: %w", err)
 		}
 	}
 	if payload.URL == "" {
-		return nil, fmt.Errorf("newsblur plugin: CreateChild: body's \"url\" field is required")
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: body's \"url\" field is required")
 	}
 
 	mutateMu.Lock()

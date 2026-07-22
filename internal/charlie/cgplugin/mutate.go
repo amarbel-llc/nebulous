@@ -13,9 +13,30 @@ import (
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
 var _ cg.NodeMutator = Plugin{}
+
+// Caller-fault vs plugin-fault (RFC 0013 §Errors, cutting-garden#185): the
+// wire transport (cutting-garden's own traversal_serve server.Handle)
+// reclassifies a returned error as CodeInvalidParams (-32602) ONLY when
+// dewey's errors.Is400BadRequest(err) is true; every other error defaults
+// to CodeInternalError (-32603). This package never imports
+// pkgs/traversal_serve or constructs an RPCError directly -- classification
+// is domain knowledge cgplugin has (a caller mistake vs a NewsBlur API
+// call failing), translation into a wire code is the transport's job, and
+// the two meeting only at dewey's shared tagging convention is what keeps
+// this package servable both wire (traversal-serve) and, in principle,
+// linked in-process without answering differently for identical input.
+// errors.BadRequestf marks a genuine caller mistake (bad URI, a value the
+// caller supplied that this plugin cannot use, patching/deleting something
+// that does not exist); plain fmt.Errorf is left alone for everything this
+// plugin itself cannot fulfill (an unreachable/failing NewsBlur API call,
+// "not initialized") -- a uniform mapping of every failure to -32603 is
+// exactly the non-conformant anti-pattern RFC 0013 §Errors calls out by
+// name, discovered when two independent implementations (this plugin's
+// upstream SDK's own reference host among them) both fell into it.
 
 // Client is the write-capable NewsBlur surface this plugin's mutations
 // use, satisfied by *newsblur.Client. Declared as an interface (like
@@ -180,7 +201,7 @@ func splitFolderPath(path string) (ownName, parentPath string) {
 // front; see CreateChild (create_child.go) instead.
 func (Plugin) CreateNode(ctx context.Context, node *url.URL, body io.Reader, typ string) error {
 	if node == nil {
-		return fmt.Errorf("newsblur plugin: CreateNode requires a node URI")
+		return errors.BadRequestf("newsblur plugin: CreateNode requires a node URI")
 	}
 	if index == nil || client == nil {
 		return fmt.Errorf("newsblur plugin: not initialized")
@@ -193,16 +214,16 @@ func (Plugin) CreateNode(ctx context.Context, node *url.URL, body io.Reader, typ
 	case len(segs) == 2 && segs[0] == "folder":
 		return createFolder(ctx, segs[1], typ)
 	default:
-		return fmt.Errorf("newsblur plugin: CreateNode only supports story/{hash} and folder/{path}, got %s", node)
+		return errors.BadRequestf("newsblur plugin: CreateNode only supports story/{hash} and folder/{path}, got %s", node)
 	}
 }
 
 func createStory(ctx context.Context, hash string, body io.Reader, typ string) error {
 	if typ != "" && typ != typeStory {
-		return fmt.Errorf("newsblur plugin: CreateNode: unexpected type %q for story/{hash} (want %q)", typ, typeStory)
+		return errors.BadRequestf("newsblur plugin: CreateNode: unexpected type %q for story/{hash} (want %q)", typ, typeStory)
 	}
 	if _, _, ok := index.StoryMetadata(hash); ok {
-		return fmt.Errorf("newsblur plugin: story %s already exists", hash)
+		return errors.BadRequestf("newsblur plugin: story %s already exists", hash)
 	}
 
 	var payload storyCreateBody
@@ -213,7 +234,7 @@ func createStory(ctx context.Context, hash string, body io.Reader, typ string) e
 		}
 		if len(bytes.TrimSpace(raw)) > 0 {
 			if err := strictUnmarshal(raw, &payload); err != nil {
-				return fmt.Errorf("newsblur plugin: invalid CreateNode body: %w", err)
+				return errors.BadRequestf("newsblur plugin: invalid CreateNode body: %w", err)
 			}
 		}
 	}
@@ -234,10 +255,10 @@ func createStory(ctx context.Context, hash string, body io.Reader, typ string) e
 // traversal.go on the current no-ListRoots scope).
 func createFolder(ctx context.Context, path string, typ string) error {
 	if typ != "" && typ != typeFolder {
-		return fmt.Errorf("newsblur plugin: CreateNode: unexpected type %q for folder/{path} (want %q)", typ, typeFolder)
+		return errors.BadRequestf("newsblur plugin: CreateNode: unexpected type %q for folder/{path} (want %q)", typ, typeFolder)
 	}
 	if path == "" {
-		return fmt.Errorf("newsblur plugin: CreateNode: folder path must not be empty")
+		return errors.BadRequestf("newsblur plugin: CreateNode: folder path must not be empty")
 	}
 	ownName, parentPath := splitFolderPath(path)
 
@@ -255,7 +276,7 @@ func createFolder(ctx context.Context, path string, typ string) error {
 // PatchNode's partial-field semantics instead. Required by the
 // NodeMutator interface regardless.
 func (Plugin) PutNode(ctx context.Context, node *url.URL, body io.Reader) error {
-	return fmt.Errorf("newsblur plugin: PutNode is not supported; use PatchNode for partial updates")
+	return errors.BadRequestf("newsblur plugin: PutNode is not supported; use PatchNode for partial updates")
 }
 
 // PatchNode supports story/{hash} (read state, user_tags), feed/{id}
@@ -279,17 +300,17 @@ func (Plugin) PutNode(ctx context.Context, node *url.URL, body io.Reader) error 
 // that landed otherwise. Order is unspecified.
 func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) ([]string, error) {
 	if node == nil {
-		return nil, fmt.Errorf("newsblur plugin: PatchNode requires a node URI")
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode requires a node URI")
 	}
 	if index == nil || client == nil {
 		return nil, fmt.Errorf("newsblur plugin: not initialized")
 	}
 	if body == nil {
-		return nil, fmt.Errorf("newsblur plugin: PatchNode requires a body")
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode requires a body")
 	}
 	segs := pathSegments(node)
 	if len(segs) != 2 {
-		return nil, fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 
 	raw, err := io.ReadAll(body)
@@ -297,7 +318,7 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) ([]s
 		return nil, fmt.Errorf("newsblur plugin: reading PatchNode body: %w", err)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, fmt.Errorf("newsblur plugin: PatchNode body must not be empty")
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode body must not be empty")
 	}
 
 	switch segs[0] {
@@ -308,13 +329,13 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) ([]s
 	case "folder":
 		return patchFolder(ctx, segs[1], raw)
 	default:
-		return nil, fmt.Errorf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 }
 
 func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) {
 	if _, _, ok := index.StoryMetadata(hash); !ok {
-		return nil, fmt.Errorf("newsblur plugin: story %s not found", hash)
+		return nil, errors.BadRequestf("newsblur plugin: story %s not found", hash)
 	}
 	// Plain json.Unmarshal, not strictUnmarshal: an unrecognized field is
 	// tolerated (dropped silently, exactly like any other absent field),
@@ -325,7 +346,7 @@ func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) 
 	// wants.
 	var patch storyPatchBody
 	if err := json.Unmarshal(raw, &patch); err != nil {
-		return nil, fmt.Errorf("newsblur plugin: invalid story patch body: %w", err)
+		return nil, errors.BadRequestf("newsblur plugin: invalid story patch body: %w", err)
 	}
 	if patch.Read == nil && patch.UserTags == nil {
 		return []string{}, nil
@@ -370,15 +391,15 @@ func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) 
 // API treats any 200 as success regardless of body).
 func patchFeed(ctx context.Context, id string, raw []byte) ([]string, error) {
 	if _, _, ok := index.FeedMetadata(ctx, id); !ok {
-		return nil, fmt.Errorf("newsblur plugin: feed %s not found", id)
+		return nil, errors.BadRequestf("newsblur plugin: feed %s not found", id)
 	}
 	// Plain json.Unmarshal -- see patchStory's identical comment.
 	var patch feedPatchBody
 	if err := json.Unmarshal(raw, &patch); err != nil {
-		return nil, fmt.Errorf("newsblur plugin: invalid feed patch body: %w", err)
+		return nil, errors.BadRequestf("newsblur plugin: invalid feed patch body: %w", err)
 	}
 	if patch.Folder != nil && patch.InFolder == nil {
-		return nil, fmt.Errorf("newsblur plugin: patching feed %s: \"folder\" requires \"in_folder\" (the feed's current folder) alongside it", id)
+		return nil, errors.BadRequestf("newsblur plugin: patching feed %s: \"folder\" requires \"in_folder\" (the feed's current folder) alongside it", id)
 	}
 	if patch.Title == nil && patch.Folder == nil {
 		return []string{}, nil
@@ -386,7 +407,7 @@ func patchFeed(ctx context.Context, id string, raw []byte) ([]string, error) {
 
 	feedID, err := strconv.Atoi(id)
 	if err != nil {
-		return nil, fmt.Errorf("newsblur plugin: invalid feed id %q: %w", id, err)
+		return nil, errors.BadRequestf("newsblur plugin: invalid feed id %q: %w", id, err)
 	}
 
 	mutateMu.Lock()
@@ -413,12 +434,12 @@ func patchFeed(ctx context.Context, id string, raw []byte) ([]string, error) {
 // folder index of its own (see typeFolder's comment in traversal.go).
 func patchFolder(ctx context.Context, path string, raw []byte) ([]string, error) {
 	if path == "" {
-		return nil, fmt.Errorf("newsblur plugin: PatchNode: folder path must not be empty")
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode: folder path must not be empty")
 	}
 	// Plain json.Unmarshal -- see patchStory's identical comment.
 	var patch folderPatchBody
 	if err := json.Unmarshal(raw, &patch); err != nil {
-		return nil, fmt.Errorf("newsblur plugin: invalid folder patch body: %w", err)
+		return nil, errors.BadRequestf("newsblur plugin: invalid folder patch body: %w", err)
 	}
 	if patch.Name == nil && patch.ToFolder == nil {
 		return []string{}, nil
@@ -450,7 +471,7 @@ func patchFolder(ctx context.Context, path string, raw []byte) ([]string, error)
 // and folder/{path} (delete).
 func (Plugin) DeleteNode(ctx context.Context, node *url.URL) error {
 	if node == nil {
-		return fmt.Errorf("newsblur plugin: DeleteNode requires a node URI")
+		return errors.BadRequestf("newsblur plugin: DeleteNode requires a node URI")
 	}
 	if index == nil || client == nil {
 		return fmt.Errorf("newsblur plugin: not initialized")
@@ -465,13 +486,13 @@ func (Plugin) DeleteNode(ctx context.Context, node *url.URL) error {
 	case len(segs) == 2 && segs[0] == "folder":
 		return deleteFolder(ctx, segs[1])
 	default:
-		return fmt.Errorf("newsblur plugin: DeleteNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return errors.BadRequestf("newsblur plugin: DeleteNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
 	}
 }
 
 func deleteStory(ctx context.Context, hash string) error {
 	if _, _, ok := index.StoryMetadata(hash); !ok {
-		return fmt.Errorf("newsblur plugin: story %s not found", hash)
+		return errors.BadRequestf("newsblur plugin: story %s not found", hash)
 	}
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
@@ -491,11 +512,11 @@ func deleteStory(ctx context.Context, hash string) error {
 func deleteFeed(ctx context.Context, id string) error {
 	view, _, ok := index.FeedMetadata(ctx, id)
 	if !ok {
-		return fmt.Errorf("newsblur plugin: feed %s not found", id)
+		return errors.BadRequestf("newsblur plugin: feed %s not found", id)
 	}
 	feedID, err := strconv.Atoi(id)
 	if err != nil {
-		return fmt.Errorf("newsblur plugin: invalid feed id %q: %w", id, err)
+		return errors.BadRequestf("newsblur plugin: invalid feed id %q: %w", id, err)
 	}
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
@@ -510,7 +531,7 @@ func deleteFeed(ctx context.Context, id string) error {
 // traversal.go.
 func deleteFolder(ctx context.Context, path string) error {
 	if path == "" {
-		return fmt.Errorf("newsblur plugin: DeleteNode: folder path must not be empty")
+		return errors.BadRequestf("newsblur plugin: DeleteNode: folder path must not be empty")
 	}
 	ownName, parentPath := splitFolderPath(path)
 	mutateMu.Lock()

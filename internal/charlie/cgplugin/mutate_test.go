@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
+	deweyerrors "code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
 // fakeClient records every write call it receives, for asserting exactly
@@ -782,5 +783,230 @@ func TestDeleteNodeDeletesTopLevelFolder(t *testing.T) {
 	}
 	if len(fc.calls) != 1 || fc.calls[0] != "DeleteFolder:Blogs:" {
 		t.Errorf("calls = %v, want [DeleteFolder:Blogs:]", fc.calls)
+	}
+}
+
+// TestErrorClassification checks RFC 0013 §Errors' caller-fault/plugin-fault
+// split (cutting-garden#185): the wire transport (cutting-garden's own
+// server.Handle) reclassifies an error as CodeInvalidParams (-32602) only
+// when deweyerrors.Is400BadRequest(err) is true, and otherwise defaults it
+// to CodeInternalError (-32603) -- so a caller mistake (bad URI, bad JSON
+// value, patching something that doesn't exist) must be tagged, while a
+// backend/setup failure (a live API call failing, "not initialized") must
+// NOT be, or the two wire codes collapse into the exact "uniform mapping"
+// the RFC calls non-conformant. This isn't about whether an error occurs --
+// every case below already has its own dedicated test for that -- it's
+// about whether the RIGHT errors carry the 400 tag and the WRONG ones don't.
+func TestErrorClassification(t *testing.T) {
+	cases := []struct {
+		name           string
+		action         func(t *testing.T) error
+		wantBadRequest bool
+	}{
+		{
+			name: "PatchNode nil node URI",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.PatchNode(context.Background(), nil, bytes.NewReader([]byte(`{}`)))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "PatchNode empty body",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader(nil))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "PatchNode story not found",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/does-not-exist"), bytes.NewReader([]byte(`{"read":true}`)))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "PatchNode story wrong-typed field",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader([]byte(`{"user_tags":"not-an-array"}`)))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "PatchNode feed folder without in_folder",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://feed/123"), bytes.NewReader([]byte(`{"folder":"new"}`)))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "CreateNode story already exists",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), nil, typeStory)
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "CreateNode unrecognized field",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://story/new-hash"), bytes.NewReader([]byte(`{"starred":true}`)), typeStory)
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "DeleteNode story not found",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://story/does-not-exist"))
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "CreateChild missing url field",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := Plugin{}.CreateChild(context.Background(), mustURL(t, "newsblur://feeds"), bytes.NewReader([]byte(`{"folder":"News"}`)), typeFeed)
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "PutNode always unsupported",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return Plugin{}.PutNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader([]byte(`{}`)))
+			},
+			wantBadRequest: true,
+		},
+		{
+			// pathSegments (url.go) drops empty path elements, so no real
+			// newsblur:// URI can reach createFolder/patchFolder/
+			// deleteFolder's own "path must not be empty" guard with segs
+			// still routed there -- exercised directly against the
+			// unexported function instead, same as their own package
+			// affords the other patch*/delete* helpers no dispatcher-level
+			// route to.
+			name: "createFolder empty path",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return createFolder(context.Background(), "", typeFolder)
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "patchFolder empty path",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				_, err := patchFolder(context.Background(), "", []byte(`{"name":"New"}`))
+				return err
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "DeleteNode feed not found",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://feed/does-not-exist"))
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "deleteFolder empty path",
+			action: func(t *testing.T) error {
+				setupMutateTest(t)
+				return deleteFolder(context.Background(), "")
+			},
+			wantBadRequest: true,
+		},
+		{
+			name: "CreateNode folder backend call failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				return Plugin{}.CreateNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), nil, typeFolder)
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "PatchNode folder backend call failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"), bytes.NewReader([]byte(`{"name":"New"}`)))
+				return err
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "DeleteNode feed backend call failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				return Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://feed/123"))
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "DeleteNode folder backend call failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				return Plugin{}.DeleteNode(context.Background(), mustURL(t, "newsblur://folder/Blogs"))
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "not initialized is a plugin fault, not a caller fault",
+			action: func(t *testing.T) error {
+				index = nil
+				client = nil
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/x"), bytes.NewReader([]byte(`{}`)))
+				return err
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "PatchNode backend call failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				_, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), bytes.NewReader([]byte(`{"read":true}`)))
+				return err
+			},
+			wantBadRequest: false,
+		},
+		{
+			name: "CreateChild backend Subscribe failure is a plugin fault",
+			action: func(t *testing.T) error {
+				_, fc := setupMutateTest(t)
+				fc.err = errors.New("newsblur: rate limited")
+				_, err := Plugin{}.CreateChild(context.Background(), mustURL(t, "newsblur://feeds"), bytes.NewReader([]byte(`{"url":"https://example.com/feed"}`)), typeFeed)
+				return err
+			},
+			wantBadRequest: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.action(t)
+			if err == nil {
+				t.Fatal("action: expected an error, got nil")
+			}
+			if got := deweyerrors.Is400BadRequest(err); got != c.wantBadRequest {
+				t.Errorf("Is400BadRequest(%v) = %v, want %v", err, got, c.wantBadRequest)
+			}
+		})
 	}
 }
