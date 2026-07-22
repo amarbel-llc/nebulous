@@ -169,7 +169,23 @@ func (Plugin) FacetCounts(
 		if err != nil {
 			return cg.FacetResult{}, false, err
 		}
-		return storyFacetCounts(stories, filter, true), true, nil
+		// byContainer=false, unlike stories/: index.StoriesByTag narrows
+		// by hasTag, a union match across BOTH user_tags and story_tags
+		// (two separate, independently-filterable facet dimensions --
+		// read_index.go's own hasTag doc comment). FacetFilter is
+		// AND-only across dimensions (no OR), so no single re-issued
+		// filter against feed/{id} can reproduce this union -- a story
+		// matched here only via user_tags (not story_tags), or vice
+		// versa, would be silently missed by filtering feed/{id} on
+		// either dimension alone. RFC 0012 §13's own conformance rule
+		// (every ByContainer entry MUST be a working descend target:
+		// re-issuing list_nodes/read_facets against the entry with the
+		// same filter must reach the attributed nodes) is not
+		// satisfiable here, unlike stories/'s ByContainer, whose entire
+		// narrowing IS the filter parameter and nothing more. Per the
+		// RFC's own guidance for a summary that isn't safely
+		// decomposable this way: omit rather than approximate.
+		return storyFacetCounts(stories, filter, false), true, nil
 	default:
 		return cg.FacetResult{}, false, nil
 	}
@@ -291,22 +307,34 @@ func (Plugin) ResolveFacetLabels(
 
 // storyFacetCounts summarizes stories into one FacetResult. byContainer
 // requests a per-feed ByContainer breakdown (RFC 0012 §13) alongside the
-// summary -- pass true for a multi-feed set (stories/, tag/{tag}) where
-// "which feeds hold the matches" is informative, false for a single feed's
-// own stories (feed/{id}), which has nothing further to attribute across.
+// summary -- pass true only for stories/, where "which feeds hold the
+// matches" is informative AND reproducible: stories/'s entire narrowing
+// IS the filter parameter, so re-issuing list_nodes/read_facets against a
+// ByContainer entry's feed/{id} with the same filter reaches exactly the
+// attributed nodes (RFC 0012 §13's "every entry MUST be a working descend
+// target" rule). feed/{id} and tag/{tag} both pass false, for two
+// DIFFERENT reasons: feed/{id} already IS the one feed being summarized,
+// nothing further to attribute across (caldav's own single-calendar
+// case); tag/{tag} narrows via a union match across two separate facet
+// dimensions (user_tag, story_tag -- read_index.go's hasTag) that no
+// single AND-only FacetFilter can reproduce, so its ByContainer would
+// violate the same working-descend-target rule stories/'s satisfies --
+// omitted per the RFC's own guidance rather than approximated.
+//
 // Recovering the per-feed match count is free here: storyFacetValues
 // already computes each story's feed id for the facetFeed dimension, so
 // counting into a second map alongside liftFacets is the SAME loop, not an
 // extra fetch (cutting-garden#170/nebulous adoption).
 //
 // Note on "container": feed/{id} is NOT a literal ListRoots child of
-// stories/ or tag/{tag} (ListRoots on either returns story/{hash} leaves
-// directly, per traversal.go) -- this attributes to the addressable
-// container for the facetFeed dimension's value instead, a semantically
-// equivalent grouping a caller can still list_nodes/read_facets into.
-// RFC 0012 §13's own bounding-rationale text names "a newsblur account's
-// feed list" as its motivating large-fan-out example, which is why this
-// reading rather than a stricter literal-child one was adopted.
+// stories/ (ListRoots on stories/ returns story/{hash} leaves directly,
+// per traversal.go) -- this attributes to the addressable container for
+// the facetFeed dimension's value instead, a semantically equivalent
+// grouping a caller can still list_nodes/read_facets into. RFC 0012 §13's
+// own bounding-rationale text names "a newsblur account's feed list" as
+// its motivating large-fan-out example, which is why this reading rather
+// than a stricter literal-child one was adopted -- confirmed normative in
+// a later §13 revision (master 5e686d2).
 func storyFacetCounts(stories []tools.StoryRef, filter cg.FacetFilter, byContainer bool) cg.FacetResult {
 	summary := cg.FacetSummary{}
 	// One evaluation instant for the whole summary (§11.3): stories are

@@ -302,10 +302,14 @@ func TestFacetCounts_FeedHasNoByContainer(t *testing.T) {
 	}
 }
 
-// TestFacetCounts_TagByContainerAttributesToFeeds pins tag/{tag}'s wiring
-// to the same per-feed attribution stories/ gets -- a distinct FacetCounts
-// call site sharing storyFacetCounts's byContainer=true path.
-func TestFacetCounts_TagByContainerAttributesToFeeds(t *testing.T) {
+// TestFacetCounts_TagHasNoByContainer pins that tag/{tag} does NOT
+// populate ByContainer, unlike stories/: index.StoriesByTag narrows by a
+// union match across user_tags and story_tags (two separate facet
+// dimensions), which no single re-issued FacetFilter (AND-only) can
+// reproduce against feed/{id} -- RFC 0012 §13's "every entry MUST be a
+// working descend target" rule isn't satisfiable here, so this omits
+// rather than approximates.
+func TestFacetCounts_TagHasNoByContainer(t *testing.T) {
 	fi := newFakeIndex()
 	fi.tagStories = map[string][]tools.StoryRef{
 		"golang": {
@@ -320,8 +324,8 @@ func TestFacetCounts_TagByContainerAttributesToFeeds(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("FacetCounts: ok=%v err=%v", ok, err)
 	}
-	if len(result.ByContainer) != 2 {
-		t.Errorf("ByContainer = %+v, want 2 entries (one per feed)", result.ByContainer)
+	if result.ByContainer != nil {
+		t.Errorf("ByContainer = %+v, want nil (tag/{tag}'s union narrowing isn't filter-reproducible)", result.ByContainer)
 	}
 }
 
