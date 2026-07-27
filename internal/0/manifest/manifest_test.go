@@ -118,6 +118,104 @@ func TestManifestLookupDoesNotReloadWithinDebounceWindow(t *testing.T) {
 	}
 }
 
+// nebulous#44: Record/RecordBatch/Delete used to merge into their own
+// in-memory m.entries and save the WHOLE map, without ever re-reading the
+// file first -- so a concurrent writer's already-committed save could be
+// silently clobbered by a save that started before it and finished after.
+// Confirmed live as nebulous#54: a patch_node clearing a story's
+// user_tags reported "applied" but a read-back immediately after
+// (sometimes) still showed the pre-clear value, self-resolving on a
+// repeat -- exactly this race, with a concurrently-running `nebulous
+// fetch` process as the other writer. Two separate Manifest instances
+// over the same file stand in for two OS processes, same as
+// TestManifestLookupPicksUpConcurrentWriterAfterStaleness does for reads.
+func TestManifestRecordDoesNotClobberConcurrentWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// other writes k1 and commits it to disk first.
+	if err := other.Record("k1", ManifestEntry{Digest: "other-abc", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("other.Record: %v", err)
+	}
+
+	// m never reloaded, so its in-memory entries still don't know about
+	// k1. Its own Record call for a different key must not silently drop
+	// other's already-committed write when it saves the whole map.
+	if err := m.Record("k2", ManifestEntry{Digest: "m-def", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("m.Record: %v", err)
+	}
+
+	reloaded, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reloaded.Lookup("k1"); !ok {
+		t.Error("k1 (other process's write) was lost after a concurrent Record from a stale in-memory copy")
+	}
+	if _, ok := reloaded.Lookup("k2"); !ok {
+		t.Error("k2 (this process's own write) is missing")
+	}
+}
+
+// Same race, but through RecordBatch and Delete -- both share Record's
+// merge-without-reload shape.
+func TestManifestRecordBatchAndDeleteDoNotClobberConcurrentWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	m, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Record("k0", ManifestEntry{Digest: "keep", WrittenAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Record("k1", ManifestEntry{Digest: "other-abc", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("other.Record: %v", err)
+	}
+
+	if err := m.RecordBatch(map[string]ManifestEntry{
+		"k2": {Digest: "m-def", WrittenAt: time.Now()},
+	}); err != nil {
+		t.Fatalf("m.RecordBatch: %v", err)
+	}
+
+	other2, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other2.Record("k3", ManifestEntry{Digest: "other-ghi", WrittenAt: time.Now()}); err != nil {
+		t.Fatalf("other2.Record: %v", err)
+	}
+
+	if err := m.Delete("k0"); err != nil {
+		t.Fatalf("m.Delete: %v", err)
+	}
+
+	reloaded, err := NewManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"k1", "k2", "k3"} {
+		if _, ok := reloaded.Lookup(key); !ok {
+			t.Errorf("%s was lost to a concurrent writer's stale-in-memory save", key)
+		}
+	}
+	if _, ok := reloaded.Lookup("k0"); ok {
+		t.Error("k0 should have been deleted")
+	}
+}
+
 func TestManifestPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manifest.json")
 

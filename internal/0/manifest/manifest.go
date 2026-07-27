@@ -150,6 +150,7 @@ func (m *Manifest) All() map[string]ManifestEntry {
 func (m *Manifest) Record(key string, entry ManifestEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.reloadLocked()
 	m.entries[key] = entry
 	return m.saveLocked()
 }
@@ -163,6 +164,7 @@ func (m *Manifest) RecordBatch(entries map[string]ManifestEntry) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.reloadLocked()
 	for k, v := range entries {
 		m.entries[k] = v
 	}
@@ -172,8 +174,37 @@ func (m *Manifest) RecordBatch(entries map[string]ManifestEntry) error {
 func (m *Manifest) Delete(key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.reloadLocked()
 	delete(m.entries, key)
 	return m.saveLocked()
+}
+
+// reloadLocked unconditionally re-reads the manifest file from disk into
+// m.entries, bypassing staleCheckDebounce entirely (unlike
+// refreshIfStale/ForceRefresh, which still only reload when the file's
+// mtime moved). Record/RecordBatch/Delete each call this before merging
+// their own change in and saving the whole map back -- without it, a
+// process whose in-memory entries never picked up another process's
+// meanwhile-committed write would overwrite that write on its own next
+// save (nebulous#44; confirmed live as nebulous#54: a patch_node clearing
+// a story's user_tags reported "applied" but a read-back immediately
+// after intermittently still showed the pre-clear value, self-resolving
+// on a repeat -- exactly this race, racing a concurrently-running
+// `nebulous fetch`). This closes the specific "merge from a stale
+// in-memory copy" gap; it does not eliminate the narrower TOCTOU window
+// between this reload and saveLocked's write below, where a different
+// process could still save in between -- #44's own doc comment already
+// flags that a full fix needs a file lock or compare-and-swap, out of
+// scope here. A reload failure leaves m.entries as-is, same as
+// refreshIfStale's own best-effort handling. Caller must hold m.mu.
+func (m *Manifest) reloadLocked() {
+	if err := m.load(); err != nil {
+		return
+	}
+	m.lastCheckedAt = time.Now()
+	if fi, err := os.Stat(m.path); err == nil {
+		m.lastMtimeNanos = fi.ModTime().UnixNano()
+	}
 }
 
 func (m *Manifest) saveLocked() error {
