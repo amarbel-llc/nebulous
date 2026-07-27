@@ -115,6 +115,71 @@ func (Plugin) ListRoots(ctx context.Context, node *url.URL) ([]cg.Node, error) {
 	}
 }
 
+// ListEnriched serves the OPTIONAL EnrichedLister capability (RFC 0012
+// §4/§160, cutting-garden#160): the same story/feed nodes ListRoots
+// already returns Facet-enriched, pre-filtered by filter -- no separate
+// data-bearing fetch, since ListRoots' underlying feedNodes/storyNodes
+// already populate Facets from the in-memory index this plugin pays for
+// regardless. Enables adopting cutting-garden's shared
+// BestEffortBulkMutate helper (bulk_mutate.go, cutting-garden#197),
+// which needs a plugin to be both a NodeMutator and an EnrichedLister.
+//
+// Scope MIRRORS FacetCounts' own switch exactly (feeds/stories/feed/{id}/
+// tag/{tag}) rather than ListRoots' broader one: a story's own leaves
+// (story/{hash}) or an unknown/unsupported node (including folder/{path},
+// which has no read surface at all -- see typeFolder's own comment) are
+// not facet-bearing containers, so ListEnriched DECLINES (ok=false) for
+// them rather than returning an empty match -- BulkBestEffortSweep
+// refuses a decline with a clear error instead of silently sweeping zero
+// nodes, the same write-safety caldav's own ListEnriched established
+// (cutting-garden#191): a mutation must never treat "I don't serve this"
+// the same as "nothing matched." "tags" (the tag-LISTING container,
+// distinct from tag/{tag}) is deliberately excluded too, matching
+// DescribeFacets: tag nodes carry no facets of their own to filter by.
+func (Plugin) ListEnriched(
+	ctx context.Context, node *url.URL, filter cg.FacetFilter,
+) ([]cg.Node, bool, error) {
+	if node == nil {
+		return nil, false, fmt.Errorf("newsblur plugin: ListEnriched requires a node URI")
+	}
+	if index == nil {
+		return nil, false, fmt.Errorf("newsblur plugin: index not initialized")
+	}
+
+	segs := pathSegments(node)
+	var (
+		nodes []cg.Node
+		err   error
+	)
+	switch {
+	case len(segs) == 1 && segs[0] == "feeds":
+		nodes, err = feedNodes(ctx)
+	case len(segs) == 1 && segs[0] == "stories":
+		nodes, err = storyNodes(index.Stories())
+	case len(segs) == 2 && segs[0] == "feed":
+		id, convErr := strconv.Atoi(segs[1])
+		if convErr != nil {
+			return nil, false, fmt.Errorf("newsblur plugin: invalid feed id %q: %w", segs[1], convErr)
+		}
+		nodes, err = storyNodes(index.FeedStories(id))
+	case len(segs) == 2 && segs[0] == "tag":
+		nodes, err = storyNodes(index.StoriesByTag(segs[1]))
+	default:
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	matched := make([]cg.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if filter.Matches(n.Facets) {
+			matched = append(matched, n)
+		}
+	}
+	return matched, true, nil
+}
+
 func feedNodes(ctx context.Context) ([]cg.Node, error) {
 	feeds, err := index.Feeds(ctx)
 	if err != nil {

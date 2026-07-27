@@ -151,6 +151,28 @@ func TestBulkMutateSweepMatchesAndApplies(t *testing.T) {
 	}
 }
 
+// A sweep whose Root isn't a facet-bearing container (ListEnriched
+// declines) REFUSES with an error rather than silently sweeping zero
+// nodes -- cutting-garden#197's shared write-safety contract: a mutation
+// must never treat "I don't serve this" the same as "nothing matched."
+func TestBulkMutateSweepDeclinedRootRefuses(t *testing.T) {
+	_, fc := setupMutateTest(t)
+
+	_, err := Plugin{}.BulkMutate(context.Background(), cg.BulkRequest{
+		Atomicity: cg.BulkBestEffort,
+		Sweep: &cg.BulkSweep{
+			Root: mustURL(t, "newsblur://story/"+sampleHash),
+			Op:   cg.BulkOp{Kind: cg.BulkPatch, Body: []byte(`{"read":true}`)},
+		},
+	})
+	if err == nil {
+		t.Fatal("BulkMutate sweeping a declined root: expected an error, got nil")
+	}
+	if len(fc.calls) != 0 {
+		t.Errorf("calls = %v, want none", fc.calls)
+	}
+}
+
 // A filter matching nothing yields an empty, error-free result — not a
 // "root not found" or "nothing to sweep" error. No node's per-verb
 // mutation ever fires.

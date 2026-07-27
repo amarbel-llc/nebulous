@@ -2,8 +2,8 @@ schema = 3
 
 [mod]
   [mod.'code.linenisgreat.com/cutting-garden']
-    version = 'v0.1.25-0.20260727151947-9ec36748ad7e'
-    hash = 'sha256-v9s9FCh2zZGSLFFrGcZgsqSNuFGsvJ6bC2ETH/xu3Xk='
+    version = 'v0.1.25-0.20260727185439-f00c1654a398'
+    hash = 'sha256-AGSRRrEten8XdGwhoyCVSN7bG7dqXO7sIeRZg2nxG20='
     goVersion = '1.26'
 
   [mod.'code.linenisgreat.com/hyphence/go']

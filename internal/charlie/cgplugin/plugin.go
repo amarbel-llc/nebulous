@@ -66,6 +66,7 @@ var index Index
 func SetIndex(ri Index) { index = ri }
 
 var (
-	_ cg.RootProvider = Plugin{}
-	_ cg.LeafReader   = Plugin{}
+	_ cg.RootProvider   = Plugin{}
+	_ cg.LeafReader     = Plugin{}
+	_ cg.EnrichedLister = Plugin{}
 )

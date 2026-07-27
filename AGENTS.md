@@ -87,15 +87,17 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       feed_index.go                In-memory word index over feed metadata
     internal/charlie/cgplugin/     cutting-garden newsblur:// scheme plugin
       plugin.go                    Plugin identity + Index injection (SetIndex)
-      traversal.go                 Types / Roots / ListRoots (incl. per-format capture leaves)
+      traversal.go                 Types / Roots / ListRoots (incl. per-format capture leaves) /
+                                    ListEnriched (EnrichedLister: ListRoots' same Facet-enriched
+                                    story/feed nodes, pre-filtered -- enables bulk_mutate.go's sweep)
       leaf.go                      ReadLeaf (story content/original/metadata/capture, feed metadata)
       facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
       mutate.go                    NodeMutator: story/feed/folder create/patch/delete (SetClient)
-      bulk_mutate.go               BulkMutator (RFC 0017): best-effort-only batch of the same
-                                    NodeMutator verbs, explicit ops or a Root+Filter sweep (matches
-                                    resolved via ListRoots + FacetFilter.Matches, no EnrichedLister
-                                    needed) -- rejects atomic with cg.ErrBulkAtomicUnsupported since
-                                    NewsBlur's REST API has no multi-object transaction primitive
+      bulk_mutate.go               BulkMutator (RFC 0017): one delegating line to
+                                    cg.BestEffortBulkMutate (cutting-garden#197's shared best-effort
+                                    dispatch helper) -- rejects atomic with
+                                    cg.ErrBulkAtomicUnsupported since NewsBlur's REST API has no
+                                    multi-object transaction primitive
       create_child.go              ContainerCreator.CreateChild: subscribe (server-assigned feed id)
       schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
@@ -104,8 +106,8 @@ server-side (cutting-garden#143). Reads stay token-free either way.
 
 `internal/charlie/cgplugin.Plugin{}` (RootProvider/LeafReader/FacetDescriber/
 FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/ContainerCreator/
-BodyDescriber/BulkMutator) is served out-of-process via `nebulous
-traversal-serve` (RFC 0013): cutting-garden's own main binary spawns it
+BodyDescriber/BulkMutator/EnrichedLister) is served out-of-process via
+`nebulous traversal-serve` (RFC 0013): cutting-garden's own main binary spawns it
 over an AF_UNIX rendezvous socket per a `[[plugins]]` config stanza and
 dispatches `newsblur://` through it, so the tools appear as
 `cutting-garden_*` on cutting-garden's own MCP child rather than a
@@ -123,6 +125,17 @@ same NodeMutator verbs -- an explicit changeset or a Root+Filter sweep --
 through cutting-garden's `bulk_mutate` tool. Best-effort only: NewsBlur's
 REST API has no multi-object transaction, so an `atomic` request is
 rejected with `cg.ErrBulkAtomicUnsupported`, never silently downgraded.
+Since cutting-garden#197, `BulkMutate` is one line delegating to
+`cg.BestEffortBulkMutate(ctx, p, p, req)` -- the shared best-effort
+dispatch helper caldav and jira also use, so this plugin can't drift
+from the #182 patchedNothing-vs-applied partitioning or the sweep
+decline-refusal write-safety contract by carrying its own copy. The
+delegation requires `EnrichedLister` (`ListEnriched`, traversal.go)
+alongside `NodeMutator`: it reuses ListRoots' same Facet-enriched
+story/feed nodes, pre-filtered, and DECLINES (rather than returning an
+empty match) for any node that isn't one of the facet-bearing containers
+FacetCounts already recognizes -- a sweep over a declined root refuses
+with an error instead of silently sweeping zero nodes.
 
 ### Three-Phase Architecture: Sync (+ Capture) + Serve
 
