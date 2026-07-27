@@ -91,6 +91,11 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       leaf.go                      ReadLeaf (story content/original/metadata/capture, feed metadata)
       facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
       mutate.go                    NodeMutator: story/feed/folder create/patch/delete (SetClient)
+      bulk_mutate.go               BulkMutator (RFC 0017): best-effort-only batch of the same
+                                    NodeMutator verbs, explicit ops or a Root+Filter sweep (matches
+                                    resolved via ListRoots + FacetFilter.Matches, no EnrichedLister
+                                    needed) -- rejects atomic with cg.ErrBulkAtomicUnsupported since
+                                    NewsBlur's REST API has no multi-object transaction primitive
       create_child.go              ContainerCreator.CreateChild: subscribe (server-assigned feed id)
       schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
@@ -99,18 +104,25 @@ server-side (cutting-garden#143). Reads stay token-free either way.
 
 `internal/charlie/cgplugin.Plugin{}` (RootProvider/LeafReader/FacetDescriber/
 FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/ContainerCreator/
-BodyDescriber) is served out-of-process via `nebulous traversal-serve` (RFC
-0013): cutting-garden's own main binary spawns it over an AF_UNIX rendezvous
-socket per a `[[plugins]]` config stanza and dispatches `newsblur://` through
-it, so the tools appear as `cutting-garden_*` on cutting-garden's own MCP
-child rather than a separate one. Capability advertisement is
-type-assertion-driven on the cutting-garden SDK side (`pkgs/traversal_serve`),
-so nothing here maintains its own capability list.
+BodyDescriber/BulkMutator) is served out-of-process via `nebulous
+traversal-serve` (RFC 0013): cutting-garden's own main binary spawns it
+over an AF_UNIX rendezvous socket per a `[[plugins]]` config stanza and
+dispatches `newsblur://` through it, so the tools appear as
+`cutting-garden_*` on cutting-garden's own MCP child rather than a
+separate one. Capability advertisement is type-assertion-driven on the
+cutting-garden SDK side (`pkgs/traversal_serve`), so nothing here
+maintains its own capability list.
 
 An earlier linked-plugin binary (`cmd/nebulous-cg`, injected in-process into
 cutting-garden's `cgapp.Build()`) has been retired now that the wire-plugin
 path is verified in production (nebulous#40). The bespoke `nebulous` MCP
 (story_query/mark_*/opml) remains a separate, unrelated child either way.
+
+`BulkMutator` (`bulk_mutate.go`, RFC 0017, cutting-garden#191) batches the
+same NodeMutator verbs -- an explicit changeset or a Root+Filter sweep --
+through cutting-garden's `bulk_mutate` tool. Best-effort only: NewsBlur's
+REST API has no multi-object transaction, so an `atomic` request is
+rejected with `cg.ErrBulkAtomicUnsupported`, never silently downgraded.
 
 ### Three-Phase Architecture: Sync (+ Capture) + Serve
 

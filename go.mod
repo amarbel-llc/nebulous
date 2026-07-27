@@ -3,7 +3,7 @@ module code.linenisgreat.com/nebulous
 go 1.26
 
 require (
-	code.linenisgreat.com/cutting-garden v0.1.25-0.20260722133831-1ac850022120
+	code.linenisgreat.com/cutting-garden v0.1.25-0.20260727151947-9ec36748ad7e
 	code.linenisgreat.com/madder/go v0.4.5-0.20260720184544-d463a948790d
 	code.linenisgreat.com/piggy/go v0.0.0-20260720155209-77cfdea0031e
 	code.linenisgreat.com/purse-first/libs/dewey v0.5.0
