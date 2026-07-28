@@ -33,7 +33,7 @@ lint-worktree:
   cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
   conformist check --config-file "$cfg" --tree-root .
 
-# Format the tree in place (repair mode) via `nix fmt`.
+# format the tree in place (repair mode) via `nix fmt`
 [group('codemod')]
 codemod-fmt-tree:
   nix fmt
@@ -67,17 +67,17 @@ build-go tag="debug":
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous       ./cmd/nebulous
   go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/migrate-cache  ./cmd/migrate-cache
 
-# Reproducible nix build — the primary release artifact.
+# reproducible nix build — the primary release artifact
 [group('build')]
 build-nix:
   nix build --show-trace
 
-# Run Go unit tests.
+# run Go unit tests
 [group('test')]
 test-go *args:
   go test {{args}} ./...
 
-# Run the bats integration suite against the debug build.
+# run the bats integration suite against the debug build
 [group('test')]
 test-bats *args: build-go
   MIGRATE_CACHE_BIN="$(pwd)/build/debug/migrate-cache" \
@@ -122,7 +122,7 @@ debug-verify-traversal-serve cg_bin: build-go
   } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 \
     | jq -r '.result.content[0].text | fromjson | (.facets.feed | length) as $total | (.labels.feed | length) as $labelled | "\($labelled)/\($total) feed ids labelled"'
 
-# Verify the flake-pinned madder path is ldflags-injected into the debug build.
+# verify the flake-pinned madder path is ldflags-injected into the debug build
 [group('debug')]
 debug-inject-check:
   #!/usr/bin/env bash
@@ -158,19 +158,19 @@ codemod-generate-facades:
 explore-fetch: build-go
   ./build/debug/nebulous fetch
 
-# Build and install the MCP server to ~/.claude.json.
+# build and install the MCP server to ~/.claude.json
 install-dev: build-nix
   ./result/bin/nebulous install-mcp
 
 cache-dir := env("HOME") / ".cache/nebulous/store"
 
-# Back up the local nebulous blob store before a risky migration.
+# back up the local nebulous blob store before a risky migration
 [group('debug')]
 debug-backup-cache:
   cp -r {{cache-dir}} {{cache-dir}}.bak
   @echo "Backed up to {{cache-dir}}.bak"
 
-# Restore the nebulous blob store from the most recent backup.
+# restore the nebulous blob store from the most recent backup
 [group('debug')]
 debug-restore-cache:
   rm -rf {{cache-dir}}
@@ -222,7 +222,7 @@ debug-probe-starred-story story_hash:
     --data-urlencode "h={{story_hash}}" \
   | jq .
 
-# Sample the local corpus: list the first 5 keys, total count, and first entry body.
+# sample the local corpus: list the first 5 keys, total count, and first entry body
 [group('explore')]
 explore-corpus: build-go
   ./build/debug/nebulous corpus-list | head -5
