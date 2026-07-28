@@ -13,6 +13,8 @@ codemod-fmt: codemod-fmt-tree
 
 # Read-only formatting + the eng preset's file-based linters, via the sandboxed
 # checks.formatting derivation.
+#
+# check formatting and the eng file-based linters
 [group('lint')]
 lint-fmt:
   #!/usr/bin/env bash
@@ -22,6 +24,8 @@ lint-fmt:
 
 # Impure eng checks (git remotes, sweatfile, agents-md) against the working
 # tree; conformist comes from the devShell PATH.
+#
+# run the impure eng checks against the working tree
 [group('lint')]
 lint-worktree:
   #!/usr/bin/env bash
@@ -36,6 +40,8 @@ codemod-fmt-tree:
 
 # Debug build of all nebulous binaries (nebulous, migrate-cache).
 # Pass tag=release for a stripped production build.
+#
+# build all nebulous binaries
 [group('build')]
 build-go tag="debug":
   #!/usr/bin/env bash
@@ -84,6 +90,8 @@ test-bats *args: build-go
 # read_facets work (nebulous#40), including the `feed` facet dimension's
 # label coverage (nebulous#49).
 # Usage: just debug-verify-traversal-serve /path/to/cutting-garden
+#
+# check `nebulous traversal-serve` end-to-end against a real cutting-garden
 [group('debug')]
 debug-verify-traversal-serve cg_bin: build-go
   #!/usr/bin/env bash
@@ -124,6 +132,8 @@ debug-inject-check:
 
 # Bump a single flake input's pin in flake.lock. Example:
 #   just debug-flake-update-input madder
+#
+# bump a single flake input's pin in flake.lock
 [group('debug')]
 debug-flake-update-input input:
   nix flake update --flake . {{input}}
@@ -134,12 +144,16 @@ debug-flake-update-input input:
 # search at the repo root — nebulous has no on-disk conformist/treefmt
 # config, and an unbounded walk escalates to a stray ancestor
 # conformist.toml (an eng-root checkout).
+#
+# regenerate pkgs/ facades from internal/ packages via dagnabit
 [group('codemod')]
 codemod-generate-facades:
   DAGNABIT_CEILING_DIRECTORIES="{{justfile_directory()}}" dagnabit export
 
 # Populate the local persistent store from the NewsBlur API.
 # Requires NEWSBLUR_TOKEN in the environment (set via .secrets.env / direnv).
+#
+# populate the local persistent store from the NewsBlur API
 [group('explore')]
 explore-fetch: build-go
   ./build/debug/nebulous fetch
@@ -165,6 +179,8 @@ debug-restore-cache:
 
 # One-shot migration from the legacy ~/.cache/nebulous/responses layout
 # to the new ~/.cache/nebulous/store layout. Not built into the prod binary.
+#
+# migrate the legacy response cache to the new store layout
 [group('codemod')]
 codemod-migrate-cache *args:
   go run ./cmd/migrate-cache {{args}}
@@ -181,6 +197,8 @@ codemod-migrate-cache *args:
 # invisible to nebulous's own SetStoryUserTags/StarStory -- this prints
 # exactly what NewsBlur returns, letting you check that layer directly.
 # Requires NEWSBLUR_TOKEN in the environment.
+#
+# star a story and replace its user_tags, printing the raw response (MUTATES the live account)
 [group('debug')]
 debug-probe-star-response story_hash tags:
   curl -sS -X POST https://www.newsblur.com/reader/mark_story_hash_as_starred \
@@ -195,6 +213,8 @@ debug-probe-star-response story_hash tags:
 # investigation, H2): does the endpoint nebulous's fetch pipeline actually
 # reads from even include user_tags per story at all? Requires
 # NEWSBLUR_TOKEN in the environment.
+#
+# print the raw /reader/starred_stories response body for one hash
 [group('debug')]
 debug-probe-starred-story story_hash:
   curl -sS -G https://www.newsblur.com/reader/starred_stories \
