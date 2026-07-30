@@ -47,6 +47,7 @@
       inputs.utils.follows = "utils";
     };
     madder.inputs.conformist.follows = "conformist";
+    madder.inputs.bats.follows = "bats";
     purse-first.inputs.conformist.follows = "conformist";
     bats.inputs.conformist.follows = "conformist";
   };
