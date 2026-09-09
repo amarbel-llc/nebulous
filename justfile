@@ -122,6 +122,27 @@ debug-verify-traversal-serve cg_bin: build-go
   } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 \
     | jq -r '.result.content[0].text | fromjson | (.facets.feed | length) as $total | (.labels.feed | length) as $labelled | "\($labelled)/\($total) feed ids labelled"'
 
+# Sweep every generated man page's NAME line through lexgrog and fail on any
+# description over the fleet ceiling (72 chars, one line): spinclass renders
+# NAME lines into a system-prompt index. The generator itself refuses to
+# emit an over-long summary (tools.SplitManDescriptions); this is the
+# from-the-outside check on the nix build's share/man.
+#
+# check the built man pages' NAME lines stay <= 72 chars via lexgrog
+[group('debug')]
+debug-lexgrog-man: build-nix
+  #!/usr/bin/env bash
+  set -euo pipefail
+  status=0
+  for page in result/share/man/man*/*; do
+    line=$(lexgrog "$page")
+    desc=${line#*: \"}; desc=${desc%\"}; desc=${desc#* - }
+    n=${#desc}
+    printf '%3d  %s\n' "$n" "$line"
+    if (( n > 72 )); then status=1; fi
+  done
+  exit "$status"
+
 # verify the flake-pinned madder path is ldflags-injected into the debug build
 [group('debug')]
 debug-inject-check:
