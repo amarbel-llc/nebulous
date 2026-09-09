@@ -124,9 +124,10 @@ debug-verify-traversal-serve cg_bin: build-go
 
 # Sweep every generated man page's NAME line through lexgrog and fail on any
 # description over the fleet ceiling (72 chars, one line): spinclass renders
-# NAME lines into a system-prompt index. The generator itself refuses to
-# emit an over-long summary (tools.SplitManDescriptions); this is the
-# from-the-outside check on the nix build's share/man.
+# NAME lines into a system-prompt index. go-mcp's GenerateManpages (>= v0.6.2)
+# derives each NAME line itself and refuses to emit an over-long one
+# (go-mcp-command(7) MANPAGE NAME LINES); this is the from-the-outside check
+# on the nix build's share/man.
 #
 # check the built man pages' NAME lines stay <= 72 chars via lexgrog
 [group('debug')]

@@ -50,12 +50,6 @@ func main() {
 	// generate-plugin and hook don't need a live NewsBlur connection.
 	if flag.NArg() >= 1 && flag.Arg(0) == "generate-plugin" {
 		app, _ := tools.RegisterAll(nil)
-		// Man page NAME lines must stay one short clause (spinclass indexes
-		// them into a system prompt); only this generation-time App is
-		// rewritten, so `serve mcp` still advertises the full descriptions.
-		if err := tools.SplitManDescriptions(app); err != nil {
-			log.Fatalf("generating plugin: %v", err)
-		}
 		if err := app.HandleGeneratePlugin(flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatalf("generating plugin: %v", err)
 		}
