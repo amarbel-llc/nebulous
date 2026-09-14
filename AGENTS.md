@@ -18,17 +18,22 @@ Built on `go-mcp` from `code.linenisgreat.com/purse-first/libs/go-mcp`.
 ## Build & Run
 
 ``` sh
-just build-go            # Debug build → build/debug/{nebulous,migrate-cache}
-just build-go release    # Release build (stripped)
+just build-go            # nix-built binaries linked → build/debug/{nebulous,migrate-cache}
 just build-nix           # Nix build (reproducible, generates plugin.json)
+just test-go             # godyn per-package Go tests (checks.nebulous-tests)
+just debug-go-test internal/bravo/tools -test.run=TestX  # one package, dirty tree
 just install-dev         # Nix build + install MCP server to ~/.claude.json
 just debug-verify-traversal-serve /path/to/cutting-garden  # RFC 0013 wire-plugin check
 ```
 
-The Nix build uses `buildGoApplication` with `gomod2nix.toml` (not vendorHash).
-After changing Go dependencies: `go mod tidy && gomod2nix` (the devShell's
-go-sync-wrap hook regenerates `gomod2nix.toml` automatically after `go get` /
-`go mod tidy`).
+Go dependencies live in `go.nix` (igloo FDR 0008, godyn(7) § GO.NIX MANIFEST):
+there is no go.mod, go.sum or gomod2nix.toml in the checkout and no ambient
+`go` in the devShell. The Nix build is `buildGoAuto { manifest = ./go.nix; }`,
+which renders the go.mod inside nix. Fleet modules (cutting-garden, tap/go,
+purse-first's go-mcp) are `flakeInputs` bridged from flake inputs, so bumping
+one is a `flake.lock`-only edit (`just debug-flake-update-input <input> ...`).
+Third-party changes go through the escape hatch, which runs the go command
+inside nix and rewrites go.nix: `just codemod-go -- go get <module>@<version>`.
 
 ## Authentication
 
@@ -214,10 +219,12 @@ once a receipt is recorded).
 
 ## Nix Flake
 
-Follows the stable-first nixpkgs convention from the parent eng repo. Devenvs are
-imported from `purse-first` (go + shell). `madder` is wired as a flake input
-(devShell + bats fixtures only — `internal/0/madder` uses `madder/go` in-process,
-no subprocess); `cutting-garden` is a vendored Go dependency (gomod2nix).
+Follows the stable-first nixpkgs convention from the parent eng repo. `madder`
+is wired as a flake input (devShell + bats fixtures only — `internal/0/madder`
+uses `madder/go` in-process, no subprocess); `cutting-garden` is a flake input
+whose Go module is bridged through `go.nix` `flakeInputs`. nebulous is itself
+an RFC 0001 producer: `mkGoPkgs { manifest = ./go.nix; }` publishes `go-pkgs`
+/ `go-pkgs-test`, and the binaries build from `go-pkgs-test`.
 
 `nix/nixos-module.nix` + `nix/home-manager-module.nix` are the self-passing
 producer modules (`circus-host-integration(7)`) exported as

@@ -198,13 +198,14 @@ The build entrypoint is the justfile:
 
 ```sh
 just build          # build-go + build-nix
-just build-go       # debug build → build/debug/{nebulous,migrate-cache}
-just build-nix      # reproducible Nix build (buildGoApplication + gomod2nix)
-just test           # go tests + bats lanes (zz-tests_bats/)
+just build-go       # nix-built binaries linked → build/debug/{nebulous,migrate-cache}
+just build-nix      # reproducible Nix build (igloo godyn, from go.nix)
+just test           # godyn Go tests + bats lanes (zz-tests_bats/)
 just install-dev    # nix build + install MCP server config
 just debug-verify-traversal-serve /path/to/cutting-garden
                     # RFC 0013 wire-plugin check against a real cutting-garden binary
 ```
 
-After changing Go dependencies: `go mod tidy && gomod2nix` (the devShell's
-go-sync-wrap hook regenerates `gomod2nix.toml` automatically).
+Go dependencies live in `go.nix` (igloo FDR 0008); there is no go.mod in the
+checkout. Change them through the escape hatch, which runs the go command inside
+nix and rewrites go.nix: `just codemod-go -- go get <module>@<version>`.

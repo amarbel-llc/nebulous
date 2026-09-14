@@ -134,6 +134,65 @@
         "url": "https://code.linenisgreat.com/crap/archive/master.tar.gz"
       }
     },
+    "cutting-garden": {
+      "inputs": {
+        "bats": [
+          "bats"
+        ],
+        "conformist": [
+          "conformist"
+        ],
+        "crap": [
+          "madder",
+          "crap"
+        ],
+        "flake-utils": [
+          "utils"
+        ],
+        "hyphence": [
+          "madder",
+          "hyphence"
+        ],
+        "igloo": [
+          "igloo"
+        ],
+        "langlang": [
+          "madder",
+          "langlang"
+        ],
+        "madder": [
+          "madder"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "piggy": [
+          "madder",
+          "piggy"
+        ],
+        "purse-first": [
+          "purse-first"
+        ],
+        "tap": [
+          "tap"
+        ],
+        "tommy": [
+          "madder",
+          "tommy"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789414357,
+        "narHash": "sha256-A2bPH46XbCw8JkWw0xNdv0ZW0BtA6bs9Rt1XVAI+t90=",
+        "rev": "5c3f9e4284a852e76e11de9149b820747d5eeb13",
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/cutting-garden/archive/5c3f9e4284a852e76e11de9149b820747d5eeb13.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/cutting-garden/archive/master.tar.gz"
+      }
+    },
     "doppelgang": {
       "inputs": {
         "conformist": [
@@ -271,11 +330,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1789158584,
-        "narHash": "sha256-BJfC7Hm14BeezMQS40kSb1dUdX4brPqHJzwSomxtH30=",
-        "rev": "1d5498c69bde33fe9d36f1b38cebdd1ddd952512",
+        "lastModified": 1789421831,
+        "narHash": "sha256-iVHoqBWOg92CQSNHKWqCytlJa/WVKgfFFRUS+udtqfc=",
+        "rev": "ca00931a206d2becc535d59a33266d7de6f97e81",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/igloo/archive/1d5498c69bde33fe9d36f1b38cebdd1ddd952512.tar.gz"
+        "url": "https://code.linenisgreat.com/igloo/archive/ca00931a206d2becc535d59a33266d7de6f97e81.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -505,6 +564,7 @@
       "inputs": {
         "bats": "bats",
         "conformist": "conformist",
+        "cutting-garden": "cutting-garden",
         "igloo": "igloo",
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master",

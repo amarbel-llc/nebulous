@@ -2,9 +2,8 @@
   description = "NewsBlur MCP server";
 
   inputs = {
-    # amarbel-llc/nixpkgs carries the gomod2nix build helpers natively
-    # (pkgs.buildGoApplication, pkgs.mkGoEnv, pkgs.gomod2nix CLI). See
-    # `man 7 gomod2nix` inside the devshell for the migration guide.
+    # igloo carries the Go build helpers: godyn (buildGoAuto, the go.nix
+    # manifest, godyn-go / godyn-test) and mkGoPkgs. See godyn(7).
     igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
     nixpkgs-master.url = "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
@@ -50,10 +49,31 @@
     madder.inputs.bats.follows = "bats";
     purse-first.inputs.conformist.follows = "conformist";
     bats.inputs.conformist.follows = "conformist";
+    # Source of the code.linenisgreat.com/cutting-garden Go module, bridged via
+    # go.nix flakeInputs (its go-pkgs, RFC 0001). The transitive fleet modules
+    # it shares with madder follow madder's nodes so one rev of each resolves.
+    cutting-garden = {
+      url = "https://code.linenisgreat.com/cutting-garden/archive/master.tar.gz";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        flake-utils.follows = "utils";
+        madder.follows = "madder";
+        tap.follows = "tap";
+        purse-first.follows = "purse-first";
+        bats.follows = "bats";
+        conformist.follows = "conformist";
+        crap.follows = "madder/crap";
+        hyphence.follows = "madder/hyphence";
+        piggy.follows = "madder/piggy";
+        tommy.follows = "madder/tommy";
+        langlang.follows = "madder/langlang";
+      };
+    };
   };
 
   outputs =
-    {
+    inputs@{
       conformist,
       self,
       igloo,
@@ -61,8 +81,8 @@
       nixpkgs-master,
       madder,
       bats,
-      purse-first,
       tap,
+      ...
     }:
     let
       nebulousVersion = builtins.head (
@@ -86,9 +106,8 @@
 
         pkgs-master = import nixpkgs-master { inherit system; };
 
-        # Single source of truth for the Go toolchain — threaded into
-        # both buildGoApplication and mkGoEnv so the build-time and
-        # devshell versions stay in lockstep.
+        # The buildGoApplication backend's toolchain; the godyn backend
+        # compiles with igloo's own pkgs.go.
         go = pkgs-master.go_1_26;
 
         madderPkg = madder.packages.${system}.default;
@@ -105,43 +124,67 @@
           tap-dancer-go = tap.packages.${system}.tap-dancer-go;
         };
 
-        gomod = import ./gomod.nix {
-          inherit
-            pkgs
-            system
-            tap
-            purse-first
-            ;
+        # RFC 0001 producer from go.nix (igloo FDR 0008): go-pkgs carry a
+        # rendered go.mod and gomod2nix.toml, and go.nix's flakeInputs become
+        # passthru.goFlakeInputs for consumers' inherited bridges.
+        goPkgs = pkgs.mkGoPkgs {
           src = self;
+          manifest = ./go.nix;
+          inherit inputs;
         };
 
-        # Self-consumption SHOULD (RFC 0001 § Producer interface):
-        # point our own buildGoApplication src/pwd at the published
-        # go-pkgs-test so checkPhase becomes the contract test for
-        # the producer outputs. Drift between the worktree and the
-        # filtered tree fails the build instead of slipping through
-        # to downstream consumers.
-        nebulous = pkgs.buildGoApplication {
-          pname = "nebulous";
-          inherit go;
-          version = nebulousVersion;
-          src = gomod.goPkgs.go-pkgs-test;
-          pwd = gomod.goPkgs.go-pkgs-test;
-          modules = ./gomod2nix.toml;
-          inherit (gomod) goFlakeInputs;
+        # Self-consumption (RFC 0001 § Producer interface): build from the
+        # published go-pkgs-test so the producer outputs are what the
+        # binaries and tests are built from.
+        buildNebulousGo =
+          args:
+          pkgs.buildGoAuto (
+            {
+              pname = "nebulous";
+              src = goPkgs.go-pkgs-test;
+              manifest = ./go.nix;
+              inherit inputs;
+              version = nebulousVersion;
+              nativeArgs = {
+                commit = nebulousCommit;
+                # github.com/DataDog/zstd (via madder/go) is cgo-only.
+                inherit (pkgs.stdenv) cc;
+              };
+            }
+            // args
+          );
 
-          subPackages = [
-            "cmd/nebulous"
-          ];
+        nebulous = buildNebulousGo {
+          subPackages = [ "cmd/nebulous" ];
+          tests = true;
+          # internal/0/madder's store tests create a madder env under $HOME.
+          testPreRun = ''
+            export HOME="$TMPDIR"
+          '';
 
           postInstall = ''
             $out/bin/nebulous generate-plugin $out
           '';
 
-          meta = with pkgs.lib; {
-            description = "NewsBlur MCP server";
-            homepage = "https://code.linenisgreat.com/nebulous";
-            license = licenses.mit;
+          bgaArgs = {
+            inherit go;
+            commit = nebulousCommit;
+            meta = with pkgs.lib; {
+              description = "NewsBlur MCP server";
+              homepage = "https://code.linenisgreat.com/nebulous";
+              license = licenses.mit;
+            };
+          };
+        };
+
+        # One-shot legacy cache migration tool; not part of the shipped
+        # package, built for the bats suite and `just codemod-migrate-cache`.
+        migrate-cache = buildNebulousGo {
+          pname = "migrate-cache";
+          subPackages = [ "cmd/migrate-cache" ];
+          bgaArgs = {
+            inherit go;
+            commit = nebulousCommit;
           };
         };
 
@@ -165,9 +208,9 @@
       {
         packages = {
           default = nebulous;
-          inherit nebulous;
+          inherit nebulous migrate-cache;
           madder = madderPkg;
-          inherit (gomod.goPkgs) go-pkgs go-pkgs-test;
+          inherit (goPkgs) go-pkgs go-pkgs-test;
           conformist-impure-config = conformistImpureEval.config.build.configFile;
           conformist-pre-commit = conformistEval.config.build.preCommit;
           conformist-repair = conformistEval.config.build.repair;
@@ -284,29 +327,27 @@
                 touch "$out"
               '';
 
+        # godyn lanes from go.nix, on systems where buildGoAuto chose the
+        # godyn backend: per-package tests, vet, and godyn-lint (vet passes +
+        # staticcheck defaults, //nolint honored). `just test-go` and
+        # `just lint-go` build these.
+        checks.nebulous-tests = nebulous.passthru.checkAll or nebulous;
+        checks.vet = nebulous.passthru.vetAll or nebulous;
+        checks.lint = nebulous.passthru.lintAll or nebulous;
+
         devShells.default = pkgs-master.mkShell {
           packages = [
-            # mkGoEnv propagates the pinned go toolchain, the
-            # gomod2nix CLI, and the go-sync-wrap hook that auto-
-            # regenerates gomod2nix.toml after `go get` / `go mod tidy`.
-            (pkgs.mkGoEnv {
-              pwd = ./.;
-              inherit go;
-              inherit (gomod) goFlakeInputs;
-            })
-            pkgs-master.delve
-            pkgs-master.gofumpt
-            pkgs-master.golangci-lint
-            pkgs-master.golines
-            pkgs-master.gopls
-            pkgs-master.gotools
-            pkgs-master.govulncheck
+            # No ambient go: dependencies live in go.nix (igloo FDR 0008); go
+            # commands run through godyn-go (`just codemod-go`), tests through
+            # godyn-test.
+            pkgs.godyn-go
+            pkgs.godyn-test
             pkgs.just
             pkgs.bats
             pkgs.shellcheck
             pkgs.shfmt
             madderPkg
-            purse-first.packages.${system}.dagnabit
+            inputs.purse-first.packages.${system}.dagnabit
             batmanPkgs.default
             conformistPkg
             conformistEval.config.build.preCommit

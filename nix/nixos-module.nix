@@ -24,11 +24,11 @@
 #
 # chrest/cutting-garden are supplied as OPTION VALUES (chrestPackage /
 # cuttingGardenPackage), not constructor args — unlike `self` (nebulous's
-# own package, resolved from nebulous's own flake), chrest and
-# cutting-garden are external packages nebulous's flake does not depend on
-# (cutting-garden is only a Go/gomod2nix dependency here, not a flake
-# input), so the consumer (circus, which DOES carry those flake inputs)
-# passes them in the standard NixOS way: as option values on
+# own package, resolved from nebulous's own flake), the chrest and
+# cutting-garden BINARIES are runtime choices nebulous's flake does not
+# make (cutting-garden is a flake input here only as a Go module bridge),
+# so the consumer (circus, which pins the deployed binaries) passes them
+# in the standard NixOS way: as option values on
 # services.nebulous, exactly like nix-cache's `package` option takes a
 # package value rather than nix-cache's flake threading its own producer
 # in as a curried arg. The capture phase only runs when both are

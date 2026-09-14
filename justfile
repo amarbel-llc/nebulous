@@ -1,7 +1,7 @@
 
 default: lint build test
 
-lint: lint-fmt lint-worktree
+lint: lint-fmt lint-worktree lint-go
 
 build: build-go build-nix
 
@@ -33,49 +33,57 @@ lint-worktree:
   cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
   conformist check --config-file "$cfg" --tree-root .
 
+# run go vet and godyn-lint (vet passes + staticcheck defaults) per package
+[group('lint')]
+lint-go:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+  nix build ".#checks.${system}.vet" ".#checks.${system}.lint" --no-link --print-build-logs
+
 # format the tree in place (repair mode) via `nix fmt`
 [group('codemod')]
 codemod-fmt-tree:
   nix fmt
 
-# Debug build of all nebulous binaries (nebulous, migrate-cache).
-# Pass tag=release for a stripped production build.
+# Build both nebulous binaries (nebulous, migrate-cache) through nix from
+# go.nix (igloo FDR 0008; no ambient go) and link them under build/debug/,
+# where the bats suite and the debug/explore recipes expect them.
 #
-# build all nebulous binaries
+# build all nebulous binaries into build/debug via nix
 [group('build')]
-build-go tag="debug":
+build-go:
   #!/usr/bin/env bash
   set -euo pipefail
-  # Resolve the flake-pinned madder so its absolute path is
-  # ldflags-injected into internal/0/madder.Bin — mirrors what the Nix
-  # build does in flake.nix. Without this, debug builds would invoke
-  # madder via PATH, where older user-profile binaries can shadow the
-  # devShell's.
-  madder_path=$(nix build --no-link --print-out-paths .#madder 2>/dev/null || true)
-  extra_ldflags=""
-  if [ -n "$madder_path" ]; then
-    extra_ldflags="$extra_ldflags -X code.linenisgreat.com/nebulous/internal/0/madder.Bin=$madder_path/bin/madder"
-  fi
-  base_ldflags="{{if tag == "release" { "-s -w" } else { "" } }}"
-  ldflags="$base_ldflags $extra_ldflags"
-  gcflags="{{if tag == "release" { "" } else { "all=-N -l" } }}"
-  gcflags_arg=()
-  if [ -n "$gcflags" ]; then gcflags_arg=(-gcflags "$gcflags"); fi
-  ldflags_arg=()
-  # shellcheck disable=SC2086 -- word-split intentional: strips leading whitespace from concatenated flags
-  if [ -n "$(echo $ldflags)" ]; then ldflags_arg=(-ldflags "$ldflags"); fi
-  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/nebulous       ./cmd/nebulous
-  go build "${gcflags_arg[@]}" "${ldflags_arg[@]}" -o build/{{tag}}/migrate-cache  ./cmd/migrate-cache
+  mkdir -p build/debug
+  for pkg in nebulous migrate-cache; do
+    out=$(nix build --no-link --print-out-paths ".#${pkg}")
+    ln -sfn "$out/bin/${pkg}" "build/debug/${pkg}"
+  done
 
 # reproducible nix build — the primary release artifact
 [group('build')]
 build-nix:
   nix build --show-trace
 
-# run Go unit tests
+# run the Go unit tests: godyn's per-package test runs from go.nix
 [group('test')]
-test-go *args:
-  go test {{args}} ./...
+test-go:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+  nix build ".#checks.${system}.nebulous-tests" --no-link --print-build-logs
+
+# Fast single-package Go test loop via godyn-test (igloo FDR 0008): builds one
+# package's test run from a git+file: ref of the dirty tree (`git add -N` a NEW
+# file first); only the edited cone rebuilds. Flags use the test binary's
+# spelling:
+#   just debug-go-test internal/bravo/tools -test.run=TestStoryQuery -test.v
+#
+# run go test for one package via godyn-test
+[group('debug')]
+debug-go-test dir *flags:
+  nix run --inputs-from . igloo#godyn-test -- {{dir}} -- {{flags}}
 
 # run the bats integration suite against the debug build
 [group('test')]
@@ -152,13 +160,25 @@ debug-inject-check:
   echo "=== madder ==="
   strings build/debug/nebulous | grep -m1 '/nix/store/.*madder.*/bin/madder' || echo "MISSING"
 
-# Bump a single flake input's pin in flake.lock. Example:
-#   just debug-flake-update-input madder
+# Bump one or more flake inputs' pins in flake.lock in a single update, e.g.
+# a cut-over go.nix producer together with the igloo it needs:
+#   just debug-flake-update-input cutting-garden igloo
 #
-# bump a single flake input's pin in flake.lock
+# bump one or more flake inputs' pins in flake.lock
 [group('debug')]
-debug-flake-update-input input:
-  nix flake update --flake . {{input}}
+debug-flake-update-input +inputs:
+  nix flake update --flake . {{inputs}}
+
+# go commands against the go.nix-rendered module (igloo FDR 0008): runs
+# godyn-go from the flake-pinned igloo, so `go get` / `go mod tidy` edits land
+# back in go.nix. There is no checkout go.mod and no ambient go. A NEW file
+# must be `git add -N`'d first or the run cannot see it.
+#   just codemod-go -- go get golang.org/x/text@latest
+#
+# run a go command through godyn's escape hatch and ingest the result into go.nix
+[group('codemod')]
+codemod-go *args:
+  nix run --inputs-from . igloo#godyn-go -- {{args}}
 
 # Regenerate pkgs/ facades from internal/ packages via dagnabit.
 # No-op until a source file contains `//go:generate dagnabit export`.
@@ -205,7 +225,7 @@ debug-restore-cache:
 # migrate the legacy response cache to the new store layout
 [group('codemod')]
 codemod-migrate-cache *args:
-  go run ./cmd/migrate-cache {{args}}
+  nix run .#migrate-cache -- {{args}}
 
 # MUTATES the live NewsBlur account: (re-)stars story_hash and REPLACES its
 # user_tags with exactly what's passed (matching SetStoryUserTags's own
