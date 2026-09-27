@@ -5,7 +5,7 @@
     # igloo carries the Go build helpers: godyn (buildGoAuto, the go.nix
     # manifest, godyn-go / godyn-test) and mkGoPkgs. See godyn(7).
     igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/e94cb152ed51bd6e24eb4a41f1460252beb52cd2";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     madder = {
       url = "https://code.linenisgreat.com/madder/archive/master.tar.gz";
