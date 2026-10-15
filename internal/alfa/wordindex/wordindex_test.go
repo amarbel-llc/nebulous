@@ -51,6 +51,20 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// The finished file must be readable by other service users: os.CreateTemp
+// makes 0600 and bolt.Open's mode does not widen an existing file.
+func TestWrittenFileIsWorldReadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.bbolt")
+	buildSample(t, path)
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != indexFileMode {
+		t.Errorf("index file mode = %o, want %o", got, indexFileMode)
+	}
+}
+
 func TestOpenRejectsOtherTokenizer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "words.bbolt")
 	buildSample(t, path)

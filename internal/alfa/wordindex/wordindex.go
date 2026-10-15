@@ -29,6 +29,11 @@ import (
 // other value so a reader never misparses a file from a different build.
 const FormatVersion = 1
 
+// indexFileMode is the permission of a finished index file. It is applied
+// with Chmod, so the process umask does not narrow it. The file holds only
+// words and story hashes.
+const indexFileMode = 0o644
+
 var (
 	bucketMeta    = []byte("meta")
 	bucketWords   = []byte("words")
@@ -105,7 +110,17 @@ func (b *Builder) WriteFile(path string, meta Meta) (err error) {
 		return err
 	}
 	tmpPath := tmp.Name()
+	// CreateTemp makes the file 0600 and bolt.Open's mode only applies when
+	// it creates a file, so widen it explicitly: other service users (the
+	// serve processes, in the fetch user's group) must be able to read the
+	// finished index.
+	if err := tmp.Chmod(indexFileMode); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	defer func() {
@@ -114,7 +129,7 @@ func (b *Builder) WriteFile(path string, meta Meta) (err error) {
 		}
 	}()
 
-	db, err := bolt.Open(tmpPath, 0o644, &bolt.Options{NoSync: true})
+	db, err := bolt.Open(tmpPath, indexFileMode, &bolt.Options{NoSync: true})
 	if err != nil {
 		return err
 	}
@@ -129,8 +144,6 @@ func (b *Builder) WriteFile(path string, meta Meta) (err error) {
 	if err = db.Close(); err != nil {
 		return err
 	}
-	// bbolt creates the file 0644; group readers (other service users)
-	// already get access through the directory, so keep that as is.
 	if err = os.Rename(tmpPath, path); err != nil {
 		return err
 	}
