@@ -23,6 +23,17 @@ func DefaultManifestPath() string {
 	return ""
 }
 
+// WordIndexPath is where the on-disk word index (internal/alfa/wordindex)
+// lives for a given manifest path: an index/ directory beside it, so every
+// process that resolves the same manifest resolves the same index. Returns
+// "" for an empty manifest path.
+func WordIndexPath(manifestPath string) string {
+	if manifestPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(manifestPath), "index", "words-v1.bbolt")
+}
+
 // NewDefaultStore initializes the madder blob store nebulous's persistent
 // cache uses, bound to ctx — the "new store, then init it" sequence
 // previously duplicated verbatim across every nebulous binary.

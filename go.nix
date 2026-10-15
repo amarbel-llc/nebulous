@@ -15,7 +15,7 @@
       subPath = "go";
     };
   };
-  go = "1.26";
+  go = "1.26.1";
   module = "code.linenisgreat.com/nebulous";
   replace = { };
   require = {
@@ -295,6 +295,12 @@
       indirect = true;
       version = "v0.0.0-20220910002029-abceb7e1c41e";
     };
+    "go.etcd.io/bbolt" = {
+      go = "1.25.0";
+      hash = "sha256-+qJ2eJTioYQjZ6UOLVqPu1jmAYc9pQgFpdrT9i7GipQ=";
+      indirect = true;
+      version = "v1.5.0";
+    };
     "golang.org/x/crypto" = {
       go = "1.25.0";
       hash = "sha256-/R74sc1mcOaOuBeXRQzrXrHAgA5VhNWc6SfQJaxb17U=";
@@ -309,9 +315,9 @@
     };
     "golang.org/x/sys" = {
       go = "1.25.0";
-      hash = "sha256-JDlj+PKsG6I6kjv5JyOUNreY51u5An0oZ5OZMHZSk+A=";
+      hash = "sha256-hkBoNazrDA67ER6sWhb+EKxx9nJ24+nz3zGy+zT5Hvw=";
       indirect = true;
-      version = "v0.44.0";
+      version = "v0.45.0";
     };
     "golang.org/x/term" = {
       go = "1.25.0";

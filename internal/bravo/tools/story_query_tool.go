@@ -77,7 +77,10 @@ func registerStoryQueryCommand(app *command.App, store *storyStore) {
 				Limit:   p.Limit,
 			}
 
-			results := store.query(q)
+			results, note, err := store.queryDetailed(q)
+			if err != nil {
+				return command.TextErrorResult("story query: " + err.Error()), nil
+			}
 
 			summaries := make([]storyQuerySummary, len(results))
 			for i, rec := range results {
@@ -97,11 +100,13 @@ func registerStoryQueryCommand(app *command.App, store *storyStore) {
 				Offset  int                 `json:"offset"`
 				Limit   int                 `json:"limit"`
 				Results []storyQuerySummary `json:"results"`
+				Note    string              `json:"note,omitempty"`
 			}{
 				Total:   len(summaries),
 				Offset:  p.Offset,
 				Limit:   q.Limit,
 				Results: summaries,
+				Note:    note,
 			}
 
 			return command.JSONResult(resp), nil

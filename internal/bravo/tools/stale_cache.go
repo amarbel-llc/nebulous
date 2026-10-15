@@ -2,6 +2,7 @@ package tools
 
 import (
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -21,15 +22,20 @@ const staleCheckDebounce = 1 * time.Second
 // the stat-compare-rebuild dance lives in one place instead of two.
 type staleCache[T any] struct {
 	manifestPath string
+	// watchPaths are further files whose (mtime, size) also invalidate the
+	// snapshot — the on-disk word index, which fetch swaps in by rename
+	// after the manifest has already changed. A missing watched file is a
+	// valid state; its appearance counts as a change.
+	watchPaths []string
 
-	mu             sync.Mutex
-	snapshot       *T
-	lastMtimeNanos int64
-	lastCheckedAt  time.Time
+	mu            sync.Mutex
+	snapshot      *T
+	lastStamp     string
+	lastCheckedAt time.Time
 }
 
-func newStaleCache[T any](manifestPath string) staleCache[T] {
-	return staleCache[T]{manifestPath: manifestPath}
+func newStaleCache[T any](manifestPath string, watchPaths ...string) staleCache[T] {
+	return staleCache[T]{manifestPath: manifestPath, watchPaths: watchPaths}
 }
 
 // current returns the up-to-date snapshot, calling build to produce a
@@ -49,8 +55,8 @@ func (c *staleCache[T]) current(build func() (*T, error)) (*T, error) {
 	}
 	c.lastCheckedAt = time.Now()
 
-	mtime, haveMtime := c.statMtime()
-	if c.snapshot != nil && haveMtime && mtime == c.lastMtimeNanos {
+	stamp, haveMtime := c.stat()
+	if c.snapshot != nil && haveMtime && stamp == c.lastStamp {
 		return c.snapshot, nil
 	}
 
@@ -62,19 +68,30 @@ func (c *staleCache[T]) current(build func() (*T, error)) (*T, error) {
 		return nil, buildErr
 	}
 	if haveMtime {
-		c.lastMtimeNanos = mtime
+		c.lastStamp = stamp
 	}
 	c.snapshot = fresh
 	return fresh, nil
 }
 
-func (c *staleCache[T]) statMtime() (int64, bool) {
+// stat returns a change stamp over the manifest and every watched path; ok
+// is false when the manifest itself cannot be stat'd (no staleness signal).
+func (c *staleCache[T]) stat() (stamp string, ok bool) {
 	if c.manifestPath == "" {
-		return 0, false
+		return "", false
 	}
 	fi, err := os.Stat(c.manifestPath)
 	if err != nil {
-		return 0, false
+		return "", false
 	}
-	return fi.ModTime().UnixNano(), true
+	stamp = strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+	for _, p := range c.watchPaths {
+		wi, err := os.Stat(p)
+		if err != nil {
+			stamp += "|-"
+			continue
+		}
+		stamp += "|" + strconv.FormatInt(wi.ModTime().UnixNano(), 10) + ":" + strconv.FormatInt(wi.Size(), 10)
+	}
+	return stamp, true
 }

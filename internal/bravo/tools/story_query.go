@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"log"
 	"sort"
 )
 
@@ -17,19 +18,36 @@ type storyQuery struct {
 }
 
 func (s *storyStore) query(q storyQuery) []*storyRecord {
+	recs, _, err := s.queryDetailed(q)
+	if err != nil {
+		log.Printf("story query: %v", err)
+	}
+	return recs
+}
+
+// queryDetailed is query plus what story_query's caller needs to know: a
+// note about the word index's freshness (empty when current or unused) and
+// a lookup error from the on-disk index, which query itself can only log.
+func (s *storyStore) queryDetailed(q storyQuery) (results []*storyRecord, note string, err error) {
 	if q.Limit == 0 {
 		q.Limit = 100
 	}
 
 	snap, err := s.current()
 	if err != nil || snap == nil {
-		return nil
+		return nil, "", err
 	}
 
 	var candidates []*storyRecord
 	usedWords := len(q.Words) > 0
 
-	if usedWords {
+	if usedWords && snap.index != nil {
+		note = snap.indexNote
+		candidates, err = snap.diskCandidates(q.Words)
+		if err != nil {
+			return nil, note, err
+		}
+	} else if usedWords {
 		seen := make(map[string]bool)
 		for _, word := range q.Words {
 			for _, rec := range snap.words[word] {
@@ -82,12 +100,12 @@ func (s *storyStore) query(q storyQuery) []*storyRecord {
 	}
 
 	if q.Offset >= len(filtered) {
-		return nil
+		return nil, note, nil
 	}
 	filtered = filtered[q.Offset:]
 	if len(filtered) > q.Limit {
 		filtered = filtered[:q.Limit]
 	}
 
-	return filtered
+	return filtered, note, nil
 }

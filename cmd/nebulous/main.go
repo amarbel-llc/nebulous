@@ -27,12 +27,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch [-formats f1,f2] [-store id] [-no-capture]\n")
-		fmt.Fprintf(os.Stderr, "                                Cache feeds, starred stories, and original text; also runs\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch [-formats f1,f2] [-store id] [-no-capture] [-no-index]\n")
+		fmt.Fprintf(os.Stderr, "                                Cache feeds, starred stories, and original text; rebuilds the\n")
+		fmt.Fprintf(os.Stderr, "                                on-disk word index when the corpus changed (-no-index skips it); also runs\n")
 		fmt.Fprintf(os.Stderr, "                                the gap-filling capture phase when its interval has elapsed\n")
 		fmt.Fprintf(os.Stderr, "                                (NEBULOUS_CAPTURE_INTERVAL, default 6h; -no-capture skips it)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous capture [-formats f1,f2] [-store id] [-backfill]\n")
 		fmt.Fprintf(os.Stderr, "                                Run the capture phase standalone, ignoring the interval gate\n")
+		fmt.Fprintf(os.Stderr, "  nebulous index                Rebuild the on-disk word index from the local cache now\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-list [-limit N] List starred story keys (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous corpus-read <key>    Extract story text by key (for maneater)\n")
 		fmt.Fprintf(os.Stderr, "  nebulous traversal-serve      RFC 0013 wire plugin: serve newsblur:// out-of-process\n")
@@ -128,6 +130,10 @@ func main() {
 			"no-capture", false,
 			"skip the capture phase entirely on this run, regardless of the interval gate",
 		)
+		noIndex := fetchFlags.Bool(
+			"no-index", false,
+			"skip the word-index phase on this run",
+		)
 		fetchFlags.Parse(flag.Args()[1:])
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -138,9 +144,14 @@ func main() {
 			log.Fatalf("fetch: cache setup: %v", err)
 		}
 
-		if err := fetchAll(ctx, client, splitFormats(*formatsFlag), *storeFlag, *noCapture); err != nil {
+		if err := fetchAll(ctx, client, splitFormats(*formatsFlag), *storeFlag, *noCapture, *noIndex); err != nil {
 			log.Fatalf("fetch: %v", err)
 		}
+		return
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "index" {
+		runIndex(flag.Args()[1:])
 		return
 	}
 
@@ -313,9 +324,10 @@ func runFetchCapturePhase(ctx context.Context, client *newsblur.Client, storeId 
 	}
 }
 
-// fetchAll runs all four phases (feeds, starred stories, original text,
-// and the gap-filling capture scan), populating the local cache.
-func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []string, captureStoreId string, skipCapture bool) error {
+// fetchAll runs all five phases (feeds, starred stories, original text,
+// the on-disk word index, and the gap-filling capture scan), populating the
+// local cache.
+func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []string, captureStoreId string, skipCapture, skipIndex bool) error {
 	// Phase 1: Feeds metadata
 	log.Println("[feeds] fetching feed list...")
 	if _, err := client.Feeds(ctx, false, true, false); err != nil {
@@ -392,7 +404,15 @@ func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []str
 		return err
 	}
 
-	// Phase 4: capture (best-effort, self-healing gap-filling scan)
+	// Phase 4: word index (best-effort; the serve side falls back to an
+	// in-memory build without it)
+	runFetchIndexPhase(ctx, client, len(missingStories) > 0 || len(missingText) > 0, skipIndex)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Phase 5: capture (best-effort, self-healing gap-filling scan)
 	runFetchCapturePhase(ctx, client, captureStoreId, captureFormats, skipCapture, func() (string, error) {
 		return exec.LookPath("cutting-garden")
 	})

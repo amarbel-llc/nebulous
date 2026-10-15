@@ -73,6 +73,8 @@ server-side (cutting-garden#143). Reads stay token-free either way.
                                     dropping out of a later /reader/feeds fetch, unlike the
                                     request cache itself
       feeds.go, stories.go, ...    One file per API domain
+    internal/alfa/wordindex/       On-disk word -> story-hash index (bbolt): Builder.WriteFile
+                                    (temp file + rename), Open (read-only), Lookup
     internal/alfa/capture/         cutting-garden subprocess client for `nebulous capture`
       capture.go                   Shells out to `cutting-garden capture`, reads the receipt
                                     id directly off its tap-ndjson stdout
@@ -81,6 +83,7 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       read_index.go                ReadIndex read façade over feedIndex/storyStore (for the cg plugin)
       feeds.go                     feed_query tool (word search over feeds)
       story_store.go               Flat story store with typed records and word index
+      word_index.go                BuildWordIndex (fetch side) + opening/staleness of the on-disk index
       story_query.go               Query engine with structured filters + word search
       story_query_tool.go          story_query MCP tool handler
       facets.go                    Aggregate counts by year/tag/feed/status
@@ -153,7 +156,19 @@ phases of the same `fetch` command rather than separate processes:
   and original article text. This is the sole ingestion pipeline --- the MCP
   server and the cutting-garden plugin never hit the API for reads.
 
-  `fetch` also runs a **capture phase** as its fourth step: a self-healing
+  `fetch` then runs an **index phase** (`cmd/nebulous/index.go`) that
+  (re)builds the on-disk word index (`internal/alfa/wordindex`, a bbolt file at
+  `index/words-v1.bbolt` beside the manifest, `newsblur.WordIndexPath`) when the
+  corpus changed or the file is missing, incompatible, or covers a different
+  story set; `-no-index` skips it and `nebulous index` rebuilds it from the
+  local cache on demand. The file is built into a temp file and swapped in by
+  rename, so readers never need a lock and a failed build keeps the previous
+  file (nebulous#59). Bump `wordTokenizerVersion`
+  (`internal/bravo/tools/word_index.go`) whenever `extractWords`, `stripHTMLTags`
+  or the stop-word list change, so old files are rejected instead of
+  disagreeing with the in-memory build.
+
+  `fetch` also runs a **capture phase** as its last step: a self-healing
   gap-filling scan over the local story corpus. For each configured format
   it shells out to `cutting-garden capture <store-id> web:<permalink>`
   (`internal/alfa/capture`), which drives chrest under the hood, and records
@@ -178,7 +193,12 @@ phases of the same `fetch` command rather than separate processes:
   restarting the server --- they no longer build once via `sync.Once` and
   never again. All query tools and resources operate against these local
   indices. `nebulous traversal-serve`'s cutting-garden plugin reads the same
-  indices through `tools.ReadIndex`.
+  indices through `tools.ReadIndex`. `serve mcp`'s `story_query` answers word
+  lookups from the on-disk word index when it opens cleanly (a stale one is
+  served with a `note` in the result; the stale-cache check also watches the
+  index file), and otherwise falls back to building the word map in memory.
+  `traversal-serve` writes heap and goroutine profiles to
+  `<user cache dir>/nebulous/pprof/` on `SIGUSR1`.
 
 ### Data Flow
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
+	"code.linenisgreat.com/nebulous/internal/alfa/wordindex"
 )
 
 type storyRecord struct {
@@ -33,9 +34,15 @@ type storyRecord struct {
 // holds a snapshot never observes a half-rebuilt index.
 type storyStoreSnapshot struct {
 	stories   []*storyRecord
+	byHash    map[string]*storyRecord
 	words     map[string][]*storyRecord
 	userTags  map[string]int
 	storyTags map[string]int
+	// index, when non-nil, answers word lookups from the on-disk index and
+	// words stays empty (nebulous#59). indexNote carries a caveat about it
+	// (staleness) for story_query to pass on.
+	index     *wordindex.Index
+	indexNote string
 }
 
 type storyStore struct {
@@ -49,9 +56,12 @@ type storyStore struct {
 // newStoryStore builds a store with the full-text word index, for the
 // story_query tool and resources that answer word queries.
 func newStoryStore(client *newsblur.Client) *storyStore {
+	manifest := client.ManifestPath()
 	return &storyStore{
-		client:     client,
-		cache:      newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+		client: client,
+		// Also watch the on-disk word index: fetch swaps it in after the
+		// manifest has already changed (nebulous#59).
+		cache:      newStaleCache[storyStoreSnapshot](manifest, newsblur.WordIndexPath(manifest)),
 		indexWords: true,
 	}
 }
@@ -59,9 +69,10 @@ func newStoryStore(client *newsblur.Client) *storyStore {
 // newMetadataStoryStore builds a store without the word index; its
 // snapshots hold only the typed story metadata (nebulous#58).
 func newMetadataStoryStore(client *newsblur.Client) *storyStore {
-	s := newStoryStore(client)
-	s.indexWords = false
-	return s
+	return &storyStore{
+		client: client,
+		cache:  newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+	}
 }
 
 // current returns the up-to-date snapshot, rebuilding when the manifest
@@ -89,6 +100,7 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 	s.client.ForceManifestRefresh()
 
 	snap := &storyStoreSnapshot{
+		byHash:    make(map[string]*storyRecord),
 		words:     make(map[string][]*storyRecord),
 		userTags:  make(map[string]int),
 		storyTags: make(map[string]int),
@@ -105,18 +117,30 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 		return nil, err
 	}
 
+	// With a usable on-disk index the corpus is read metadata-only; without
+	// one (absent, corrupt, other tokenizer) fall back to tokenizing here.
+	tokenize := s.indexWords
+	if s.indexWords {
+		if ix, note := openWordIndex(newsblur.WordIndexPath(s.client.ManifestPath()), hashes); ix != nil {
+			snap.index, snap.indexNote = ix, note
+			tokenize = false
+			closeIndexWhenUnreachable(snap)
+		}
+	}
+
 	for _, hash := range hashes {
 		storyRaw, ok := s.client.CachedStarredStory(hash)
 		if !ok {
 			continue
 		}
 
-		rec, err := parseStoryRecordOpts(storyRaw, s.client, s.indexWords)
+		rec, err := parseStoryRecordOpts(storyRaw, s.client, tokenize)
 		if err != nil {
 			continue
 		}
 		rec.Starred = true
 		snap.stories = append(snap.stories, rec)
+		snap.byHash[rec.Hash] = rec
 
 		for word := range rec.Words {
 			postings, seen := snap.words[word]
@@ -147,7 +171,12 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 		return snap.stories[i].Date.After(snap.stories[j].Date)
 	})
 
-	log.Printf("story store: indexed %d stories, %d words", len(snap.stories), len(snap.words))
+	if snap.index != nil {
+		log.Printf("story store: loaded %d stories; word lookups served from the on-disk index (%d words)",
+			len(snap.stories), snap.index.Meta().Words)
+	} else {
+		log.Printf("story store: indexed %d stories, %d words", len(snap.stories), len(snap.words))
+	}
 	return snap, nil
 }
 
@@ -254,12 +283,8 @@ func (s *storyStore) storyByHash(hash string) (*storyRecord, bool) {
 	if err != nil || snap == nil {
 		return nil, false
 	}
-	for _, rec := range snap.stories {
-		if rec.Hash == hash {
-			return rec, true
-		}
-	}
-	return nil, false
+	rec, ok := snap.byHash[hash]
+	return rec, ok
 }
 
 func (s *storyStore) rawStoryByHash(hash string) (json.RawMessage, bool) {

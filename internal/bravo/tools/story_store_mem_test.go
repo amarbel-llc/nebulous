@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -85,6 +86,67 @@ func syntheticCorpus(tb testing.TB, n int) *newsblur.Client {
 		}
 	}
 	return c
+}
+
+// TestWordIndexOnDiskMemory is the nebulous#59 before/after: serve mcp's
+// first word query served from the in-memory word index vs the on-disk one,
+// plus what fetch pays to build and store the file.
+//
+//	just debug-go-test internal/bravo/tools -test.run=TestWordIndexOnDiskMemory -test.v -corpus-stories=3000
+func TestWordIndexOnDiskMemory(t *testing.T) {
+	if *corpusStories == 0 {
+		t.Skip("set -corpus-stories=N to run")
+	}
+	c := syntheticCorpus(t, *corpusStories)
+	q := storyQuery{Words: []string{"w0x", "w5x", "w1000x"}}
+
+	base := heapInUseMB()
+	mem := newStoryStore(c)
+	start := time.Now()
+	memHits := len(mem.query(q))
+	memFirst := time.Since(start)
+	memRetained := heapInUseMB() - base
+	runtime.KeepAlive(mem) // else the store is collectable before heapInUseMB runs
+	mem = nil
+	runtime.GC()
+
+	path := newsblur.WordIndexPath(c.ManifestPath())
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start = time.Now()
+	meta, err := BuildWordIndex(context.Background(), c, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildTime := time.Since(start)
+	var afterBuild runtime.MemStats
+	runtime.ReadMemStats(&afterBuild)
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base = heapInUseMB()
+	disk := newStoryStore(c)
+	start = time.Now()
+	diskHits := len(disk.query(q))
+	diskFirst := time.Since(start)
+	diskRetained := heapInUseMB() - base
+	runtime.KeepAlive(disk)
+
+	if memHits != diskHits {
+		t.Errorf("hits differ: in-memory %d, on-disk %d", memHits, diskHits)
+	}
+	start = time.Now()
+	disk.query(q)
+	diskWarm := time.Since(start)
+
+	t.Logf("MEM stories=%d words=%d hits=%d", meta.Stories, meta.Words, diskHits)
+	t.Logf("MEM in-memory index : first query %s, retained heap %.0fMB", memFirst, memRetained)
+	t.Logf("MEM on-disk index   : first query %s (warm %s), retained heap %.0fMB, file %.1fMB",
+		diskFirst, diskWarm, diskRetained, float64(fi.Size())/(1<<20))
+	t.Logf("MEM fetch-side build: %s, heap-sys growth during build %.0fMB",
+		buildTime, float64(int64(afterBuild.HeapSys)-int64(before.HeapSys))/(1<<20))
 }
 
 func heapInUseMB() float64 {
