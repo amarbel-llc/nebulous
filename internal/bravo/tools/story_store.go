@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
@@ -40,13 +41,27 @@ type storyStoreSnapshot struct {
 type storyStore struct {
 	client *newsblur.Client
 	cache  staleCache[storyStoreSnapshot]
+	// indexWords is false for the metadata-only store: the word index
+	// (snap.words) and the per-story content stats are skipped entirely.
+	indexWords bool
 }
 
+// newStoryStore builds a store with the full-text word index, for the
+// story_query tool and resources that answer word queries.
 func newStoryStore(client *newsblur.Client) *storyStore {
 	return &storyStore{
-		client: client,
-		cache:  newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+		client:     client,
+		cache:      newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+		indexWords: true,
 	}
+}
+
+// newMetadataStoryStore builds a store without the word index; its
+// snapshots hold only the typed story metadata (nebulous#58).
+func newMetadataStoryStore(client *newsblur.Client) *storyStore {
+	s := newStoryStore(client)
+	s.indexWords = false
+	return s
 }
 
 // current returns the up-to-date snapshot, rebuilding when the manifest
@@ -96,7 +111,7 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 			continue
 		}
 
-		rec, err := parseStoryRecord(storyRaw, s.client)
+		rec, err := parseStoryRecordOpts(storyRaw, s.client, s.indexWords)
 		if err != nil {
 			continue
 		}
@@ -104,8 +119,18 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 		snap.stories = append(snap.stories, rec)
 
 		for word := range rec.Words {
-			snap.words[word] = append(snap.words[word], rec)
+			postings, seen := snap.words[word]
+			if !seen {
+				// word is a substring of the story's lowercased body; as a
+				// map key it would pin that whole body for the snapshot's
+				// life. Clone so only the word itself is retained.
+				word = strings.Clone(word)
+			}
+			snap.words[word] = append(postings, rec)
 		}
+		// Words only feeds the inverted index above; keeping the per-story
+		// set resident doubled the index for nothing.
+		rec.Words = nil
 		for _, t := range rec.UserTags {
 			if t != "" {
 				snap.userTags[t]++
@@ -133,6 +158,14 @@ var storyDateFormats = []string{
 }
 
 func parseStoryRecord(raw json.RawMessage, client *newsblur.Client) (*storyRecord, error) {
+	return parseStoryRecordOpts(raw, client, true)
+}
+
+// parseStoryRecordOpts parses one cached story. With indexWords false the
+// body is never stripped or tokenized (Words stays nil, HasContent and
+// ContentTokens stay zero) — the metadata-only path ReadIndex consumers
+// (traversal-serve, capture) take, since none of them read those fields.
+func parseStoryRecordOpts(raw json.RawMessage, client *newsblur.Client, indexWords bool) (*storyRecord, error) {
 	var story struct {
 		Hash       string   `json:"story_hash"`
 		Title      string   `json:"story_title"`
@@ -158,29 +191,34 @@ func parseStoryRecord(raw json.RawMessage, client *newsblur.Client) (*storyRecor
 		}
 	}
 
-	stripped := stripHTMLTags(story.Content)
-	hasContent := len(stripped) > 200
-	contentTokens := len(stripped) / 4
+	var words map[string]bool
+	hasContent := false
+	contentTokens := 0
+	if indexWords {
+		stripped := stripHTMLTags(story.Content)
+		hasContent = len(stripped) > 200
+		contentTokens = len(stripped) / 4
 
-	words := make(map[string]bool)
-	addWords := func(text string) {
-		for _, w := range extractWords(text) {
-			words[w] = true
-		}
-	}
-
-	addWords(story.Title)
-	if story.Content != "" {
-		addWords(stripped)
-	}
-
-	if client != nil {
-		if otRaw, ok := client.CachedOriginalText(story.Hash); ok {
-			var ot struct {
-				OriginalText string `json:"original_text"`
+		words = make(map[string]bool)
+		addWords := func(text string) {
+			for _, w := range extractWords(text) {
+				words[w] = true
 			}
-			if json.Unmarshal(otRaw, &ot) == nil && ot.OriginalText != "" {
-				addWords(stripHTMLTags(ot.OriginalText))
+		}
+
+		addWords(story.Title)
+		if story.Content != "" {
+			addWords(stripped)
+		}
+
+		if client != nil {
+			if otRaw, ok := client.CachedOriginalText(story.Hash); ok {
+				var ot struct {
+					OriginalText string `json:"original_text"`
+				}
+				if json.Unmarshal(otRaw, &ot) == nil && ot.OriginalText != "" {
+					addWords(stripHTMLTags(ot.OriginalText))
+				}
 			}
 		}
 	}

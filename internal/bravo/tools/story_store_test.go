@@ -245,6 +245,25 @@ func TestBuildFromCachedStories(t *testing.T) {
 	}
 }
 
+func TestMetadataStoreSkipsWordIndex(t *testing.T) {
+	c := testClientWithCachedStories(t)
+	s := newMetadataStoryStore(c)
+
+	snap, err := s.current()
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	if len(snap.stories) != 2 {
+		t.Fatalf("expected 2 stories, got %d", len(snap.stories))
+	}
+	if len(snap.words) != 0 {
+		t.Errorf("metadata-only store built %d words, want 0", len(snap.words))
+	}
+	if snap.stories[0].Hash != "hash1" || snap.stories[0].Year != 2024 || snap.userTags["interests"] != 1 {
+		t.Errorf("metadata not populated: %+v", snap.stories[0])
+	}
+}
+
 func TestRawStoryByHash(t *testing.T) {
 	c := testClientWithCachedStories(t)
 	s := newStoryStore(c)

@@ -23,7 +23,7 @@ type ReadIndex struct {
 func NewReadIndex(client *newsblur.Client) *ReadIndex {
 	return &ReadIndex{
 		feeds:   newFeedIndex(client),
-		stories: newStoryStore(client),
+		stories: newMetadataStoryStore(client),
 		client:  client,
 	}
 }
