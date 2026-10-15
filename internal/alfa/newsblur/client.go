@@ -294,5 +294,12 @@ func (c *Client) post(ctx context.Context, path string, form url.Values) (json.R
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	// NewsBlur reports many write failures as HTTP 200 with a negative
+	// "code" in the body; surface them so callers never treat a rejected
+	// write as done (and never patch the cache for it).
+	if err := mutationFailure(body); err != nil {
+		return nil, fmt.Errorf("POST %s: %w", path, err)
+	}
+
 	return json.RawMessage(body), nil
 }

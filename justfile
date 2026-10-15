@@ -344,6 +344,44 @@ debug-probe-starred-story story_hash:
     --data-urlencode "h={{story_hash}}" \
   | jq .
 
+# Capture what NewsBlur answers to a star/unstar/read POST that carries NO
+# session cookie (so it cannot touch any account): the failure shape
+# nebulous's post() must learn to recognise instead of treating any HTTP 200
+# as success (tag-mutation review, finding 1). Prints status line and body.
+#
+# print NewsBlur's response to unauthenticated mutation POSTs (touches no account)
+[group('debug')]
+debug-probe-unauthenticated-mutation:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  for path in mark_story_hash_as_starred mark_story_hash_as_unstarred mark_story_hashes_as_read; do
+    echo "=== POST /reader/$path (no cookie) ==="
+    curl -sS -i -X POST "https://www.newsblur.com/reader/$path" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --data-urlencode "story_hash=0:000000" --data-urlencode "user_tags=nebulous-probe" \
+      | head -c 1500
+    echo
+  done
+
+# READ-ONLY: print the account's starred-story tag counts straight from
+# NewsBlur's /reader/starred_counts (tag, count), bypassing nebulous's cache,
+# to compare against the cached user_tag facet (tag-mutation review: does an
+# empty-string tag really exist server-side, and which tags carry spaces).
+# Never prints the token. Requires NEWSBLUR_TOKEN in the environment.
+#
+# print live starred tag counts from NewsBlur (read-only)
+[group('debug')]
+debug-probe-starred-counts:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -z "${NEWSBLUR_TOKEN:-}" ]; then
+    echo "NEWSBLUR_TOKEN is not set in this environment" >&2
+    exit 1
+  fi
+  curl -sS https://www.newsblur.com/reader/starred_counts \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+  | jq -r '.starred_counts[] | select(.tag != null) | [(.tag | @json), .count] | @tsv'
+
 # sample the local corpus: list the first 5 keys, total count, and first entry body
 [group('explore')]
 explore-corpus: build-go
