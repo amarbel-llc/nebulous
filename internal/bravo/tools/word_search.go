@@ -17,6 +17,11 @@ import (
 // plugin turns it into "this plugin cannot answer a words search right now".
 var ErrWordIndexUnavailable = errors.New("nebulous: word index unavailable (run 'nebulous fetch' or 'nebulous index')")
 
+// ErrNotIndexedWord marks a words-search query that is not exactly one
+// indexed word: a caller mistake, which the cutting-garden plugin reports as
+// a bad request rather than an internal error.
+var ErrNotIndexedWord = errors.New("not a single indexed word")
+
 // IndexedWord canonicalizes a words-search query to the single indexed word
 // it denotes: the same case and accent folding the index applies, with the
 // same rules about what is indexed. A query that is not exactly one indexed
@@ -28,8 +33,8 @@ func IndexedWord(query string) (string, error) {
 	words := extractWords(canonical)
 	if len(words) == 0 || words[0] != canonical || len(canonical) > maxIndexedWordBytes {
 		return "", fmt.Errorf(
-			"%q is not a single indexed word: nebulous indexes lowercase, accent-folded words of 3 to %d letters or digits (hyphens allowed inside a word), and skips numbers and common stop words",
-			query, maxIndexedWordBytes)
+			"%q is %w: nebulous indexes lowercase, accent-folded words of 3 to %d letters or digits (hyphens allowed inside a word), and skips numbers and common stop words",
+			query, ErrNotIndexedWord, maxIndexedWordBytes)
 	}
 	return canonical, nil
 }

@@ -19,8 +19,11 @@ func TestIndexedWord(t *testing.T) {
 		}
 	}
 	for _, query := range []string{"", "go", "the", "2024", "two words", "roam research", "---"} {
-		if got, err := IndexedWord(query); err == nil {
+		got, err := IndexedWord(query)
+		if err == nil {
 			t.Errorf("IndexedWord(%q) = %q, want an error (not a single indexed word)", query, got)
+		} else if !errors.Is(err, ErrNotIndexedWord) {
+			t.Errorf("IndexedWord(%q) error %v does not wrap ErrNotIndexedWord", query, err)
 		}
 	}
 }

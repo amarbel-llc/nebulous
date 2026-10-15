@@ -3,11 +3,13 @@ package cgplugin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
+	deweyerrors "code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
 func wordsIndex() *fakeIndex {
@@ -168,10 +170,24 @@ func TestSearchWordsErrors(t *testing.T) {
 		t.Errorf("no index: err = %v, want ErrSearchModeUnsupported so cutting-garden reports the gap", err)
 	}
 
-	f.wordsErr = errors.New("not a single indexed word")
+	f.wordsErr = fmt.Errorf("%q is %w: details", "the", tools.ErrNotIndexedWord)
 	err := func() error { _, e := Plugin{}.Search(context.Background(), req); return e }()
 	if err == nil || errors.Is(err, cg.ErrSearchModeUnsupported) {
-		t.Errorf("bad query: err = %v, want a plain error that fails the query loudly", err)
+		t.Errorf("bad query: err = %v, want an error that fails the query loudly", err)
+	}
+	if !deweyerrors.Is400BadRequest(err) {
+		t.Errorf("bad query: err = %v, want a bad request (-32602), not an internal error", err)
+	}
+
+	f.wordsErr = errors.New("disk exploded")
+	if _, err := (Plugin{}).Search(context.Background(), req); err == nil || deweyerrors.Is400BadRequest(err) {
+		t.Errorf("genuine failure: err = %v, want a non-bad-request error", err)
+	}
+	f.wordsErr = nil
+
+	badFeed := cg.SearchRequest{Root: mustURL(t, "newsblur://feed/notanumber"), Query: "pelican", Mode: cg.SearchWords}
+	if _, err := (Plugin{}).Search(context.Background(), badFeed); err == nil || !deweyerrors.Is400BadRequest(err) {
+		t.Errorf("invalid feed id: err = %v, want a bad request", err)
 	}
 
 	index = nil

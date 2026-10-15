@@ -8,6 +8,7 @@ import (
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
+	deweyerrors "code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
 // Search serves cutting-garden's RFC 0016 search for newsblur://, in WORDS
@@ -57,11 +58,13 @@ func (Plugin) Search(ctx context.Context, req cg.SearchRequest) (cg.SearchResult
 			"%w: newsblur answers only words searches (`_words`); `_body` substring/regex queries are not accelerated here",
 			cg.ErrSearchModeUnsupported)
 	}
+	// Caller mistakes are bad requests (-32602 on the wire), not internal
+	// errors (-32603); see the classification note in mutate.go.
 	if req.Root == nil {
-		return cg.SearchResult{}, fmt.Errorf("newsblur plugin: Search requires a root URI")
+		return cg.SearchResult{}, deweyerrors.BadRequestf("newsblur plugin: Search requires a root URI")
 	}
 	if req.Query == "" {
-		return cg.SearchResult{}, fmt.Errorf("newsblur plugin: Search requires a non-empty query")
+		return cg.SearchResult{}, deweyerrors.BadRequestf("newsblur plugin: Search requires a non-empty query")
 	}
 	if index == nil {
 		return cg.SearchResult{}, fmt.Errorf("newsblur plugin: index not initialized")
@@ -79,6 +82,9 @@ func (Plugin) Search(ctx context.Context, req cg.SearchRequest) (cg.SearchResult
 	if err != nil {
 		if errors.Is(err, tools.ErrWordIndexUnavailable) {
 			return cg.SearchResult{}, fmt.Errorf("%w: %v", cg.ErrSearchModeUnsupported, err)
+		}
+		if errors.Is(err, tools.ErrNotIndexedWord) {
+			return cg.SearchResult{}, deweyerrors.BadRequestf("newsblur plugin: %v", err)
 		}
 		return cg.SearchResult{}, err
 	}
@@ -119,7 +125,7 @@ func searchScope(segs []string) (func(tools.StoryRef) bool, error) {
 	case len(segs) == 2 && segs[0] == "feed":
 		id, err := strconv.Atoi(segs[1])
 		if err != nil {
-			return nil, fmt.Errorf("newsblur plugin: invalid feed id %q: %w", segs[1], err)
+			return nil, deweyerrors.BadRequestf("newsblur plugin: invalid feed id %q: %v", segs[1], err)
 		}
 		return func(s tools.StoryRef) bool { return s.FeedID == id }, nil
 	case len(segs) == 2 && segs[0] == "tag":
