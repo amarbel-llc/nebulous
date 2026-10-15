@@ -130,6 +130,86 @@ debug-verify-traversal-serve cg_bin: build-go
   } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 \
     | jq -r '.result.content[0].text | fromjson | (.facets.feed | length) as $total | (.labels.feed | length) as $labelled | "\($labelled)/\($total) feed ids labelled"'
 
+# End-to-end check of cutting-garden's `_words` word search (RFC 0016 words
+# mode) against `nebulous traversal-serve`, on a tiny SEEDED corpus in a
+# throwaway HOME: seeds a legacy cache, migrates it into the madder store,
+# builds the on-disk word index with `nebulous index`, then queries through a
+# real cutting-garden's MCP list_nodes. Prints each query's matching story
+# URIs (or the error) and fails when a result differs from the expectation.
+# Usage: just debug-verify-words-search /path/to/cutting-garden
+#
+# check `_words` search end to end against a real cutting-garden on a seeded corpus
+[group('debug')]
+debug-verify-words-search cg_bin: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' EXIT
+  export HOME="$work/home" XDG_DATA_HOME="$work/data" XDG_CONFIG_HOME="$work/config" XDG_CACHE_HOME="$work/cache"
+  export MADDER_CEILING_DIRECTORIES="$work"
+  legacy="$HOME/.cache/nebulous/store"
+  mkdir -p "$legacy/blobs/sha256" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME/cutting-garden"
+
+  entries=""
+  put() { # <cache key path+query> <body>
+    local k sha
+    k=$(printf '%s' "$1" | sha256sum | awk '{print $1}')
+    sha=$(printf '%s' "$2" | sha256sum | awk '{print $1}')
+    printf '%s' "$2" > "$legacy/blobs/sha256/$sha"
+    entries+="\"$k\": {\"digest\": \"$sha\", \"written_at\": \"2026-01-01T00:00:00Z\", \"immutable\": true},"
+  }
+  story() { # <hash> <feed id> <title> <content>
+    jq -nc --arg h "$1" --argjson f "$2" --arg t "$3" --arg c "$4" \
+      '{story_hash:$h, story_feed_id:$f, story_title:$t, story_date:"2024-06-15 10:00:00", story_permalink:("https://example.com/"+$h), story_content:$c, story_tags:[], user_tags:[], starred:true}'
+  }
+  seed() { # <hash> <feed id> <title> <content>
+    put "/starred_story?story_hash=${1//:/%3A}" "$(story "$1" "$2" "$3" "$4")"
+  }
+  put "/reader/starred_story_hashes" '{"starred_story_hashes":["1:aaa","2:bbb","1:ccc"]}'
+  seed "1:aaa" 1 "Migration notes" "<p>The Pelican flies south.</p>"
+  seed "2:bbb" 2 "Wading birds" "<p>herons wade; pelicans fish</p>"
+  seed "1:ccc" 1 "Dusk" "<p>A PELICAN at dusk, plus a café</p>"
+  printf '{"entries": {%s}}' "${entries%,}" > "$legacy/manifest.json"
+
+  ./build/debug/migrate-cache
+  ./build/debug/nebulous index
+
+  cat > "$XDG_CONFIG_HOME/cutting-garden/config.toml" <<EOF
+  [[plugins]]
+  name = "nebulous"
+  command = ["$(pwd)/build/debug/nebulous"]
+  schemes = ["newsblur"]
+  protocols = ["traversal"]
+  EOF
+
+  fail=0
+  check() { # <label> <expected comma-joined sorted hashes or ERR> <list_nodes query>
+    local label="$1" want="$2" query="$3" out got
+    out=$({
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+      jq -nc --arg q "$query" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"list_nodes",arguments:{uri:"newsblur://stories",query:$q}}}'
+    } | {{cg_bin}} mcp | tail -1)
+    if [[ $(jq -r '.result.isError // .error != null' <<<"$out") == true ]]; then
+      got=ERR
+      echo "  error: $(jq -r '.result.content[0].text // .error.message' <<<"$out" | head -c 300)"
+    else
+      got=$(jq -r '.result.content[0].text | fromjson | [.nodes[].uri | sub("^newsblur://story/";"")] | sort | join(",")' <<<"$out")
+      echo "  complete/partial: $(jq -r '.result.content[0].text | fromjson | [.complete, .partial] | @json' <<<"$out")"
+    fi
+    if [[ $got == "$want" ]]; then echo "ok   $label -> $got"; else echo "FAIL $label -> got '$got', want '$want'"; fail=1; fi
+  }
+  check "_words=pelican (case-insensitive, whole word)" "1:aaa,1:ccc" '!newsblur-story-v1 _words=pelican'
+  check "_words=PELICAN (query folded)" "1:aaa,1:ccc" '!newsblur-story-v1 _words=PELICAN'
+  check "_words list is OR" "1:aaa,1:ccc,2:bbb" '!newsblur-story-v1 _words=["pelican","herons"]'
+  check "_words=heron (whole word only: 'herons' is a different word)" "" '!newsblur-story-v1 _words=heron'
+  check "_words=pelicans (a different whole word)" "2:bbb" '!newsblur-story-v1 _words=pelicans'
+  check "_words=cafe (accent-folded)" "1:ccc" '!newsblur-story-v1 _words=cafe'
+  check "_words + facet feed=1" "1:ccc" '!newsblur-story-v1 feed=1 _words=cafe'
+  check "_words + facet excludes" "" '!newsblur-story-v1 feed=2 _words=cafe'
+  check "stop word is an error, not empty" "ERR" '!newsblur-story-v1 _words=the'
+  exit $fail
+
 # Sweep every generated man page's NAME line through lexgrog and fail on any
 # description over the fleet ceiling (72 chars, one line): spinclass renders
 # NAME lines into a system-prompt index. go-mcp's GenerateManpages (>= v0.6.2)

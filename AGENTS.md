@@ -24,6 +24,7 @@ just test-go             # godyn per-package Go tests (checks.nebulous-tests)
 just debug-go-test internal/bravo/tools -test.run=TestX  # one package, dirty tree
 just install-dev         # Nix build + install MCP server to ~/.claude.json
 just debug-verify-traversal-serve /path/to/cutting-garden  # RFC 0013 wire-plugin check
+just debug-verify-words-search /path/to/cutting-garden/bin/cutting-garden  # `_words` search, seeded corpus
 ```
 
 Go dependencies live in `go.nix` (igloo FDR 0008, godyn(7) § GO.NIX MANIFEST):
@@ -101,6 +102,12 @@ server-side (cutting-garden#143). Reads stay token-free either way.
       leaf.go                      ReadLeaf (story content/original/metadata/capture, feed metadata)
       facets.go                    FacetDescriber / FacetCounter / FacetLabeler / FacetVersioner
       mutate.go                    NodeMutator: story/feed/folder create/patch/delete (SetClient)
+      search.go                    Searcher (RFC 0016), words mode only: cutting-garden's
+                                    `_words` field, answered from the on-disk word index via
+                                    ReadIndex.SearchWords; the file's doc comment is the
+                                    published tokenizer contract. Declines substring/regex
+                                    (`_body*=` stays a walk) and, with no usable index,
+                                    words mode too.
       bulk_mutate.go               BulkMutator (RFC 0017): one delegating line to
                                     cg.BestEffortBulkMutate (cutting-garden#197's shared best-effort
                                     dispatch helper) -- rejects atomic with
@@ -114,7 +121,7 @@ server-side (cutting-garden#143). Reads stay token-free either way.
 
 `internal/charlie/cgplugin.Plugin{}` (RootProvider/LeafReader/FacetDescriber/
 FacetCounter/FacetVersioner/FacetLabeler/NodeMutator/ContainerCreator/
-BodyDescriber/BulkMutator/EnrichedLister) is served out-of-process via
+BodyDescriber/BulkMutator/EnrichedLister/Searcher) is served out-of-process via
 `nebulous traversal-serve` (RFC 0013): cutting-garden's own main binary spawns it
 over an AF_UNIX rendezvous socket per a `[[plugins]]` config stanza and
 dispatches `newsblur://` through it, so the tools appear as

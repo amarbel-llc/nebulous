@@ -25,6 +25,21 @@ type fakeIndex struct {
 	captureRecords map[string]tools.CaptureRecordView // key: hash+"/"+format
 	captureFormats []string
 	seenFeedTitles map[string]string
+
+	// wordHits/wordsComplete/wordsErr script SearchWords; wordQueries
+	// records what the plugin asked for.
+	wordHits      map[string][]tools.StoryRef
+	wordsComplete bool
+	wordsErr      error
+	wordQueries   []string
+}
+
+func (f *fakeIndex) SearchWords(word string) ([]tools.StoryRef, bool, error) {
+	f.wordQueries = append(f.wordQueries, word)
+	if f.wordsErr != nil {
+		return nil, false, f.wordsErr
+	}
+	return f.wordHits[word], f.wordsComplete, nil
 }
 
 type contentEntry struct {

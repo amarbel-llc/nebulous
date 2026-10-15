@@ -4,9 +4,11 @@
 //
 // It implements the cutting-garden plugin SDK's RootProvider (no-arg
 // entry points + traversal) and LeafReader (per-leaf body fetch),
-// registered via MustRegisterScheme. The NewsBlur API sync pipeline and
-// word search remain standalone nebulous concerns — this plugin is a
-// read-only view over the same local cache the MCP server serves.
+// registered via MustRegisterScheme. The NewsBlur API sync pipeline
+// remains a standalone nebulous concern, and word search is served as
+// cutting-garden's `_words` search (search.go) from the on-disk word index
+// fetch builds — this plugin is a view over the same local cache the MCP
+// server serves.
 package cgplugin
 
 import (
@@ -34,6 +36,7 @@ type Index interface {
 	ManifestPath() string
 	CaptureRecord(storyHash, format string) (tools.CaptureRecordView, bool)
 	CaptureFormats() []string
+	SearchWords(word string) (hits []tools.StoryRef, complete bool, err error)
 }
 
 var _ Index = (*tools.ReadIndex)(nil)
@@ -69,4 +72,5 @@ var (
 	_ cg.RootProvider   = Plugin{}
 	_ cg.LeafReader     = Plugin{}
 	_ cg.EnrichedLister = Plugin{}
+	_ cg.Searcher       = Plugin{}
 )

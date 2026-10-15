@@ -182,11 +182,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790864318,
-        "narHash": "sha256-IuM1+XjIBCdI2ElCrY36mkACdgRnoZuXw2RKuXHPqoI=",
-        "rev": "b46ab31232b8252fa79d62c14f2ab95034228feb",
+        "lastModified": 1792074081,
+        "narHash": "sha256-UWBddlmLE1yAzV2fu5opwrLucq7yfEyb1r0esUiFyAM=",
+        "rev": "643925382ae1b6673d6ff29201c250dbb265e579",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/cutting-garden/archive/b46ab31232b8252fa79d62c14f2ab95034228feb.tar.gz"
+        "url": "https://code.linenisgreat.com/cutting-garden/archive/643925382ae1b6673d6ff29201c250dbb265e579.tar.gz"
       },
       "original": {
         "type": "tarball",
