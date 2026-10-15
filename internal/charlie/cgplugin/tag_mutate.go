@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
@@ -70,10 +71,17 @@ func patchTag(ctx context.Context, tag string, raw []byte) ([]string, error) {
 	if _, ok := live[tag]; !ok {
 		return nil, errors.BadRequestf("newsblur plugin: %q is not a tag on any story in NewsBlur", tag)
 	}
-	if _, exists := live[newName]; exists && !patch.Force {
-		return nil, errors.BadRequestf(
-			"newsblur plugin: a tag named %q already exists (%d stories); renaming %q onto it would merge the two; pass \"force\": true to merge",
-			newName, live[newName], tag)
+	// NewsBlur merges case-insensitively (its rename_tag compares lowercased
+	// names), so "Other" counts as an existing tag for a rename to "other".
+	// Renaming a tag to a different casing of ITSELF is not a merge.
+	if !patch.Force {
+		for existing, n := range live {
+			if existing != tag && strings.EqualFold(existing, newName) {
+				return nil, errors.BadRequestf(
+					"newsblur plugin: a tag named %q already exists (%d stories); renaming %q to %q would merge the two (NewsBlur compares tag names case-insensitively); pass \"force\": true to merge",
+					existing, n, tag, newName)
+			}
+		}
 	}
 
 	if _, err := client.RenameStarredTag(ctx, tag, newName); err != nil {

@@ -75,6 +75,28 @@ func TestRenameOntoExistingTagNeedsForce(t *testing.T) {
 	}
 }
 
+// NewsBlur's rename_tag merges case-insensitively, so a rename onto a
+// different casing of an existing tag is a merge and needs force; a rename to
+// another casing of the tag ITSELF is just a spelling change.
+func TestRenameMergeGuardIsCaseInsensitive(t *testing.T) {
+	fc := tagFixture(t)
+	fc.liveCounts = map[string]int{"proj": 2, "Other": 5}
+
+	if _, err := patchTagNode(t, "proj", `{"name":"other"}`); err == nil || !deweyerrors.Is400BadRequest(err) || !strings.Contains(err.Error(), "Other") {
+		t.Fatalf("err = %v, want a bad request naming the existing tag %q", err, "Other")
+	}
+	for _, c := range fc.calls {
+		if strings.HasPrefix(c, "RenameStarredTag:") {
+			t.Errorf("calls = %v, want no rename onto a case variant without force", fc.calls)
+		}
+	}
+
+	fc.calls = nil
+	if _, err := patchTagNode(t, "proj", `{"name":"Proj"}`); err != nil {
+		t.Fatalf("a casing-only rename of the tag itself must not need force: %v", err)
+	}
+}
+
 func TestRenameTagValidationAndMissingTag(t *testing.T) {
 	fc := tagFixture(t)
 
