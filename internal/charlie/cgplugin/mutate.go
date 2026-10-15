@@ -49,6 +49,12 @@ type Client interface {
 	// LiveStoryUserTags reads a story's current tags from NewsBlur itself
 	// (never the cache), the starting point for add_tags/remove_tags.
 	LiveStoryUserTags(ctx context.Context, hash string) ([]string, error)
+	// Tag-node operations (tag_mutate.go): NewsBlur's live tag counts, the
+	// rename/delete calls, and the cache patch that follows them.
+	LiveStarredTagCounts(ctx context.Context) (map[string]int, error)
+	RenameStarredTag(ctx context.Context, oldTag, newTag string) (json.RawMessage, error)
+	DeleteStarredTag(ctx context.Context, tag string) (json.RawMessage, error)
+	PatchCachedUserTag(hashes []string, oldTag, newTag string) error
 	UnstarStory(ctx context.Context, hash string) (json.RawMessage, error)
 	MarkStoriesRead(ctx context.Context, hashes []string) (json.RawMessage, error)
 	MarkStoryUnread(ctx context.Context, hash string) (json.RawMessage, error)
@@ -352,8 +358,10 @@ func (Plugin) PatchNode(ctx context.Context, node *url.URL, body io.Reader) ([]s
 		return patchFeed(ctx, segs[1], raw)
 	case "folder":
 		return patchFolder(ctx, segs[1], raw)
+	case "tag":
+		return patchTag(ctx, segs[1], raw)
 	default:
-		return nil, errors.BadRequestf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return nil, errors.BadRequestf("newsblur plugin: PatchNode only supports story/{hash}, feed/{id}, folder/{path}, and tag/{name}, got %s", node)
 	}
 }
 
@@ -590,8 +598,10 @@ func (Plugin) DeleteNode(ctx context.Context, node *url.URL) error {
 		return deleteFeed(ctx, segs[1])
 	case len(segs) == 2 && segs[0] == "folder":
 		return deleteFolder(ctx, segs[1])
+	case len(segs) == 2 && segs[0] == "tag":
+		return deleteTag(ctx, segs[1])
 	default:
-		return errors.BadRequestf("newsblur plugin: DeleteNode only supports story/{hash}, feed/{id}, and folder/{path}, got %s", node)
+		return errors.BadRequestf("newsblur plugin: DeleteNode only supports story/{hash}, feed/{id}, folder/{path}, and tag/{name}, got %s", node)
 	}
 }
 

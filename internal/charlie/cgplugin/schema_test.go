@@ -18,7 +18,7 @@ func TestDescribeBodies_DescribesWritableTypes(t *testing.T) {
 		byTag[b.Tag] = describedBody{accepts: len(b.Accepts), serverAssigned: b.ServerAssignedIdentity, example: b.Example}
 	}
 
-	for _, tag := range []string{typeStory, typeFeed, typeFolder} {
+	for _, tag := range []string{typeStory, typeFeed, typeFolder, typeTag} {
 		entry, ok := byTag[tag]
 		if !ok {
 			t.Errorf("DescribeBodies must describe %q; got %+v", tag, bodies)
@@ -32,7 +32,7 @@ func TestDescribeBodies_DescribesWritableTypes(t *testing.T) {
 	if !byTag[typeFeed].serverAssigned {
 		t.Errorf("%s must declare ServerAssignedIdentity (created via CreateChild)", typeFeed)
 	}
-	for _, tag := range []string{typeStory, typeFolder} {
+	for _, tag := range []string{typeStory, typeFolder, typeTag} {
 		if byTag[tag].serverAssigned {
 			t.Errorf("%s must NOT declare ServerAssignedIdentity (created via CreateNode)", tag)
 		}
@@ -73,6 +73,14 @@ func TestDescribeBodies_ExamplesAreValidPayloads(t *testing.T) {
 			}
 			if body.URL == "" {
 				t.Errorf("%s: example has no url", b.Tag)
+			}
+		case typeTag:
+			var body tagPatchBody
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Errorf("%s: example does not parse as tagPatchBody: %v", b.Tag, err)
+			}
+			if body.Name == nil {
+				t.Errorf("%s: example has no name", b.Tag)
 			}
 		case typeFolder:
 			var body folderPatchBody

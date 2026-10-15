@@ -37,6 +37,16 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 			ServerAssignedIdentity: true,
 		},
 		{
+			Tag: typeTag,
+			Accepts: []string{
+				"application/json (patch_node: {\"name\":\"new-name\"} renames this USER tag on every story that carries it; " +
+					"refused if a tag with the new name already exists unless {\"force\":true} (which merges them); " +
+					"feed-assigned story tags cannot be renamed)",
+				"delete_node removes this user tag from every story that carries it; the stories stay starred",
+			},
+			Example: map[string]any{"name": "new-name"},
+		},
+		{
 			Tag: typeFolder,
 			Accepts: []string{
 				"application/json (create_node: an empty body -- the folder's own name and parent are the target URI itself, see splitFolderPath)",

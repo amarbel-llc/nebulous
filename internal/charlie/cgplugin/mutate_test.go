@@ -23,6 +23,32 @@ type fakeClient struct {
 	// right now"; liveErr makes that read fail.
 	live    map[string][]string
 	liveErr error
+
+	liveCounts    map[string]int
+	liveCountsErr error
+}
+
+// liveCounts scripts LiveStarredTagCounts (NewsBlur's tag -> story count);
+// liveCountsErr makes it fail.
+func (f *fakeClient) LiveStarredTagCounts(context.Context) (map[string]int, error) {
+	f.calls = append(f.calls, "LiveStarredTagCounts")
+	if f.liveCountsErr != nil {
+		return nil, f.liveCountsErr
+	}
+	return f.liveCounts, nil
+}
+
+func (f *fakeClient) RenameStarredTag(_ context.Context, oldTag, newTag string) (json.RawMessage, error) {
+	return f.record("RenameStarredTag:" + oldTag + ">" + newTag)
+}
+
+func (f *fakeClient) DeleteStarredTag(_ context.Context, tag string) (json.RawMessage, error) {
+	return f.record("DeleteStarredTag:" + tag)
+}
+
+func (f *fakeClient) PatchCachedUserTag(hashes []string, oldTag, newTag string) error {
+	f.calls = append(f.calls, "PatchCachedUserTag:"+oldTag+">"+newTag+":"+strings.Join(hashes, ","))
+	return nil
 }
 
 func (f *fakeClient) LiveStoryUserTags(_ context.Context, hash string) ([]string, error) {

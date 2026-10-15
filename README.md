@@ -136,6 +136,13 @@ be non-empty with no comma or whitespace (`cgplugin/tags.go`, the one place
 that rule lives). A write NewsBlur rejects inside an HTTP 200 (`code: -1`)
 is reported as an error and never patches the cache.
 
+Tag nodes (`newsblur://tag/<name>`) are writable for USER tags:
+`patch_node {"name":"new"}` renames the tag on every story that carries it
+and `delete_node` removes it from every story (the stories stay starred).
+Both first confirm against NewsBlur's own tag counts that the tag exists; a
+rename onto an existing tag is refused unless `"force": true` (it would merge
+the two). Feed-assigned story tags cannot be renamed or deleted.
+
 Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
 `story_tag`, `feed`, `read`, `age_band` on stories; `folder`, `active` on
 feeds) via the cutting-garden `FacetDescriber`/`FacetCounter`/`FacetLabeler`
