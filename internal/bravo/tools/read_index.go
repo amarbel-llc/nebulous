@@ -16,15 +16,18 @@ type ReadIndex struct {
 	feeds   *feedIndex
 	stories *storyStore
 	client  *newsblur.Client
+	// wordIndex serves SearchWords from the on-disk word index.
+	wordIndex *wordIndexHolder
 }
 
 // NewReadIndex builds a ReadIndex over client's local cache. The
 // underlying indices build lazily on first read (sync.Once).
 func NewReadIndex(client *newsblur.Client) *ReadIndex {
 	return &ReadIndex{
-		feeds:   newFeedIndex(client),
-		stories: newMetadataStoryStore(client),
-		client:  client,
+		feeds:     newFeedIndex(client),
+		stories:   newMetadataStoryStore(client),
+		client:    client,
+		wordIndex: newWordIndexHolder(client.ManifestPath()),
 	}
 }
 

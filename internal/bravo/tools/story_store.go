@@ -43,6 +43,9 @@ type storyStoreSnapshot struct {
 	// (staleness) for story_query to pass on.
 	index     *wordindex.Index
 	indexNote string
+	// digest is corpusDigest of the starred-hash manifest this snapshot was
+	// built from, for comparing against an on-disk index's coverage.
+	digest string
 }
 
 type storyStore struct {
@@ -116,6 +119,7 @@ func (s *storyStore) build() (*storyStoreSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	snap.digest = corpusDigest(hashes)
 
 	// With a usable on-disk index the corpus is read metadata-only; without
 	// one (absent, corrupt, other tokenizer) fall back to tokenizing here.
