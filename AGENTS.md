@@ -208,6 +208,10 @@ once a receipt is recorded).
 - **Story store**: `storyStore` holds all stories as typed records with a word
   acceleration index, built from cached starred story pages and rebuilt
   whenever the manifest file's mtime changes (see `stale_cache.go` above).
+  `tools.ReadIndex` (traversal-serve, capture) uses `newMetadataStoryStore`
+  instead: no word index, no body stripping, since it only reads metadata
+  (nebulous#58; 2.17 GB RSS before). Memory harness:
+  `just debug-go-test internal/bravo/tools -test.run=TestStoryStoreMemory -test.v -corpus-stories=3000`.
 - **All newsblur client methods return `json.RawMessage`** --- parsing happens
   in tool handlers.
 - **Persistent store**: a SHA256-keyed manifest plus a madder blob store under
