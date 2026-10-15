@@ -27,8 +27,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous generate-plugin      Generate plugin.json\n")
 		fmt.Fprintf(os.Stderr, "  nebulous hook                 Handle purse-first hooks\n")
 		fmt.Fprintf(os.Stderr, "  nebulous install-mcp          Install MCP server config\n")
-		fmt.Fprintf(os.Stderr, "  nebulous fetch [-formats f1,f2] [-store id] [-no-capture] [-no-index]\n")
-		fmt.Fprintf(os.Stderr, "                                Cache feeds, starred stories, and original text; rebuilds the\n")
+		fmt.Fprintf(os.Stderr, "  nebulous fetch [-formats f1,f2] [-store id] [-no-capture] [-no-index] [-no-refresh] [-refresh-all]\n")
+		fmt.Fprintf(os.Stderr, "                                Cache feeds, starred stories, and original text; re-downloads cached\n")
+		fmt.Fprintf(os.Stderr, "                                stories whose tags changed in NewsBlur (every run) and re-syncs all of\n")
+		fmt.Fprintf(os.Stderr, "                                them for read state every NEBULOUS_REFRESH_FULL_INTERVAL (default 168h;\n")
+		fmt.Fprintf(os.Stderr, "                                -no-refresh skips, -refresh-all forces it); rebuilds the\n")
 		fmt.Fprintf(os.Stderr, "                                on-disk word index when the corpus changed (-no-index skips it); also runs\n")
 		fmt.Fprintf(os.Stderr, "                                the gap-filling capture phase when its interval has elapsed\n")
 		fmt.Fprintf(os.Stderr, "                                (NEBULOUS_CAPTURE_INTERVAL, default 6h; -no-capture skips it)\n")
@@ -134,6 +137,14 @@ func main() {
 			"no-index", false,
 			"skip the word-index phase on this run",
 		)
+		noRefresh := fetchFlags.Bool(
+			"no-refresh", false,
+			"skip the refresh phase (re-downloading cached starred stories whose tags changed in NewsBlur) on this run",
+		)
+		refreshAll := fetchFlags.Bool(
+			"refresh-all", false,
+			"force the refresh phase's full re-sync of every cached starred story on this run (also refreshes read state)",
+		)
 		fetchFlags.Parse(flag.Args()[1:])
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -144,7 +155,14 @@ func main() {
 			log.Fatalf("fetch: cache setup: %v", err)
 		}
 
-		if err := fetchAll(ctx, client, splitFormats(*formatsFlag), *storeFlag, *noCapture, *noIndex); err != nil {
+		if err := fetchAll(ctx, client, fetchOptions{
+			CaptureFormats: splitFormats(*formatsFlag),
+			CaptureStoreID: *storeFlag,
+			SkipCapture:    *noCapture,
+			SkipIndex:      *noIndex,
+			SkipRefresh:    *noRefresh,
+			RefreshAll:     *refreshAll,
+		}); err != nil {
 			log.Fatalf("fetch: %v", err)
 		}
 		return
@@ -324,10 +342,23 @@ func runFetchCapturePhase(ctx context.Context, client *newsblur.Client, storeId 
 	}
 }
 
-// fetchAll runs all five phases (feeds, starred stories, original text,
-// the on-disk word index, and the gap-filling capture scan), populating the
-// local cache.
-func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []string, captureStoreId string, skipCapture, skipIndex bool) error {
+// fetchOptions are the knobs of one fetch run beyond the NewsBlur client.
+type fetchOptions struct {
+	CaptureFormats []string
+	CaptureStoreID string
+	SkipCapture    bool
+	SkipIndex      bool
+	// SkipRefresh skips the refresh phase; RefreshAll forces its full
+	// re-sync of every cached story on this run.
+	SkipRefresh bool
+	RefreshAll  bool
+}
+
+// fetchAll runs all six phases (feeds, starred stories, original text, the
+// refresh of already-cached stories, the on-disk word index, and the
+// gap-filling capture scan), populating the local cache.
+func fetchAll(ctx context.Context, client *newsblur.Client, opts fetchOptions) error {
+	captureFormats, captureStoreId, skipCapture, skipIndex := opts.CaptureFormats, opts.CaptureStoreID, opts.SkipCapture, opts.SkipIndex
 	// Phase 1: Feeds metadata
 	log.Println("[feeds] fetching feed list...")
 	if _, err := client.Feeds(ctx, false, true, false); err != nil {
@@ -404,9 +435,23 @@ func fetchAll(ctx context.Context, client *newsblur.Client, captureFormats []str
 		return err
 	}
 
+	// Phase 3b: refresh already-cached starred stories (tags changed in the
+	// NewsBlur apps, read state). Stories downloaded in phase 2 of this same
+	// run are current and are not downloaded again.
+	justFetched := make(map[string]bool, len(missingStories))
+	for _, h := range missingStories {
+		justFetched[h] = true
+	}
+	refreshed := runFetchRefreshPhase(ctx, client, justFetched, opts.SkipRefresh, opts.RefreshAll)
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Phase 4: word index (best-effort; the serve side falls back to an
-	// in-memory build without it)
-	runFetchIndexPhase(ctx, client, len(missingStories) > 0 || len(missingText) > 0, skipIndex)
+	// in-memory build without it). It runs after the refresh so it indexes
+	// the refreshed stories.
+	runFetchIndexPhase(ctx, client, len(missingStories) > 0 || len(missingText) > 0 || refreshed, skipIndex)
 
 	if err := ctx.Err(); err != nil {
 		return err

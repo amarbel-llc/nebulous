@@ -163,6 +163,19 @@ phases of the same `fetch` command rather than separate processes:
   and original article text. This is the sole ingestion pipeline --- the MCP
   server and the cutting-garden plugin never hit the API for reads.
 
+  `fetch` then runs a **refresh phase** (`cmd/nebulous/refresh.go`), because a
+  starred story is otherwise downloaded exactly once and its tags and read
+  state go stale. Every run it reads NewsBlur's per-story `starred_updated`
+  stamps (`StarredHashTimestamps`; recorded in the store by
+  `internal/alfa/newsblur/sync_state.go`) and re-downloads stories whose stamp
+  moved, plus the cached holders of any tag NewsBlur's own tag counts no longer
+  list (a tag deleted in the apps does not move the stamp). Read state has no
+  cheap change signal, so every cached story is re-downloaded on a long
+  interval (`NEBULOUS_REFRESH_FULL_INTERVAL`, default 168h; the first run, with
+  no recorded stamps, is such a run); `-refresh-all` forces it, `-no-refresh`
+  skips the phase. Progress is saved every `refreshChunk` stories so an
+  interrupted re-sync resumes. It never fails the fetch.
+
   `fetch` then runs an **index phase** (`cmd/nebulous/index.go`) that
   (re)builds the on-disk word index (`internal/alfa/wordindex`, a bbolt file at
   `index/words-v1.bbolt` beside the manifest, `newsblur.WordIndexPath`) when the

@@ -34,7 +34,8 @@ rather than separate processes:
 
 - **Sync (+ Capture)** — `nebulous fetch` is the sole ingestion pipeline. It
   sequentially fetches feed metadata, starred stories, and original article
-  text from the NewsBlur API, with adaptive backoff that learns from
+  text from the NewsBlur API, then refreshes already-cached stories whose
+  tags changed in NewsBlur (and, weekly, all of them for read state), with adaptive backoff that learns from
   rate-limit bursts, and persists responses into the local store: a
   SHA256-keyed manifest (`$XDG_DATA_HOME/nebulous/manifest.json`) whose
   response bodies live in a dedicated `nebulous` madder blob store. It also
@@ -186,8 +187,11 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
 
 ```
 nebulous serve mcp                    Start the MCP server over stdio
-nebulous fetch [--formats f1,f2] [--store id] [--no-capture]
-                                      Sync feeds/starred stories/original text; also runs
+nebulous fetch [--formats f1,f2] [--store id] [--no-capture] [--no-index]
+               [--no-refresh] [--refresh-all]
+                                      Sync feeds/starred stories/original text; re-downloads cached
+                                      stories whose tags changed in NewsBlur (and, weekly, all of
+                                      them for read state: NEBULOUS_REFRESH_FULL_INTERVAL); also runs
                                       the gap-filling capture scan when its interval elapses
 nebulous capture [--formats f1,f2] [--store id] [--backfill]
                                       Run the capture scan standalone, ignoring the interval gate
