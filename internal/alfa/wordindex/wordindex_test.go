@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,29 @@ func TestWrittenFileIsWorldReadable(t *testing.T) {
 	}
 	if got := fi.Mode().Perm(); got != indexFileMode {
 		t.Errorf("index file mode = %o, want %o", got, indexFileMode)
+	}
+}
+
+// One absurdly long token (a base64 blob in an article) must not fail the
+// whole build: bbolt rejects keys over MaxKeySize ("key too large").
+func TestOversizedWordIsSkippedNotFatal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.bbolt")
+	b := NewBuilder()
+	b.Add("1:aaa", []string{"alpha", strings.Repeat("x", 40000)})
+	b.Add("1:bbb", []string{"alpha"})
+	if err := b.WriteFile(path, Meta{Tokenizer: "t1"}); err != nil {
+		t.Fatalf("WriteFile with an oversized word: %v", err)
+	}
+	if b.Skipped() != 1 {
+		t.Errorf("Skipped = %d, want 1", b.Skipped())
+	}
+	ix, err := Open(path, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close()
+	if got, _ := ix.Lookup("alpha"); len(got) != 2 {
+		t.Errorf("alpha = %v, want both stories", got)
 	}
 }
 

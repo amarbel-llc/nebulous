@@ -21,7 +21,14 @@ import (
 // Bump it whenever any of those change: Open then rejects older files and
 // readers fall back to the in-memory build instead of silently disagreeing
 // with it.
-const wordTokenizerVersion = "extractwords-v1"
+const wordTokenizerVersion = "extractwords-v2"
+
+// maxIndexedWordBytes bounds a story word: longer tokens (base64 blobs, long
+// digit runs, minified payloads) are not words anyone searches for, and an
+// unbounded one used to fail the whole on-disk build with bbolt's "key too
+// large". v2 of the tokenizer drops them from both the in-memory and the
+// on-disk index so the two agree.
+const maxIndexedWordBytes = 100
 
 // corpusDigest identifies the set of starred stories an index covers.
 func corpusDigest(hashes []string) string {
@@ -81,6 +88,9 @@ func BuildWordIndex(ctx context.Context, client *newsblur.Client, path string) (
 	meta.Stories, meta.Words = b.Stories(), b.Words()
 	log.Printf("word index: wrote %s: %d stories, %d words in %s",
 		path, meta.Stories, meta.Words, time.Since(start).Round(time.Millisecond))
+	if n := b.Skipped(); n > 0 {
+		log.Printf("word index: skipped %d words too long to store", n)
+	}
 	return meta, nil
 }
 

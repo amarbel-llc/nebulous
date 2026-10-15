@@ -62,6 +62,7 @@ type Meta struct {
 type Builder struct {
 	hashes   []string
 	postings map[string][]uint32
+	skipped  int
 }
 
 func NewBuilder() *Builder {
@@ -75,6 +76,12 @@ func (b *Builder) Add(hash string, words []string) {
 	ord := uint32(len(b.hashes))
 	b.hashes = append(b.hashes, hash)
 	for _, w := range words {
+		// bbolt rejects keys over MaxKeySize, and one junk token (a base64
+		// blob, a long run of digits) must never fail the whole index.
+		if len(w) > bolt.MaxKeySize {
+			b.skipped++
+			continue
+		}
 		list, seen := b.postings[w]
 		if !seen {
 			w = strings.Clone(w)
@@ -84,6 +91,9 @@ func (b *Builder) Add(hash string, words []string) {
 		b.postings[w] = append(list, ord)
 	}
 }
+
+// Skipped reports how many words Add dropped for being too long to key.
+func (b *Builder) Skipped() int { return b.skipped }
 
 func (b *Builder) Stories() int { return len(b.hashes) }
 func (b *Builder) Words() int   { return len(b.postings) }

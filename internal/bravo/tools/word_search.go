@@ -26,10 +26,10 @@ var ErrWordIndexUnavailable = errors.New("nebulous: word index unavailable (run 
 func IndexedWord(query string) (string, error) {
 	canonical := strings.Trim(strings.ToLower(stripDiacritics(strings.TrimSpace(query))), "-")
 	words := extractWords(canonical)
-	if len(words) == 0 || words[0] != canonical {
+	if len(words) == 0 || words[0] != canonical || len(canonical) > maxIndexedWordBytes {
 		return "", fmt.Errorf(
-			"%q is not a single indexed word: nebulous indexes lowercase, accent-folded words of at least 3 letters or digits (hyphens allowed inside a word), and skips numbers and common stop words",
-			query)
+			"%q is not a single indexed word: nebulous indexes lowercase, accent-folded words of 3 to %d letters or digits (hyphens allowed inside a word), and skips numbers and common stop words",
+			query, maxIndexedWordBytes)
 	}
 	return canonical, nil
 }

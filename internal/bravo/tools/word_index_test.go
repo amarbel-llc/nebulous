@@ -60,6 +60,36 @@ func TestOnDiskWordIndexMatchesInMemory(t *testing.T) {
 	}
 }
 
+// Regression for the first production build: one story containing a giant
+// token (a base64 blob) failed the whole index with bbolt's "key too large".
+func TestIndexBuildSurvivesGiantTokenAndBothPathsDropIt(t *testing.T) {
+	c := testClientWithCachedStories(t)
+	giant := strings.Repeat("a", 40000)
+	if err := c.PutCachedStarredStory("hash1", json.RawMessage(
+		`{"story_hash":"hash1","story_title":"First Story","story_feed_id":1,`+
+			`"story_date":"2024-06-15 10:00:00","story_content":"<p>programming `+giant+`</p>"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	memStore := newStoryStore(c)
+	buildIndexFor(t, c) // must not fail
+	diskStore := newStoryStore(c)
+
+	for _, w := range []string{"programming", giant} {
+		mem := hashesOf(memStore.query(storyQuery{Words: []string{w}}))
+		disk := hashesOf(diskStore.query(storyQuery{Words: []string{w}}))
+		if !reflect.DeepEqual(mem, disk) {
+			t.Errorf("word %.12q...: in-memory %v, on-disk %v", w, mem, disk)
+		}
+	}
+	if got := hashesOf(diskStore.query(storyQuery{Words: []string{giant}})); len(got) != 0 {
+		t.Errorf("giant token was indexed: %v", got)
+	}
+	if _, err := IndexedWord(giant); err == nil {
+		t.Error("IndexedWord accepted a token longer than the index stores")
+	}
+}
+
 func TestStaleOnDiskIndexIsServedWithNote(t *testing.T) {
 	c := testClientWithCachedStories(t)
 	buildIndexFor(t, c)

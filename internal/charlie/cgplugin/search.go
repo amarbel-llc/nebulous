@@ -31,8 +31,9 @@ import (
 //     whole word; "Café", "cafe" and "CAFÉ" are the same word. Hyphens
 //     inside a word are kept ("machine-learning" is a word, and also
 //     indexes "machine" and "learning").
-//   - Not indexed, therefore not matchable: words shorter than 3 characters,
-//     purely numeric words, and these stop words: the and for with from that
+//   - Not indexed, therefore not matchable: words shorter than 3 characters
+//     or longer than 100 bytes (junk such as base64 blobs), purely numeric
+//     words, and these stop words: the and for with from that
 //     this are was but not you all can had has have its our will www com org
 //     net http https. A query that is not exactly one indexed word (a phrase,
 //     a stop word, "go") is a bad-request error naming why, never a silent

@@ -235,6 +235,9 @@ func parseStoryRecordOpts(raw json.RawMessage, client *newsblur.Client, indexWor
 		words = make(map[string]bool)
 		addWords := func(text string) {
 			for _, w := range extractWords(text) {
+				if len(w) > maxIndexedWordBytes {
+					continue // junk (base64 blobs, long digit runs), never a searchable word
+				}
 				words[w] = true
 			}
 		}
