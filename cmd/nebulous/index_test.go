@@ -8,6 +8,7 @@ import (
 
 	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 	"code.linenisgreat.com/nebulous/internal/alfa/wordindex"
+	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 )
 
 func seedStarred(t *testing.T, c *newsblur.Client, hash, title string) {
@@ -31,7 +32,7 @@ func setHashes(t *testing.T, c *newsblur.Client, hashes ...string) {
 
 func indexBuiltAt(t *testing.T, path string) (stories int) {
 	t.Helper()
-	ix, err := wordindex.Open(path, "extractwords-v1")
+	ix, err := wordindex.Open(path, tools.WordTokenizerVersion)
 	if err != nil {
 		t.Fatalf("open index: %v", err)
 	}

@@ -23,6 +23,10 @@ import (
 // with it.
 const wordTokenizerVersion = "extractwords-v2"
 
+// WordTokenizerVersion is wordTokenizerVersion for callers outside the
+// package (tests that open an index file directly).
+const WordTokenizerVersion = wordTokenizerVersion
+
 // maxIndexedWordBytes bounds a story word: longer tokens (base64 blobs, long
 // digit runs, minified payloads) are not words anyone searches for, and an
 // unbounded one used to fail the whole on-disk build with bbolt's "key too
