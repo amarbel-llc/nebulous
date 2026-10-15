@@ -31,6 +31,8 @@ func runTraversalServe(ctx context.Context) int {
 		return 1
 	}
 
+	installProfileDumpOnSignal(ctx)
+
 	cgplugin.SetIndex(tools.NewReadIndex(client))
 	if token != "" {
 		cgplugin.SetClient(client)
