@@ -136,6 +136,78 @@ func TestSetStoryUserTagsSendsExplicitEmptyParam(t *testing.T) {
 	}
 }
 
+// Multi-tag writes send one user_tags parameter per tag, the shape NewsBlur's
+// view reads with getlist; a single comma-joined value would be stored as
+// one tag containing commas.
+func TestStarAndSetUserTagsSendOneParamPerTag(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		got = r.PostForm["user_tags"]
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"code":1}`))
+	}))
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	if _, err := c.StarStory(context.Background(), "abc", []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("StarStory user_tags = %q, want one parameter per tag %q", got, want)
+	}
+	if _, err := c.SetStoryUserTags(context.Background(), "abc", []string{"x", "y", "z"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"x", "y", "z"}; !slices.Equal(got, want) {
+		t.Errorf("SetStoryUserTags user_tags = %q, want one parameter per tag %q", got, want)
+	}
+}
+
+func TestLiveStoryUserTagsReadsFromNewsBlurNotTheCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/reader/starred_stories" || r.URL.Query().Get("h") != "abc" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"stories":[{"story_hash":"other","user_tags":["no"]},{"story_hash":"abc","user_tags":["live","tags"]}]}`))
+	}))
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	// A stale cached copy must not influence the answer.
+	if err := c.PutCachedStarredStory("abc", json.RawMessage(`{"story_hash":"abc","user_tags":["stale"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.LiveStoryUserTags(context.Background(), "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"live", "tags"}; !slices.Equal(got, want) {
+		t.Errorf("LiveStoryUserTags = %v, want %v", got, want)
+	}
+}
+
+func TestLiveStoryUserTagsMissingStoryAndNoTags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("h") == "untagged" {
+			w.Write([]byte(`{"stories":[{"story_hash":"untagged"}]}`))
+			return
+		}
+		w.Write([]byte(`{"stories":[]}`))
+	}))
+	defer server.Close()
+	c := testClientAgainstServer(t, server)
+
+	if got, err := c.LiveStoryUserTags(context.Background(), "untagged"); err != nil || got == nil || len(got) != 0 {
+		t.Errorf("untagged story: got %v, %v; want an empty non-nil slice", got, err)
+	}
+	if _, err := c.LiveStoryUserTags(context.Background(), "gone"); err == nil {
+		t.Error("a story NewsBlur does not return was reported as having no tags instead of an error")
+	}
+}
+
 func TestSetStoryUserTagsPatchesCachedHashList(t *testing.T) {
 	server := okServer(t)
 	defer server.Close()

@@ -18,6 +18,19 @@ import (
 type fakeClient struct {
 	calls []string
 	err   error // if set, every call returns this error instead of succeeding
+
+	// live scripts LiveStoryUserTags: the story's tags "as NewsBlur has them
+	// right now"; liveErr makes that read fail.
+	live    map[string][]string
+	liveErr error
+}
+
+func (f *fakeClient) LiveStoryUserTags(_ context.Context, hash string) ([]string, error) {
+	f.calls = append(f.calls, "LiveStoryUserTags:"+hash)
+	if f.liveErr != nil {
+		return nil, f.liveErr
+	}
+	return f.live[hash], nil
 }
 
 func (f *fakeClient) record(call string) (json.RawMessage, error) {
@@ -222,7 +235,7 @@ func TestPatchNodeStoryMarksUnread(t *testing.T) {
 func TestPatchNodeStorySetsUserTags(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"user_tags":["a","b"]}`))
+	body := bytes.NewReader([]byte(`{"user_tags":["a","b"],"force":true}`))
 	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
@@ -240,7 +253,7 @@ func TestPatchNodeStorySetsUserTags(t *testing.T) {
 func TestPatchNodeStoryEmptyUserTagsClearsTags(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"user_tags":[]}`))
+	body := bytes.NewReader([]byte(`{"user_tags":[],"force":true}`))
 	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)
@@ -275,7 +288,7 @@ func TestPatchNodeStoryNoOpWhenUserTagsAbsent(t *testing.T) {
 func TestPatchNodeStoryReadAndUserTagsBothFireFromOneBody(t *testing.T) {
 	_, fc := setupMutateTest(t)
 
-	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"]}`))
+	body := bytes.NewReader([]byte(`{"read":true,"user_tags":["a"],"force":true}`))
 	applied, err := Plugin{}.PatchNode(context.Background(), mustURL(t, "newsblur://story/"+sampleHash), body)
 	if err != nil {
 		t.Fatalf("PatchNode: %v", err)

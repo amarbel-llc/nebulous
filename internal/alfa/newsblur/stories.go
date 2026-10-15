@@ -19,6 +19,35 @@ func (c *Client) StoriesStarredByHash(ctx context.Context, hashes []string) (jso
 	return c.doGet(ctx, "/reader/starred_stories", params)
 }
 
+// LiveStoryUserTags reads one starred story's CURRENT tags straight from
+// NewsBlur, never from the local cache: tags edited in the NewsBlur apps
+// never reach the cache (fetch downloads a starred story once), so any
+// read-modify-write of a tag set must start here, not from the cache.
+func (c *Client) LiveStoryUserTags(ctx context.Context, storyHash string) ([]string, error) {
+	raw, err := c.StoriesStarredByHash(ctx, []string{storyHash})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Stories []struct {
+			Hash     string   `json:"story_hash"`
+			UserTags []string `json:"user_tags"`
+		} `json:"stories"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("parsing starred story %s: %w", storyHash, err)
+	}
+	for _, s := range resp.Stories {
+		if s.Hash == storyHash {
+			if s.UserTags == nil {
+				return []string{}, nil
+			}
+			return s.UserTags, nil
+		}
+	}
+	return nil, fmt.Errorf("newsblur returned no starred story %s", storyHash)
+}
+
 func (c *Client) OriginalText(ctx context.Context, storyHash string) (json.RawMessage, error) {
 	params := url.Values{"story_hash": {storyHash}}
 	return c.get(ctx, "/rss_feeds/original_text", params)

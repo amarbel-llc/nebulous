@@ -113,10 +113,7 @@ check.
 When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
 `NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
 `create_child.go`): `create_node`/`patch_node`/`delete_node` on
-`story/{hash}` (star/unstar, read/unread, and `user_tags` — patch_node
-REPLACES the tag set, an empty array clears it, verified against a real
-NewsBlur account: re-starring with a different tag set drops the old one
-rather than merging) and `feed/{id}` (rename/move/
+`story/{hash}` (star/unstar, read/unread, and tags) and `feed/{id}` (rename/move/
 unsubscribe); `create_node` against the `feeds` root (subscribe, via
 cutting-garden#143's server-assigned-identity `CreateChild` — NewsBlur
 assigns the feed id, so the tool reports the resulting `feed/{id}` URI
@@ -126,6 +123,18 @@ NewsBlur's own nested-folder join convention (`"Parent - Child"`, the same
 string already in `FeedRef.Folder`) rather than a slash-hierarchical URI.
 `describe_node_types`' schema (`schema.go`) documents every writable
 type's body shape.
+
+Story tags are edited with `patch_node`: `{"add_tags":[...],"remove_tags":[...]}`
+reads the story's CURRENT tags from NewsBlur (never the local cache, which
+never learns about tags edited in the NewsBlur apps), applies the set edit
+and writes the result. `{"user_tags":[...],"force":true}` replaces the whole
+set (re-starring with a different set drops the old one rather than merging;
+an empty array clears it) and is refused without `force`, because a replace
+built from the possibly stale local copy can erase tags. The two forms
+cannot be combined. Tags are treated as a set (duplicates dropped) and must
+be non-empty with no comma or whitespace (`cgplugin/tags.go`, the one place
+that rule lives). A write NewsBlur rejects inside an HTTP 200 (`code: -1`)
+is reported as an error and never patches the cache.
 
 Feed and story nodes also carry facet dimensions (`year`, `user_tag`,
 `story_tag`, `feed`, `read`, `age_band` on stories; `folder`, `active` on

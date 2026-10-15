@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"strings"
 )
 
 // MarkStoriesRead marks the given stories read on NewsBlur, then
@@ -37,11 +36,19 @@ func (c *Client) MarkStoryUnread(ctx context.Context, storyHash string) (json.Ra
 	return raw, err
 }
 
+// addUserTags sends each tag as its own repeated user_tags parameter, the
+// shape NewsBlur's own client sends and its view reads
+// (request.POST.getlist("user_tags")). A single comma-joined value would be
+// read as ONE tag containing commas.
+func addUserTags(form url.Values, userTags []string) {
+	for _, tag := range userTags {
+		form.Add("user_tags", tag)
+	}
+}
+
 func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []string) (json.RawMessage, error) {
 	form := url.Values{"story_hash": {storyHash}}
-	if len(userTags) > 0 {
-		form.Set("user_tags", strings.Join(userTags, ","))
-	}
+	addUserTags(form, userTags)
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
 	if err == nil {
 		_ = c.PatchCachedStarredStoryHashes(storyHash, "")
@@ -63,7 +70,16 @@ func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []str
 // was not directly tested, so this deliberately never relies on that
 // omit behavior at all).
 func (c *Client) SetStoryUserTags(ctx context.Context, storyHash string, userTags []string) (json.RawMessage, error) {
-	form := url.Values{"story_hash": {storyHash}, "user_tags": {strings.Join(userTags, ",")}}
+	form := url.Values{"story_hash": {storyHash}}
+	if len(userTags) == 0 {
+		// Clearing: keep sending the explicit empty value this method has
+		// always sent (nebulous#50). Whether an omitted parameter clears
+		// too, and what an empty value stores, is still to be settled by a
+		// live fixture test; this encoding is unchanged until then.
+		form.Set("user_tags", "")
+	} else {
+		addUserTags(form, userTags)
+	}
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
 	if err == nil {
 		_ = c.PatchCachedStarredStoryHashes(storyHash, "")

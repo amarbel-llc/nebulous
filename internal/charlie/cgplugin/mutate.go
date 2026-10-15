@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,9 @@ var _ cg.NodeMutator = Plugin{}
 type Client interface {
 	StarStory(ctx context.Context, hash string, tags []string) (json.RawMessage, error)
 	SetStoryUserTags(ctx context.Context, hash string, tags []string) (json.RawMessage, error)
+	// LiveStoryUserTags reads a story's current tags from NewsBlur itself
+	// (never the cache), the starting point for add_tags/remove_tags.
+	LiveStoryUserTags(ctx context.Context, hash string) ([]string, error)
 	UnstarStory(ctx context.Context, hash string) (json.RawMessage, error)
 	MarkStoriesRead(ctx context.Context, hashes []string) (json.RawMessage, error)
 	MarkStoryUnread(ctx context.Context, hash string) (json.RawMessage, error)
@@ -138,9 +142,20 @@ type storyCreateBody struct {
 // Starred is deliberately absent -- unstarring goes through DeleteNode
 // instead, since a not-starred story isn't an addressable node this
 // plugin's local index can represent at all.
+//
+// Tag edits come in two kinds. user_tags REPLACES the whole set and is
+// refused unless Force is true: this index's copy of a story's tags can be
+// stale (tags edited in the NewsBlur apps never reach it), so a replace
+// built from it can silently erase tags. AddTags/RemoveTags instead read the
+// story's CURRENT tags from NewsBlur, apply the set edit, and write the
+// result; they never need Force. The two kinds cannot be combined in one
+// body.
 type storyPatchBody struct {
-	Read     *bool     `json:"read,omitempty"`
-	UserTags *[]string `json:"user_tags,omitempty"`
+	Read       *bool     `json:"read,omitempty"`
+	UserTags   *[]string `json:"user_tags,omitempty"`
+	AddTags    *[]string `json:"add_tags,omitempty"`
+	RemoveTags *[]string `json:"remove_tags,omitempty"`
+	Force      bool      `json:"force,omitempty"`
 }
 
 // feedPatchBody is PatchNode's payload for a feed node. Title and Folder
@@ -243,9 +258,14 @@ func createStory(ctx context.Context, hash string, body io.Reader, typ string) e
 		}
 	}
 
+	tags, err := tagSet(payload.UserTags)
+	if err != nil {
+		return err
+	}
+
 	mutateMu.Lock()
 	defer mutateMu.Unlock()
-	if _, err := client.StarStory(ctx, hash, payload.UserTags); err != nil {
+	if _, err := client.StarStory(ctx, hash, tags); err != nil {
 		return fmt.Errorf("newsblur plugin: starring %s: %w", hash, err)
 	}
 	return nil
@@ -352,8 +372,44 @@ func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) 
 	if err := json.Unmarshal(raw, &patch); err != nil {
 		return nil, errors.BadRequestf("newsblur plugin: invalid story patch body: %w", err)
 	}
-	if patch.Read == nil && patch.UserTags == nil {
+	replacing := patch.UserTags != nil
+	editing := patch.AddTags != nil || patch.RemoveTags != nil
+	if patch.Read == nil && !replacing && !editing {
 		return []string{}, nil
+	}
+
+	// Validate every tag edit BEFORE any write, so a bad tag never leaves a
+	// body half applied (a read change landed, the tags refused).
+	var replacement, add, remove []string
+	if replacing && editing {
+		return nil, errors.BadRequestf("newsblur plugin: user_tags (replace the whole set) cannot be combined with add_tags/remove_tags in one patch")
+	}
+	if replacing {
+		if !patch.Force {
+			return nil, errors.BadRequestf(
+				"newsblur plugin: user_tags replaces the story's whole tag set, and this index's copy of the tags can be stale " +
+					"(tags edited in the NewsBlur apps never reach it), so a replace could erase tags; use add_tags/remove_tags, " +
+					"or pass \"force\": true to replace anyway")
+		}
+		set, err := tagSet(*patch.UserTags)
+		if err != nil {
+			return nil, err
+		}
+		replacement = set
+	}
+	if editing {
+		var err error
+		if add, err = tagSet(deref(patch.AddTags)); err != nil {
+			return nil, err
+		}
+		if remove, err = tagSet(deref(patch.RemoveTags)); err != nil {
+			return nil, err
+		}
+		for _, tag := range add {
+			if slices.Contains(remove, tag) {
+				return nil, errors.BadRequestf("newsblur plugin: tag %q is in both add_tags and remove_tags", tag)
+			}
+		}
 	}
 
 	mutateMu.Lock()
@@ -375,14 +431,59 @@ func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) 
 	// REPLACES the story's tags, including clearing them all when UserTags
 	// is present-but-empty -- see storyPatchBody's doc comment for how the
 	// *[]string distinguishes that from UserTags being absent.
-	if patch.UserTags != nil {
-		if _, err := client.SetStoryUserTags(ctx, hash, *patch.UserTags); err != nil {
+	if replacing {
+		if _, err := client.SetStoryUserTags(ctx, hash, replacement); err != nil {
 			return nil, fmt.Errorf("newsblur plugin: setting tags for %s: %w", hash, err)
 		}
 		applied = append(applied, "user_tags")
 	}
 
+	if editing {
+		if err := editStoryTags(ctx, hash, add, remove); err != nil {
+			return nil, err
+		}
+		if patch.AddTags != nil {
+			applied = append(applied, "add_tags")
+		}
+		if patch.RemoveTags != nil {
+			applied = append(applied, "remove_tags")
+		}
+	}
+
 	return applied, nil
+}
+
+func deref(p *[]string) []string {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// editStoryTags applies a set edit to a story's tags starting from the tags
+// NewsBlur has RIGHT NOW (never this index's possibly stale copy) and writes
+// the result back. The window between that read and the write is one API
+// call wide; a concurrent edit from another client inside it can still be
+// overwritten. Removing a story's last tag is refused: clearing all tags is
+// a different, explicit operation (user_tags: [] with force) whose
+// NewsBlur-side behavior has not been verified live.
+func editStoryTags(ctx context.Context, hash string, add, remove []string) error {
+	live, err := client.LiveStoryUserTags(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("newsblur plugin: reading the current tags of %s from NewsBlur: %w", hash, err)
+	}
+	next := applyTagEdit(live, add, remove)
+	if len(next) == 0 && len(live) > 0 {
+		return errors.BadRequestf(
+			"newsblur plugin: remove_tags would remove all of %s's tags; clearing every tag is not supported here, use user_tags [] with force", hash)
+	}
+	if sameTagSet(next, live) {
+		return nil // nothing to change: no write
+	}
+	if _, err := client.SetStoryUserTags(ctx, hash, next); err != nil {
+		return fmt.Errorf("newsblur plugin: setting tags for %s: %w", hash, err)
+	}
+	return nil
 }
 
 // patchFeed requires InFolder alongside Folder rather than deriving the

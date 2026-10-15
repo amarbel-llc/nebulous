@@ -51,7 +51,7 @@ func TestBulkMutateOpsPartitionsOutcomes(t *testing.T) {
 	result, err := Plugin{}.BulkMutate(context.Background(), cg.BulkRequest{
 		Atomicity: cg.BulkBestEffort,
 		Ops: []cg.BulkOp{
-			{Kind: cg.BulkPatch, URI: storyURI, Body: []byte(`{"user_tags":["a","b"]}`)},
+			{Kind: cg.BulkPatch, URI: storyURI, Body: []byte(`{"user_tags":["a","b"],"force":true}`)},
 			{Kind: cg.BulkDelete, URI: missingURI},
 		},
 	})
