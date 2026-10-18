@@ -51,6 +51,24 @@ func tagSet(tags []string) ([]string, error) {
 	return out, nil
 }
 
+// distinctTags drops duplicates (first occurrence kept) without validating:
+// for tags being removed, which may legitimately be malformed.
+func distinctTags(tags []string) []string {
+	if tags == nil {
+		return nil
+	}
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if _, dup := seen[tag]; dup {
+			continue
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
+	return out
+}
+
 // applyTagEdit returns current minus remove plus add: current's order is
 // kept, tags already present are not repeated, new tags are appended in the
 // order given. current is taken as-is (including any tag checkTag would

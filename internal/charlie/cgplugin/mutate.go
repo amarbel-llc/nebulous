@@ -410,9 +410,10 @@ func patchStory(ctx context.Context, hash string, raw []byte) ([]string, error) 
 		if add, err = tagSet(deref(patch.AddTags)); err != nil {
 			return nil, err
 		}
-		if remove, err = tagSet(deref(patch.RemoveTags)); err != nil {
-			return nil, err
-		}
+		// remove_tags is NOT validated: removing a malformed tag already on the
+		// story (a comma-joined tag, a trailing space, the empty tag) is the
+		// cleanup case, and a remove of a tag the story lacks changes nothing.
+		remove = distinctTags(deref(patch.RemoveTags))
 		for _, tag := range add {
 			if slices.Contains(remove, tag) {
 				return nil, errors.BadRequestf("newsblur plugin: tag %q is in both add_tags and remove_tags", tag)

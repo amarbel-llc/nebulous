@@ -152,6 +152,22 @@ func TestAddTagsToUntaggedStory(t *testing.T) {
 	}
 }
 
+// A malformed tag already on a story (comma-joined, trailing space, empty)
+// must be removable, or it could never be cleaned up; adding one still isn't.
+func TestMalformedTagsCanBeRemovedAndSplit(t *testing.T) {
+	_, fc := setupMutateTest(t)
+	fc.live = map[string][]string{sampleHash: {"proj-mephisto,zz-dsp", "keep", "padded ", ""}}
+
+	body := `{"add_tags":["proj-mephisto","zz-dsp"],"remove_tags":["proj-mephisto,zz-dsp","padded ",""]}`
+	if _, err := patchStoryBody(t, body); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"LiveStoryUserTags:" + sampleHash, "SetStoryUserTags:" + sampleHash + ":keep,proj-mephisto,zz-dsp"}
+	if !reflect.DeepEqual(fc.calls, want) {
+		t.Errorf("calls = %v, want %v", fc.calls, want)
+	}
+}
+
 func TestRemovingTheLastTagIsRefused(t *testing.T) {
 	_, fc := setupMutateTest(t)
 	fc.live = map[string][]string{sampleHash: {"only"}}
@@ -174,7 +190,6 @@ func TestTagEditBodyErrors(t *testing.T) {
 		"replace combined with remove": `{"user_tags":["a"],"force":true,"remove_tags":["b"]}`,
 		"same tag added and removed":   `{"add_tags":["a"],"remove_tags":["a"]}`,
 		"invalid added tag":            `{"add_tags":["a b"]}`,
-		"invalid removed tag":          `{"remove_tags":["a,b"]}`,
 	} {
 		if _, err := patchStoryBody(t, body); err == nil || !deweyerrors.Is400BadRequest(err) {
 			t.Errorf("%s: err = %v, want a bad request", name, err)

@@ -18,7 +18,7 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 				"application/json (mutate_nodes patch op: {\"read\":bool} to mark read/unread; " +
 					"{\"add_tags\":[...],\"remove_tags\":[...]} to edit the tag set, starting from the story's live NewsBlur tags; " +
 					"{\"user_tags\":[...],\"force\":true} to REPLACE the whole set, an empty array clears it -- refused without force, " +
-					"and not combinable with add_tags/remove_tags; tags must not be empty or contain commas or whitespace)",
+					"and not combinable with add_tags/remove_tags; tags written must not be empty or contain commas or whitespace; remove_tags is not checked, so a malformed tag already on a story can be removed)",
 			},
 			Example: storyCreateBody{UserTags: []string{"cooking", "blogs"}},
 		},
