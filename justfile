@@ -377,6 +377,23 @@ debug-probe-clear-tags story_hash mode:
     --data-urlencode "h={{story_hash}}" \
   | jq -c '.stories[] | {story_hash, user_tags}'
 
+# Throwaway: print the live user_tags NewsBlur holds for the given stories
+# (read-only). Fetches the token from piggy when NEWSBLUR_TOKEN is unset;
+# never prints it. Used to verify cleanup writes against NewsBlur itself.
+#
+# throwaway: print live user_tags from NewsBlur for story hashes (read-only)
+[group('debug')]
+debug-probe-live-tags +story_hashes:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  for h in {{story_hashes}}; do
+    curl -sS -G https://www.newsblur.com/reader/starred_stories \
+      -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+      --data-urlencode "h=$h" \
+    | jq -c '.stories[] | {story_hash, user_tags}'
+  done
+
 # Throwaway: the whole clearing experiment in one go, on one fixture story.
 # Fetches the token from piggy itself when NEWSBLUR_TOKEN is unset (the
 # operator runs it; never prints the token). For each mode in order: set a
@@ -420,20 +437,18 @@ debug-probe-unauthenticated-mutation:
 # NewsBlur's /reader/starred_counts (tag, count), bypassing nebulous's cache,
 # to compare against the cached user_tag facet (tag-mutation review: does an
 # empty-string tag really exist server-side, and which tags carry spaces).
-# Never prints the token. Requires NEWSBLUR_TOKEN in the environment.
+# Never prints the token; fetches it from piggy when NEWSBLUR_TOKEN is unset.
+# An optional jq regex (matched against the tag) narrows the output.
 #
 # print live starred tag counts from NewsBlur (read-only)
 [group('debug')]
-debug-probe-starred-counts:
+debug-probe-starred-counts pattern='':
   #!/usr/bin/env bash
   set -euo pipefail
-  if [ -z "${NEWSBLUR_TOKEN:-}" ]; then
-    echo "NEWSBLUR_TOKEN is not set in this environment" >&2
-    exit 1
-  fi
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
   curl -sS https://www.newsblur.com/reader/starred_counts \
     -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
-  | jq -r '.starred_counts[] | select(.tag != null) | [(.tag | @json), .count] | @tsv'
+  | jq -r --arg p '{{pattern}}' '.starred_counts[] | select(.tag != null) | select(.tag | test($p)) | [(.tag | @json), .count] | @tsv'
 
 # sample the local corpus: list the first 5 keys, total count, and first entry body
 [group('explore')]
