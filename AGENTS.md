@@ -44,10 +44,11 @@ direnv via `.envrc`). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 `corpus-*`, and `traversal-serve` read only the local store and do not
 require a token. `traversal-serve` optionally becomes read-write when
 `NEWSBLUR_TOKEN` is set: its plugin gains `NodeMutator` support
-(`create_node`/`patch_node`/`delete_node`), mapping to
+(`create`/`patch`/`delete` ops of cutting-garden's single `mutate_nodes`
+write tool, cutting-garden#315), mapping to
 star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed/folder
-create/rename/delete/move, plus `ContainerCreator` (`create_node` against
-the `feeds` root) for subscribe, since NewsBlur assigns the feed id
+create/rename/delete/move, plus `ContainerCreator` (a temp-id `create` op
+in the `feeds` root) for subscribe, since NewsBlur assigns the feed id
 server-side (cutting-garden#143). Reads stay token-free either way.
 
 ## Architecture
@@ -137,7 +138,12 @@ path is verified in production (nebulous#40). The bespoke `nebulous` MCP
 
 `BulkMutator` (`bulk_mutate.go`, RFC 0017, cutting-garden#191) batches the
 same NodeMutator verbs -- an explicit changeset or a Root+Filter sweep --
-through cutting-garden's `bulk_mutate` tool. Best-effort only: NewsBlur's
+through cutting-garden's `mutate_nodes` tool (which replaced
+create_node/put_node/patch_node/delete_node/bulk_mutate in
+cutting-garden#315 and runs EVERY write, even a single one, as a batch;
+its host-side `BestEffortBulkMutate`/`ApplyBulkOp` also resolves temp-id
+creates via `ContainerCreator` and reports per-item
+applied/patched_nothing/failed/created). Best-effort only: NewsBlur's
 REST API has no multi-object transaction, so an `atomic` request is
 rejected with `cg.ErrBulkAtomicUnsupported`, never silently downgraded.
 Since cutting-garden#197, `BulkMutate` is one line delegating to

@@ -19,11 +19,11 @@ One Go module, two surfaces over one local store:
    cutting-garden's own main binary spawns it over an AF_UNIX rendezvous
    socket per a `[[plugins]]` config stanza. Read-only by default; no token
    required. Optionally becomes read-write when `NEWSBLUR_TOKEN` is set,
-   implementing `NodeMutator` (`create_node`/`patch_node`/`delete_node` —
+   implementing `NodeMutator` (`create`/`patch`/`delete` ops of cutting-garden's `mutate_nodes` —
    star/unstar, mark_read/mark_unread, replace/clear a story's user tags,
    unsubscribe, rename_feed/move_feed, folder create/rename/delete/move)
    and `ContainerCreator` (subscribe, via
-   `create_node` against the feeds root — cutting-garden#143's
+   a temp-id `create` op in the feeds root — cutting-garden#143's
    server-assigned-identity shape).
 
 ## NewsBlur MCP server
@@ -113,9 +113,9 @@ check.
 
 When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
 `NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
-`create_child.go`): `create_node`/`patch_node`/`delete_node` on
+`create_child.go`): `mutate_nodes` `create`/`patch`/`delete` ops on
 `story/{hash}` (star/unstar, read/unread, and tags) and `feed/{id}` (rename/move/
-unsubscribe); `create_node` against the `feeds` root (subscribe, via
+unsubscribe); a temp-id `create` op in the `feeds` root (subscribe, via
 cutting-garden#143's server-assigned-identity `CreateChild` — NewsBlur
 assigns the feed id, so the tool reports the resulting `feed/{id}` URI
 back). Folder nodes (`folder/{path}`, not yet listed by `ListRoots`) are
@@ -125,7 +125,7 @@ string already in `FeedRef.Folder`) rather than a slash-hierarchical URI.
 `describe_node_types`' schema (`schema.go`) documents every writable
 type's body shape.
 
-Story tags are edited with `patch_node`: `{"add_tags":[...],"remove_tags":[...]}`
+Story tags are edited with a `mutate_nodes` `patch` op: `{"add_tags":[...],"remove_tags":[...]}`
 reads the story's CURRENT tags from NewsBlur (never the local cache, which
 never learns about tags edited in the NewsBlur apps), applies the set edit
 and writes the result. `{"user_tags":[...],"force":true}` replaces the whole
@@ -138,8 +138,8 @@ that rule lives). A write NewsBlur rejects inside an HTTP 200 (`code: -1`)
 is reported as an error and never patches the cache.
 
 Tag nodes (`newsblur://tag/<name>`) are writable for USER tags:
-`patch_node {"name":"new"}` renames the tag on every story that carries it
-and `delete_node` removes it from every story (the stories stay starred).
+a `patch` op `{"name":"new"}` renames the tag on every story that carries it
+and a `delete` op removes it from every story (the stories stay starred).
 Both first confirm against NewsBlur's own tag counts that the tag exists; a
 rename onto an existing tag is refused unless `"force": true` (it would merge
 the two). Feed-assigned story tags cannot be renamed or deleted.
@@ -209,7 +209,7 @@ nebulous traversal-serve              RFC 0013 wire plugin: serve newsblur:// fo
   `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv). The
   corpus and `traversal-serve` subcommands read only the local store and
   need no token. `traversal-serve` optionally becomes read-write (mutations
-  via `create_node`/`patch_node`/`delete_node`) when `NEWSBLUR_TOKEN` is
+  via `mutate_nodes`) when `NEWSBLUR_TOKEN` is
   set; without it, it stays read-only exactly as before.
 
 ## Development

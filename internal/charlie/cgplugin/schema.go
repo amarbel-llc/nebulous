@@ -14,8 +14,8 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 		{
 			Tag: typeStory,
 			Accepts: []string{
-				"application/json (create_node: {\"user_tags\":[...]} to star the story)",
-				"application/json (patch_node: {\"read\":bool} to mark read/unread; " +
+				"application/json (mutate_nodes create op: {\"user_tags\":[...]} to star the story)",
+				"application/json (mutate_nodes patch op: {\"read\":bool} to mark read/unread; " +
 					"{\"add_tags\":[...],\"remove_tags\":[...]} to edit the tag set, starting from the story's live NewsBlur tags; " +
 					"{\"user_tags\":[...],\"force\":true} to REPLACE the whole set, an empty array clears it -- refused without force, " +
 					"and not combinable with add_tags/remove_tags; tags must not be empty or contain commas or whitespace)",
@@ -23,15 +23,15 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 			Example: storyCreateBody{UserTags: []string{"cooking", "blogs"}},
 		},
 		{
-			// ServerAssignedIdentity routes create_node through
+			// ServerAssignedIdentity routes a mutate_nodes create op (a temp-id create) through
 			// CreateChild (create_child.go, cutting-garden#143): the
 			// caller passes the feeds root as the container and
 			// NewsBlur assigns the feed_id, rather than the caller
 			// naming a story/feed-shaped target URI up front.
 			Tag: typeFeed,
 			Accepts: []string{
-				"application/json (create_node against the feeds root: {\"url\":\"...\",\"folder\":\"...\"} to subscribe)",
-				"application/json (patch_node: {\"title\":\"...\"} and/or {\"folder\":\"...\",\"in_folder\":\"...\"} to rename/move)",
+				"application/json (mutate_nodes create op in the feeds root: {\"url\":\"...\",\"folder\":\"...\"} to subscribe)",
+				"application/json (mutate_nodes patch op: {\"title\":\"...\"} and/or {\"folder\":\"...\",\"in_folder\":\"...\"} to rename/move)",
 			},
 			Example:                subscribeCreateBody{URL: "https://example.com/feed", Folder: "Blogs"},
 			ServerAssignedIdentity: true,
@@ -39,18 +39,18 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 		{
 			Tag: typeTag,
 			Accepts: []string{
-				"application/json (patch_node: {\"name\":\"new-name\"} renames this USER tag on every story that carries it; " +
+				"application/json (mutate_nodes patch op: {\"name\":\"new-name\"} renames this USER tag on every story that carries it; " +
 					"refused if a tag with the new name already exists unless {\"force\":true} (which merges them); " +
 					"feed-assigned story tags cannot be renamed)",
-				"delete_node removes this user tag from every story that carries it; the stories stay starred",
+				"a mutate_nodes delete op removes this user tag from every story that carries it; the stories stay starred",
 			},
 			Example: map[string]any{"name": "new-name"},
 		},
 		{
 			Tag: typeFolder,
 			Accepts: []string{
-				"application/json (create_node: an empty body -- the folder's own name and parent are the target URI itself, see splitFolderPath)",
-				"application/json (patch_node: {\"name\":\"...\"} and/or {\"to_folder\":\"...\"} to rename/move)",
+				"application/json (mutate_nodes create op: an empty body -- the folder's own name and parent are the target URI itself, see splitFolderPath)",
+				"application/json (mutate_nodes patch op: {\"name\":\"...\"} and/or {\"to_folder\":\"...\"} to rename/move)",
 			},
 			Example: map[string]any{"name": "NewName"},
 		},

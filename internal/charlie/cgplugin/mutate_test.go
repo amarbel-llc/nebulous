@@ -19,6 +19,11 @@ type fakeClient struct {
 	calls []string
 	err   error // if set, every call returns this error instead of succeeding
 
+	// failFor makes exactly the named record() call (e.g.
+	// "MarkStoriesRead:123:b") fail while every other call succeeds -- a
+	// per-item upstream failure inside a bulk request.
+	failFor map[string]error
+
 	// live scripts LiveStoryUserTags: the story's tags "as NewsBlur has them
 	// right now"; liveErr makes that read fail.
 	live    map[string][]string
@@ -61,6 +66,9 @@ func (f *fakeClient) LiveStoryUserTags(_ context.Context, hash string) ([]string
 
 func (f *fakeClient) record(call string) (json.RawMessage, error) {
 	f.calls = append(f.calls, call)
+	if err := f.failFor[call]; err != nil {
+		return nil, err
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
