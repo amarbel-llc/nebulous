@@ -394,6 +394,21 @@ debug-probe-live-tags +story_hashes:
     | jq -c '.stories[] | {story_hash, user_tags}'
   done
 
+# Throwaway: list the starred stories NewsBlur says carry a tag (read-only;
+# first page only). Fetches the token from piggy when NEWSBLUR_TOKEN is
+# unset; never prints it.
+#
+# throwaway: print story hashes and live user_tags for a tag straight from NewsBlur (read-only)
+[group('debug')]
+debug-probe-tag-holders tag:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  curl -sS -G https://www.newsblur.com/reader/starred_stories \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+    --data-urlencode "tag={{tag}}" \
+  | jq -c '.stories[] | {story_hash, user_tags}'
+
 # Throwaway: the whole clearing experiment in one go, on one fixture story.
 # Fetches the token from piggy itself when NEWSBLUR_TOKEN is unset (the
 # operator runs it; never prints the token). For each mode in order: set a
