@@ -41,7 +41,7 @@ type feedIndex struct {
 func newFeedIndex(client *newsblur.Client) *feedIndex {
 	return &feedIndex{
 		client: client,
-		cache:  newStaleCache[feedIndexSnapshot](client.ManifestPath()),
+		cache:  newStaleCache[feedIndexSnapshot](client.ManifestPath(), nil),
 	}
 }
 

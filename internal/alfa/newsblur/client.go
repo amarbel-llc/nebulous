@@ -94,6 +94,18 @@ func (c *Client) ManifestPath() string {
 	return c.cache.manifest.Path()
 }
 
+// LocalWrites counts the manifest writes this process has made (cache
+// patches after a mutation, fetched stories, ...). It is a cheap "something
+// changed here" signal for readers that debounce their file-mtime check: a
+// read right after a local write must see it (nebulous#56). Writes by other
+// processes are not counted; they are caught by the mtime check.
+func (c *Client) LocalWrites() uint64 {
+	if c.cache == nil {
+		return 0
+	}
+	return c.cache.writes.Load()
+}
+
 // ForceManifestRefresh bypasses the manifest's own staleness debounce
 // (internal/0/manifest's staleCheckDebounce). A caller that already
 // decided a rebuild is warranted — e.g. storyStore/feedIndex's own outer

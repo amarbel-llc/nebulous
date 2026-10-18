@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"code.linenisgreat.com/nebulous/internal/0/manifest"
@@ -26,6 +27,8 @@ type responseCache struct {
 	manifest *manifest.Manifest
 	sink     BlobSink
 	ttl      time.Duration
+	// writes counts this process's own manifest writes (see Client.LocalWrites).
+	writes atomic.Uint64
 }
 
 func newResponseCache(manifestPath string, ttl time.Duration, sink BlobSink) (*responseCache, error) {
@@ -83,6 +86,7 @@ func (c *responseCache) readBlob(digest string) (json.RawMessage, bool) {
 
 func (c *responseCache) remove(key string) {
 	_ = c.manifest.Delete(key)
+	c.writes.Add(1)
 }
 
 func (c *responseCache) has(key string) bool {
@@ -105,7 +109,9 @@ func (c *responseCache) write(key string, body json.RawMessage, immutable bool) 
 	if err != nil {
 		return err
 	}
-	return c.manifest.Record(key, entry)
+	err = c.manifest.Record(key, entry)
+	c.writes.Add(1)
+	return err
 }
 
 // putImmutableBatch writes multiple immutable entries with a single
@@ -122,7 +128,9 @@ func (c *responseCache) putImmutableBatch(bodies map[string]json.RawMessage) err
 		}
 		entries[key] = entry
 	}
-	return c.manifest.RecordBatch(entries)
+	err := c.manifest.RecordBatch(entries)
+	c.writes.Add(1)
+	return err
 }
 
 // writeEntry writes body to the blob sink and builds the ManifestEntry

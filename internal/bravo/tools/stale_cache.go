@@ -27,15 +27,21 @@ type staleCache[T any] struct {
 	// after the manifest has already changed. A missing watched file is a
 	// valid state; its appearance counts as a change.
 	watchPaths []string
+	// localWrites, when set, counts this process's own writes to the
+	// manifest. A changed count bypasses the debounce and forces a rebuild
+	// (so a read right after a local write sees it: nebulous#56) even if the
+	// file's mtime resolution did not move.
+	localWrites func() uint64
 
 	mu            sync.Mutex
 	snapshot      *T
 	lastStamp     string
+	lastWrites    uint64
 	lastCheckedAt time.Time
 }
 
-func newStaleCache[T any](manifestPath string, watchPaths ...string) staleCache[T] {
-	return staleCache[T]{manifestPath: manifestPath, watchPaths: watchPaths}
+func newStaleCache[T any](manifestPath string, localWrites func() uint64, watchPaths ...string) staleCache[T] {
+	return staleCache[T]{manifestPath: manifestPath, localWrites: localWrites, watchPaths: watchPaths}
 }
 
 // current returns the up-to-date snapshot, calling build to produce a
@@ -50,13 +56,17 @@ func (c *staleCache[T]) current(build func() (*T, error)) (*T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.snapshot != nil && time.Since(c.lastCheckedAt) < staleCheckDebounce {
+	var writes uint64
+	if c.localWrites != nil {
+		writes = c.localWrites()
+	}
+	if c.snapshot != nil && writes == c.lastWrites && time.Since(c.lastCheckedAt) < staleCheckDebounce {
 		return c.snapshot, nil
 	}
 	c.lastCheckedAt = time.Now()
 
 	stamp, haveMtime := c.stat()
-	if c.snapshot != nil && haveMtime && stamp == c.lastStamp {
+	if c.snapshot != nil && haveMtime && stamp == c.lastStamp && writes == c.lastWrites {
 		return c.snapshot, nil
 	}
 
@@ -70,6 +80,9 @@ func (c *staleCache[T]) current(build func() (*T, error)) (*T, error) {
 	if haveMtime {
 		c.lastStamp = stamp
 	}
+	// writes was read before build, so a write landing during the build is
+	// seen as new on the next call rather than lost.
+	c.lastWrites = writes
 	c.snapshot = fresh
 	return fresh, nil
 }

@@ -64,7 +64,7 @@ func newStoryStore(client *newsblur.Client) *storyStore {
 		client: client,
 		// Also watch the on-disk word index: fetch swaps it in after the
 		// manifest has already changed (nebulous#59).
-		cache:      newStaleCache[storyStoreSnapshot](manifest, newsblur.WordIndexPath(manifest)),
+		cache:      newStaleCache[storyStoreSnapshot](manifest, client.LocalWrites, newsblur.WordIndexPath(manifest)),
 		indexWords: true,
 	}
 }
@@ -74,7 +74,7 @@ func newStoryStore(client *newsblur.Client) *storyStore {
 func newMetadataStoryStore(client *newsblur.Client) *storyStore {
 	return &storyStore{
 		client: client,
-		cache:  newStaleCache[storyStoreSnapshot](client.ManifestPath()),
+		cache:  newStaleCache[storyStoreSnapshot](client.ManifestPath(), client.LocalWrites),
 	}
 }
 

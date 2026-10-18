@@ -214,7 +214,9 @@ phases of the same `fetch` command rather than separate processes:
 - **MCP server** (serve phase): Reads exclusively from the local persistent
   store. In-memory indices (`feedIndex`, `storyStore`) rebuild themselves
   when the manifest file's mtime changes since the last check (a debounced
-  staleness check, `internal/bravo/tools/stale_cache.go`), so a
+  staleness check, `internal/bravo/tools/stale_cache.go`; the story store also
+  rebuilds right after this process's own writes, via
+  `Client.LocalWrites`, so a listing never shows pre-mutation data: nebulous#56), so a
   concurrently-running `nebulous fetch`'s new data becomes visible without
   restarting the server --- they no longer build once via `sync.Once` and
   never again. All query tools and resources operate against these local

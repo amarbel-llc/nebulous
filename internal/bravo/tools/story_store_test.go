@@ -447,6 +447,44 @@ func TestStoryStorePicksUpConcurrentWriterDespiteManifestDebounceDesync(t *testi
 	}
 }
 
+// nebulous#56: a write made through this process's own client must be visible
+// to the very next read, not only after the debounce window: a mutation, then
+// a listing, must not show the pre-mutation membership.
+func TestStoryStoreSeesItsOwnProcessWritesWithinDebounceWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	c := newsblur.NewClient("test-token")
+	if err := c.WithCache(path, time.Hour, newMemSink()); err != nil {
+		t.Fatal(err)
+	}
+	stores := map[string]*storyStore{"word-index store": newStoryStore(c), "metadata store": newMetadataStoryStore(c)}
+	for name, s := range stores {
+		if _, err := s.current(); err != nil {
+			t.Fatalf("%s: current (initial): %v", name, err)
+		}
+	}
+
+	if err := c.PutCachedStarredStoryHashes(json.RawMessage(`{"starred_story_hashes":["hash1"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	story := json.RawMessage(`{"story_hash":"hash1","story_title":"First","story_feed_id":1,"story_date":"2024-06-15 10:00:00","story_content":"","starred":true,"user_tags":["old"]}`)
+	if err := c.PutCachedStarredStory("hash1", story); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PatchCachedStoryUserTags("hash1", []string{"new"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, s := range stores {
+		snap, err := s.current()
+		if err != nil {
+			t.Fatalf("%s: current: %v", name, err)
+		}
+		if len(snap.stories) != 1 || len(snap.stories[0].UserTags) != 1 || snap.stories[0].UserTags[0] != "new" {
+			t.Errorf("%s: stories = %+v, want the one story carrying user tag \"new\"", name, snap.stories)
+		}
+	}
+}
+
 // Within the debounce window, current() must NOT reload even if the
 // manifest changed underneath it — the cost-bounding half of the fix (a
 // busy fetch run rewrites the manifest on every single Record(), and
