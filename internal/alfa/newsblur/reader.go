@@ -60,26 +60,17 @@ func (c *Client) StarStory(ctx context.Context, storyHash string, userTags []str
 // NewsBlur's star endpoint (nebulous#50): mark_story_hash_as_starred
 // REPLACES the existing user_tags with whatever's sent, rather than
 // merging (verified live against a real account: starring with ["a"]
-// then ["b"] left only "b", not both). Unlike StarStory, which omits the
-// user_tags param entirely when userTags is empty (fine for a first
-// star -- there's nothing yet to clear), this always sends the param
-// explicitly, including an explicit empty value, since a caller passing
-// an empty slice here means "clear all tags" and an omitted param does
-// not clear an already-tagged story (verified: an explicit empty value
-// does; whether an omitted param instead leaves existing tags untouched
-// was not directly tested, so this deliberately never relies on that
-// omit behavior at all).
+// then ["b"] left only "b", not both).
+//
+// Clearing (an empty userTags) OMITS the param. Verified live
+// (just debug-probe-clear-cycle): after setting a tag, omitting user_tags
+// leaves the story with user_tags [], while sending user_tags= with an empty
+// value leaves it with [""], a single empty-string tag. The empty-value form
+// this method used to send is where the empty tag on dozens of stories came
+// from.
 func (c *Client) SetStoryUserTags(ctx context.Context, storyHash string, userTags []string) (json.RawMessage, error) {
 	form := url.Values{"story_hash": {storyHash}}
-	if len(userTags) == 0 {
-		// Clearing: keep sending the explicit empty value this method has
-		// always sent (nebulous#50). Whether an omitted parameter clears
-		// too, and what an empty value stores, is still to be settled by a
-		// live fixture test; this encoding is unchanged until then.
-		form.Set("user_tags", "")
-	} else {
-		addUserTags(form, userTags)
-	}
+	addUserTags(form, userTags)
 	raw, err := c.post(ctx, "/reader/mark_story_hash_as_starred", form)
 	if err == nil {
 		_ = c.PatchCachedStarredStoryHashes(storyHash, "")

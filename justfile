@@ -344,6 +344,59 @@ debug-probe-starred-story story_hash:
     --data-urlencode "h={{story_hash}}" \
   | jq .
 
+# Find out which request form actually clears a story's user tags on NewsBlur:
+# mode "omit" sends no user_tags parameter, "empty" sends user_tags= (the form
+# nebulous sends today, suspected of leaving a single empty-string tag; the
+# source of the empty tag on 48 corpus stories). Prints the raw response, then
+# the story's live user_tags via /reader/starred_stories. MUTATES the live
+# account: run it only on a fixture story. Requires NEWSBLUR_TOKEN in the
+# environment; never prints it.
+#
+# clear one story's user tags with the given request form, then print its live tags (MUTATES the live account)
+[group('debug')]
+debug-probe-clear-tags story_hash mode:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -z "${NEWSBLUR_TOKEN:-}" ]; then
+    echo "NEWSBLUR_TOKEN is not set in this environment" >&2
+    exit 1
+  fi
+  case "{{mode}}" in
+    omit)  extra=() ;;
+    empty) extra=(--data-urlencode "user_tags=") ;;
+    *) echo "mode must be omit or empty" >&2; exit 1 ;;
+  esac
+  echo "=== mark_story_hash_as_starred ({{mode}}) ==="
+  curl -sS -X POST https://www.newsblur.com/reader/mark_story_hash_as_starred \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+    --data-urlencode "story_hash={{story_hash}}" \
+    "${extra[@]}" | jq -c .
+  echo "=== live user_tags ==="
+  curl -sS -G https://www.newsblur.com/reader/starred_stories \
+    -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+    --data-urlencode "h={{story_hash}}" \
+  | jq -c '.stories[] | {story_hash, user_tags}'
+
+# Throwaway: the whole clearing experiment in one go, on one fixture story.
+# Fetches the token from piggy itself when NEWSBLUR_TOKEN is unset (the
+# operator runs it; never prints the token). For each mode in order: set a
+# known tag, clear with that request form, print the live tags afterwards.
+# Compares "omit" against "empty" so the right clearing form is known before
+# SetStoryUserTags changes. MUTATES the live account: fixture story only.
+#
+# throwaway: set a tag then clear it by each request form, printing live tags after each (MUTATES the live account)
+[group('debug')]
+debug-probe-clear-cycle story_hash:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  export NEWSBLUR_TOKEN
+  for mode in omit empty; do
+    echo "##### set a known tag, then clear with mode=$mode"
+    just debug-probe-star-response "{{story_hash}}" nebulous-fixture-test >/dev/null
+    just debug-probe-clear-tags "{{story_hash}}" "$mode"
+  done
+
 # Capture what NewsBlur answers to a star/unstar/read POST that carries NO
 # session cookie (so it cannot touch any account): the failure shape
 # nebulous's post() must learn to recognise instead of treating any HTTP 200

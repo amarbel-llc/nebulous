@@ -107,32 +107,31 @@ func TestStarStoryPatchesCachedHashList(t *testing.T) {
 	}
 }
 
-// nebulous#50: SetStoryUserTags must send an explicit user_tags= param
-// even when clearing all tags -- unlike StarStory, which omits the param
-// entirely when tags is empty (fine for a first star, since there's
-// nothing yet to clear; verified live against a real account that an
-// omitted param does not clear an already-tagged story's tags the way an
-// explicit empty value does).
-func TestSetStoryUserTagsSendsExplicitEmptyParam(t *testing.T) {
-	var gotForm string
+// Clearing a story's tags must OMIT user_tags. Verified live
+// (just debug-probe-clear-cycle): omitting it leaves user_tags [], while
+// user_tags= (an explicit empty value, what nebulous#50 sent) stores a single
+// empty-string tag [""]. A regression here recreates the empty tags the
+// corpus cleanup removes.
+func TestSetStoryUserTagsClearsByOmittingTheParam(t *testing.T) {
+	var sent bool
+	var values []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
-		if !r.PostForm.Has("user_tags") {
-			gotForm = "MISSING"
-		} else {
-			gotForm = "present:" + r.PostForm.Get("user_tags")
-		}
+		sent = r.PostForm.Has("user_tags")
+		values = r.PostForm["user_tags"]
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"result":"ok"}`))
 	}))
 	defer server.Close()
 	c := testClientAgainstServer(t, server)
 
-	if _, err := c.SetStoryUserTags(context.Background(), "abc", nil); err != nil {
-		t.Fatalf("SetStoryUserTags: %v", err)
-	}
-	if gotForm != "present:" {
-		t.Errorf("user_tags form param = %q, want an explicit empty value sent", gotForm)
+	for _, tags := range [][]string{nil, {}} {
+		if _, err := c.SetStoryUserTags(context.Background(), "abc", tags); err != nil {
+			t.Fatalf("SetStoryUserTags(%#v): %v", tags, err)
+		}
+		if sent {
+			t.Errorf("SetStoryUserTags(%#v) sent user_tags = %q, want the param omitted (an empty value stores [\"\"])", tags, values)
+		}
 	}
 }
 
