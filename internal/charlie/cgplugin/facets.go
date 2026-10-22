@@ -139,7 +139,7 @@ func (Plugin) FacetCounts(
 	segs := pathSegments(node)
 	switch {
 	case len(segs) == 1 && segs[0] == "feeds":
-		feeds, err := index.Feeds(ctx)
+		feeds, err := feedsWithExternal(ctx)
 		if err != nil {
 			return cg.FacetResult{}, false, err
 		}
@@ -228,12 +228,17 @@ func (Plugin) FacetVersion(ctx context.Context, node *url.URL) (string, bool, er
 	case len(segs) == 2 && segs[0] == "tag":
 		return manifestVersionToken(index.ManifestPath())
 	case len(segs) == 2 && segs[0] == "feed":
-		feeds, err := index.Feeds(ctx)
+		feeds, err := feedsWithExternal(ctx)
 		if err != nil {
 			return "", false, err
 		}
 		for _, f := range feeds {
 			if f.ID == segs[1] {
+				if f.ID == externalFeedID {
+					// No NewsBlur unread count for the synthetic feed; it
+					// moves exactly when the corpus does.
+					return manifestVersionToken(index.ManifestPath())
+				}
 				return strconv.Itoa(f.NT), true, nil
 			}
 		}
@@ -280,7 +285,7 @@ func (Plugin) ResolveFacetLabels(
 	if dimension != facetFeed || index == nil {
 		return nil, nil
 	}
-	feeds, err := index.Feeds(ctx)
+	feeds, err := feedsWithExternal(ctx)
 	if err != nil {
 		return nil, err
 	}

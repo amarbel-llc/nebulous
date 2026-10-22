@@ -130,6 +130,67 @@ debug-verify-traversal-serve cg_bin: build-go
   } | XDG_CONFIG_HOME="$cfgdir" {{cg_bin}} mcp | tail -1 \
     | jq -r '.result.content[0].text | fromjson | (.facets.feed | length) as $total | (.labels.feed | length) as $labelled | "\($labelled)/\($total) feed ids labelled"'
 
+# End-to-end check of saving an external URL as a story: a mutate_nodes
+# create (temp id, stories root) through a REAL cutting-garden spawning
+# `nebulous traversal-serve` with the live token, then read_node on the URI
+# it returns from a SECOND cutting-garden process (so the read has to find the
+# write in the store, not in memory), then list_nodes on the stories root.
+# Runs against a throwaway XDG config/data dir so the real local store is
+# untouched; the saved story is unstarred again with a direct API call.
+# Fetches the token from piggy when NEWSBLUR_TOKEN is unset; never prints it.
+# Usage: just debug-verify-save-story cutting-garden https://example.com/x "Title" tag
+#
+# check save-external-story end to end via cutting-garden mutate_nodes (MUTATES the live account)
+[group('debug')]
+debug-verify-save-story cg_bin url title tag: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  export NEWSBLUR_TOKEN
+  work="$(mktemp -d)"
+  hash=""
+  cleanup() {
+    rm -rf "$work"
+    if [ -n "$hash" ]; then
+      echo "##### cleanup: unstar $hash"
+      curl -sS -X POST https://www.newsblur.com/reader/mark_story_hash_as_unstarred \
+        -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" \
+        --data-urlencode "story_hash=$hash" | jq -c '{code}'
+    fi
+  }
+  trap cleanup EXIT
+  mkdir -p "$work/config/cutting-garden" "$work/data"
+  cat > "$work/config/cutting-garden/config.toml" <<EOF
+  [[plugins]]
+  name = "nebulous"
+  command = ["$(pwd)/build/debug/nebulous"]
+  schemes = ["newsblur"]
+  protocols = ["traversal"]
+  EOF
+  export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data"
+  mcp() {
+    {
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+      printf '%s\n' "$1"
+    } | {{cg_bin}} mcp | jq -c 'select(.id == 2)'
+  }
+  body=$(jq -nc --arg url "{{url}}" --arg title "{{title}}" --arg tag "{{tag}}" \
+    '{url: $url, title: $title, content: "<p>saved through mutate_nodes</p>", user_tags: [$tag]}')
+  create=$(jq -nc --arg body "$body" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"mutate_nodes",arguments:{groups:[{anchor:"newsblur://stories",ops:[{kind:"create",id:"+s",type:"newsblur-story-v1",body:$body}]}]}}}')
+  echo "##### mutate_nodes create (stories root, temp id)"
+  out=$(mcp "$create")
+  echo "$out" | jq -c '.result // .error'
+  hash=$(echo "$out" | grep -o 'newsblur://story/[^"\\ ]*' | head -1 | sed 's|newsblur://story/||' || true)
+  [ -n "$hash" ] || { echo "no story URI in the create result"; exit 1; }
+  echo "created hash: $hash"
+  echo "##### read_node newsblur://story/$hash (second process)"
+  mcp "$(jq -nc --arg uri "newsblur://story/$hash" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"read_node",arguments:{uri:$uri}}}')" \
+    | jq -c '.result // .error'
+  echo "##### list_nodes newsblur://stories (second process)"
+  mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_nodes","arguments":{"uri":"newsblur://stories","bare":true}}}' \
+    | jq -c '.result // .error'
+
 # End-to-end check of cutting-garden's `_words` word search (RFC 0016 words
 # mode) against `nebulous traversal-serve`, on a tiny SEEDED corpus in a
 # throwaway HOME: seeds a legacy cache, migrates it into the madder store,

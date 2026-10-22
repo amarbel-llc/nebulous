@@ -181,7 +181,7 @@ func (Plugin) ListEnriched(
 }
 
 func feedNodes(ctx context.Context) ([]cg.Node, error) {
-	feeds, err := index.Feeds(ctx)
+	feeds, err := feedsWithExternal(ctx)
 	if err != nil {
 		return nil, err
 	}
