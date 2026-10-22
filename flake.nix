@@ -174,7 +174,7 @@
             mv $out/bin/nebulous $out/bin/.nebulous-wrapped
             printf '%s\n' \
               '#!${pkgs.runtimeShell}' \
-              'export PATH="$PATH:${inputs.piggy.packages.${system}.default}/bin"' \
+              'export PATH="''${PATH:+$PATH:}${inputs.piggy.packages.${system}.default}/bin"' \
               'exec '"$out"'/bin/.nebulous-wrapped "$@"' > $out/bin/nebulous
             chmod +x $out/bin/nebulous
           '';

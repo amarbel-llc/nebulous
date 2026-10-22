@@ -31,7 +31,10 @@ var readPiggyPass = func(ctx context.Context, entry string) ([]byte, error) {
 	if err := cmd.Run(); err != nil {
 		// piggy's own diagnostics (a locked agent, a missing entry) say what to
 		// fix and never carry the secret; stdout, which may, is not included.
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
 	}
 	return stdout.Bytes(), nil
 }

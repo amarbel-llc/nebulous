@@ -96,7 +96,10 @@ in
         description = ''
           Arguments appended to `nebulous fetch`. The capture phase drives
           cutting-garden and chrest by PATH, which a user unit does not carry,
-          so it is skipped by default.
+          so it is skipped by default. The token comes from piggy, so the unit
+          needs piggy's agent socket in its environment (it inherits none from
+          your session): a locked or unreachable agent fails the run, and the
+          next tick retries.
         '';
       };
     };
