@@ -45,7 +45,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME              honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n")
-		fmt.Fprintf(os.Stderr, "  NEBULOUS_CAPTURE_INTERVAL  how often `fetch`'s folded-in capture phase actually runs (default 6h)\n\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_CAPTURE_INTERVAL  how often `fetch`'s folded-in capture phase actually runs (default 6h)\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_ORIGINAL_TEXT_RETRY_INTERVAL  how old a failed original-text answer must be before `fetch` asks\n")
+		fmt.Fprintf(os.Stderr, "                             NewsBlur again (default 168h, at most 500 per run; 0 turns retries off)\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -409,27 +411,31 @@ func fetchAll(ctx context.Context, client *newsblur.Client, opts fetchOptions) e
 		return err
 	}
 
-	// Phase 3: Original text for starred story hashes
-	var missingText []string
-	for _, h := range hashes {
-		if !client.HasCachedOriginalText(h) {
-			missingText = append(missingText, h)
-		}
-	}
+	// Phase 3: Original text for starred story hashes. Besides stories never
+	// asked for, this retries answers NewsBlur gave as "extraction failed"
+	// once they are older than NEBULOUS_ORIGINAL_TEXT_RETRY_INTERVAL: those
+	// are valid JSON, so the cache keeps them, and a bare "is anything
+	// cached" test would never ask again (see planOriginalText).
+	textPlan := planOriginalText(hashes, client.OriginalTextStatus, time.Now(),
+		originalTextRetryInterval(), maxOriginalTextRetriesPerRun)
+	missingText := textPlan.todo()
 
-	log.Printf("[original-text] total: %d, cached: %d, missing: %d",
-		len(hashes), len(hashes)-len(missingText), len(missingText))
+	log.Printf("[original-text] total: %d, cached: %d, missing: %d, failed answers: %d (due for retry: %d, retrying this run: %d)",
+		len(hashes), len(hashes)-len(textPlan.missing), len(textPlan.missing),
+		textPlan.failed, textPlan.failedDue, len(textPlan.retry))
 
 	if len(missingText) > 0 {
 		fetched := fetchWithBackoff(ctx, "original-text", missingText, func(hash string) error {
-			_, err := client.OriginalText(ctx, hash)
+			// Refetch, not OriginalText: a retry must reach NewsBlur even
+			// though an answer is cached (an immutable one is served forever).
+			_, err := client.RefetchOriginalText(ctx, hash)
 			return err
 		})
 		log.Printf("[original-text] fetched %d/%d", fetched, len(missingText))
 	}
 
 	log.Printf("[done] feeds: cached, stories: %d, original text: %d/%d cached",
-		len(hashes), len(hashes)-len(missingText), len(hashes))
+		len(hashes), len(hashes)-len(textPlan.missing), len(hashes))
 
 	if err := ctx.Err(); err != nil {
 		return err

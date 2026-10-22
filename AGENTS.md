@@ -174,6 +174,16 @@ phases of the same `fetch` command rather than separate processes:
   and original article text. This is the sole ingestion pipeline --- the MCP
   server and the cutting-garden plugin never hit the API for reads.
 
+  NewsBlur answers a page it could not extract with a valid JSON body holding
+  no text (`"failed": true`), which the cache keeps like any answer. The
+  original-text phase therefore asks again for such an answer once it is older
+  than `NEBULOUS_ORIGINAL_TEXT_RETRY_INTERVAL` (default 168h, at most 500 per
+  run, oldest attempt first; `0` turns retries off), through
+  `Client.RefetchOriginalText` so a cached entry cannot short-circuit it; the
+  write re-stamps the entry, so the interval counts from the last attempt.
+  `Client.OriginalTextStatus` classifies a cached answer; a body that is not
+  JSON is retryable too, and `doGet` no longer caches one.
+
   `fetch` then runs a **refresh phase** (`cmd/nebulous/refresh.go`), because a
   starred story is otherwise downloaded exactly once and its tags and read
   state go stale. Every run it reads NewsBlur's per-story `starred_updated`
