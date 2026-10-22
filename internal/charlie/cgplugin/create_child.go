@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	cg "code.linenisgreat.com/cutting-garden/pkgs/cutting_garden_plugins"
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
 
@@ -45,11 +46,12 @@ type subscribeResponse struct {
 	} `json:"feed"`
 }
 
-// CreateChild supports exactly one container/type pair: the feeds root
-// (newsblur://feeds), creating a typeFeed child by subscribing to a URL.
-// It is the ContainerCreator counterpart to CreateNode's story/{hash}
-// and folder/{path} cases (mutate.go), for the one write nebulous has
-// that assigns identity server-side.
+// CreateChild supports two container/type pairs, both writes where NewsBlur
+// assigns the identity server-side: the feeds root (newsblur://feeds),
+// creating a typeFeed child by subscribing to a URL, and the stories root
+// (newsblur://stories), creating a typeStory child by saving an external
+// URL. It is the ContainerCreator counterpart to CreateNode's story/{hash}
+// (star an existing story) and folder/{path} cases (mutate.go).
 func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reader, typ string) (*url.URL, error) {
 	if container == nil {
 		return nil, errors.BadRequestf("newsblur plugin: CreateChild requires a container URI")
@@ -59,9 +61,17 @@ func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reade
 	}
 
 	segs := pathSegments(container)
-	if len(segs) != 1 || segs[0] != "feeds" {
-		return nil, errors.BadRequestf("newsblur plugin: CreateChild only supports the feeds root (newsblur://feeds), got %s", container)
+	switch {
+	case len(segs) == 1 && segs[0] == "feeds":
+		return subscribeChild(ctx, body, typ)
+	case len(segs) == 1 && segs[0] == "stories":
+		return saveStoryChild(ctx, body, typ)
+	default:
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild only supports the feeds root (newsblur://feeds) and the stories root (newsblur://stories), got %s", container)
 	}
+}
+
+func subscribeChild(ctx context.Context, body io.Reader, typ string) (*url.URL, error) {
 	if typ != "" && typ != typeFeed {
 		return nil, errors.BadRequestf("newsblur plugin: CreateChild: unexpected type %q for the feeds root (want %q)", typ, typeFeed)
 	}
@@ -106,4 +116,76 @@ func (Plugin) CreateChild(ctx context.Context, container *url.URL, body io.Reade
 	}
 
 	return nodeURL("feed", strconv.Itoa(resp.Feed.ID)), nil
+}
+
+// saveStoryBody is CreateChild's payload for a story node under the stories
+// root: an external URL to save as a starred story that never came from a
+// feed (POST /api/save_story). Title is required by NewsBlur. Content is
+// optional; left out, NewsBlur fetches and extracts the page itself, which
+// can come back empty. FeedID/RSSURL optionally file the story under an
+// existing feed; without them it lands under feed 0.
+type saveStoryBody struct {
+	URL      string   `json:"url"`
+	Title    string   `json:"title"`
+	Content  string   `json:"content,omitempty"`
+	Notes    string   `json:"notes,omitempty"`
+	UserTags []string `json:"user_tags,omitempty"`
+	FeedID   int      `json:"feed_id,omitempty"`
+	RSSURL   string   `json:"rss_url,omitempty"`
+}
+
+// saveStoryChild saves an external URL as a starred story and returns the
+// story/{hash} URI NewsBlur assigned. Saving an already-saved URL updates
+// that story in place and returns the same URI.
+func saveStoryChild(ctx context.Context, body io.Reader, typ string) (*url.URL, error) {
+	if typ != "" && typ != typeStory {
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: unexpected type %q for the stories root (want %q)", typ, typeStory)
+	}
+
+	var payload saveStoryBody
+	if body != nil {
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("newsblur plugin: reading CreateChild body: %w", err)
+		}
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil, errors.BadRequestf("newsblur plugin: CreateChild requires a body with \"url\" and \"title\" fields")
+		}
+		if err := strictUnmarshal(raw, &payload); err != nil {
+			return nil, errors.BadRequestf("newsblur plugin: invalid CreateChild body: %w", err)
+		}
+	}
+	if payload.URL == "" {
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: body's \"url\" field is required")
+	}
+	if payload.Title == "" {
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: body's \"title\" field is required")
+	}
+	if payload.FeedID < 0 {
+		return nil, errors.BadRequestf("newsblur plugin: CreateChild: body's \"feed_id\" must not be negative, got %d", payload.FeedID)
+	}
+	tags, err := tagSet(payload.UserTags)
+	if err != nil {
+		return nil, err
+	}
+
+	mutateMu.Lock()
+	saved, err := client.SaveStory(ctx, newsblur.SaveStoryInput{
+		URL:     payload.URL,
+		Title:   payload.Title,
+		Content: payload.Content,
+		Notes:   payload.Notes,
+		Tags:    tags,
+		FeedID:  payload.FeedID,
+		RSSURL:  payload.RSSURL,
+	})
+	mutateMu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("newsblur plugin: saving %s: %w", payload.URL, err)
+	}
+	if saved.Hash == "" {
+		return nil, fmt.Errorf("newsblur plugin: saving %s: NewsBlur returned no story hash", payload.URL)
+	}
+
+	return nodeURL("story", saved.Hash), nil
 }

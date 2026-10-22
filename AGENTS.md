@@ -49,7 +49,11 @@ write tool, cutting-garden#315), mapping to
 star/unstar/mark_read/mark_unread/unsubscribe/rename_feed/move_feed/folder
 create/rename/delete/move, plus `ContainerCreator` (a temp-id `create` op
 in the `feeds` root) for subscribe, since NewsBlur assigns the feed id
-server-side (cutting-garden#143). Reads stay token-free either way.
+server-side (cutting-garden#143), and in the `stories` root to save an
+external URL that never came from a feed (`{url,title,content?,notes?,
+user_tags?,feed_id?,rss_url?}` via NewsBlur's undocumented
+`POST /api/save_story`; NewsBlur assigns the story hash, and a story with no
+feed lands under feed 0). Reads stay token-free either way.
 
 ## Architecture
 
@@ -114,7 +118,8 @@ server-side (cutting-garden#143). Reads stay token-free either way.
                                     dispatch helper) -- rejects atomic with
                                     cg.ErrBulkAtomicUnsupported since NewsBlur's REST API has no
                                     multi-object transaction primitive
-      create_child.go              ContainerCreator.CreateChild: subscribe (server-assigned feed id)
+      create_child.go              ContainerCreator.CreateChild: subscribe (feeds root, server-assigned
+                                    feed id) and save an external URL (stories root, server-assigned hash)
       schema.go                    BodyDescriber: writable-type payload schemas
       url.go                       newsblur:// URL build/parse
 

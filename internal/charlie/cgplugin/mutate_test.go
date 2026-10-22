@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/nebulous/internal/alfa/newsblur"
 	"code.linenisgreat.com/nebulous/internal/bravo/tools"
 	deweyerrors "code.linenisgreat.com/purse-first/libs/dewey/pkgs/errors"
 )
@@ -31,6 +32,20 @@ type fakeClient struct {
 
 	liveCounts    map[string]int
 	liveCountsErr error
+
+	// saved scripts SaveStory's result: the story NewsBlur "assigned".
+	saved newsblur.SavedStory
+}
+
+// SaveStory records every input field in one call string, so a test can
+// assert exactly what the plugin forwarded.
+func (f *fakeClient) SaveStory(_ context.Context, in newsblur.SaveStoryInput) (newsblur.SavedStory, error) {
+	call := "SaveStory:" + in.URL + "|" + in.Title + "|" + in.Content + "|" + in.Notes + "|" +
+		strings.Join(in.Tags, ",") + "|" + strconv.Itoa(in.FeedID) + "|" + in.RSSURL
+	if _, err := f.record(call); err != nil {
+		return newsblur.SavedStory{}, err
+	}
+	return f.saved, nil
 }
 
 // liveCounts scripts LiveStarredTagCounts (NewsBlur's tag -> story count);

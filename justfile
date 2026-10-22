@@ -330,6 +330,90 @@ debug-probe-star-response story_hash tags:
     --data-urlencode "user_tags={{tags}}" \
   | jq .
 
+# POC for saving a story that did NOT come from a feed: POSTs the
+# undocumented /api/save_story (apps/api/views.py::save_story in NewsBlur's
+# source) with an external URL, then prints the raw response, the subscribed
+# feed count and starred hash count before/after (to see whether a feed gets
+# subscribed or created as a side effect), and what /reader/starred_stories
+# returns for the new hash. Pass cleanup=yes to unstar the saved story after
+# (the stories collection is a user-scoped starred store, so unstarring
+# removes it from the account's view). Fetches the token from piggy when
+# NEWSBLUR_TOKEN is unset; never prints it.
+#
+# POC: save an external URL as a story via /api/save_story (MUTATES the live account)
+[group('debug')]
+debug-probe-save-story url title tags cleanup="no":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  nb() { curl -sS -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" "$@"; }
+  counts() {
+    echo "subscribed feeds: $(nb "https://www.newsblur.com/reader/feeds?flat=true" | jq '.feeds | length')"
+    echo "starred hashes:   $(nb https://www.newsblur.com/reader/starred_story_hashes | jq '.starred_story_hashes | length')"
+  }
+  echo "##### before"; counts
+  echo "##### POST /api/save_story"
+  resp=$(nb -X POST https://www.newsblur.com/api/save_story \
+    --data-urlencode "story_url={{url}}" \
+    --data-urlencode "title={{title}}" \
+    --data-urlencode "user_tags={{tags}}")
+  echo "$resp" | head -c 1500; echo
+  echo "##### after"; counts
+  # .story is a JSON-encoded string inside the JSON envelope (double-encoded)
+  hash=$(echo "$resp" | jq -r '(.story | if type == "string" then fromjson else . end).story_hash? // empty' 2>/dev/null || true)
+  if [ -n "$hash" ]; then
+    echo "##### starred_stories?h=$hash"
+    nb -G https://www.newsblur.com/reader/starred_stories --data-urlencode "h=$hash" \
+      | jq -c '.stories[] | {story_hash, story_feed_id, story_permalink, story_title, user_tags}'
+    if [ "{{cleanup}}" = yes ]; then
+      echo "##### cleanup: unstar $hash"
+      nb -X POST https://www.newsblur.com/reader/mark_story_hash_as_unstarred \
+        --data-urlencode "story_hash=$hash" | jq -c .
+      counts
+    fi
+  else
+    echo "no story_hash in response; nothing to clean up"
+  fi
+
+# Follow-up to debug-probe-save-story: save an external story WITH caller-
+# supplied content, then try to retrieve it through each read endpoint
+# nebulous (or a client) could use, printing a one-line verdict per endpoint:
+# starred_stories?h=, starred_stories?tag=, starred_story_hashes (with
+# timestamps), river_stories?h=, and rss_feeds/original_text. Always unstars
+# the story at the end (even on failure), leaving the account as found.
+# Fetches the token from piggy when NEWSBLUR_TOKEN is unset; never prints it.
+#
+# POC: save an external story, retrieve it via every read endpoint, then unstar it (MUTATES the live account)
+[group('debug')]
+debug-probe-retrieve-saved-story url title tag content:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  : "${NEWSBLUR_TOKEN:=$(piggy pass show newsblur-api-token)}"
+  nb() { curl -sS -H "Cookie: newsblur_sessionid=$NEWSBLUR_TOKEN" "$@"; }
+  resp=$(nb -X POST https://www.newsblur.com/api/save_story \
+    --data-urlencode "story_url={{url}}" \
+    --data-urlencode "title={{title}}" \
+    --data-urlencode "user_tags={{tag}}" \
+    --data-urlencode "content={{content}}")
+  hash=$(echo "$resp" | jq -r '(.story | if type == "string" then fromjson else . end).story_hash // empty')
+  [ -n "$hash" ] || { echo "save failed: $resp" | head -c 800; exit 1; }
+  trap 'echo "##### cleanup: unstar $hash"; nb -X POST https://www.newsblur.com/reader/mark_story_hash_as_unstarred --data-urlencode "story_hash=$hash" | jq -c "{code}"' EXIT
+  echo "saved as $hash"
+  slim='.stories[] | select(.story_hash == $h) | {story_hash, story_feed_id, story_title, story_permalink, user_tags, content_len: (.story_content // "" | length)}'
+  echo "##### starred_stories?h=$hash"
+  nb -G https://www.newsblur.com/reader/starred_stories --data-urlencode "h=$hash" | jq -c --arg h "$hash" "$slim"
+  echo "##### starred_stories?tag={{tag}}"
+  nb -G https://www.newsblur.com/reader/starred_stories --data-urlencode "tag={{tag}}" | jq -c --arg h "$hash" "$slim"
+  echo "##### starred_story_hashes?include_timestamps=true"
+  nb -G https://www.newsblur.com/reader/starred_story_hashes --data-urlencode "include_timestamps=true" \
+    | jq -c --arg h "$hash" '[.starred_story_hashes[] | select(.[0] == $h)]'
+  echo "##### river_stories?h=$hash"
+  nb -G https://www.newsblur.com/reader/river_stories --data-urlencode "h=$hash" | jq -c --arg h "$hash" "$slim" || true
+  echo "##### rss_feeds/original_text?story_hash=$hash"
+  nb -G https://www.newsblur.com/rss_feeds/original_text --data-urlencode "story_hash=$hash" \
+    -o /dev/stdout -w '\nHTTP %{http_code} content-type=%{content_type} bytes=%{size_download}\n' \
+    | grep -E -i '^HTTP |<title>|"original_text"|"failed"|"code"|"message"' | head -c 600; echo
+
 # Probe the RAW response body of /reader/starred_stories for one hash,
 # bypassing nebulous entirely (cutting-garden#180 / nebulous#53
 # investigation, H2): does the endpoint nebulous's fetch pipeline actually

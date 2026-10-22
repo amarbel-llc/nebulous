@@ -13,8 +13,17 @@ func (Plugin) DescribeBodies() []cg.NodeTypeBody {
 	return []cg.NodeTypeBody{
 		{
 			Tag: typeStory,
+			// Deliberately NOT ServerAssignedIdentity: cutting-garden
+			// refuses a caller-named id for such a type, which would break
+			// the create-by-hash (star an existing story) mode below. A
+			// temp-id create into the stories root reaches CreateChild
+			// regardless of the flag.
 			Accepts: []string{
-				"application/json (mutate_nodes create op: {\"user_tags\":[...]} to star the story)",
+				"application/json (mutate_nodes create op with a story/{hash} id: {\"user_tags\":[...]} to star a story NewsBlur already has)",
+				"application/json (mutate_nodes create op with a temp id in the stories root: " +
+					"{\"url\":\"...\",\"title\":\"...\",\"content\":\"<html>\",\"notes\":\"...\",\"user_tags\":[...]} saves an external URL " +
+					"that never came from a feed as a new starred story; url and title are required, content is optional (omitted, NewsBlur fetches the page itself and may find nothing); " +
+					"optional \"feed_id\"/\"rss_url\" file it under an existing feed, else it lands under feed 0; saving a URL again updates that story in place)",
 				"application/json (mutate_nodes patch op: {\"read\":bool} to mark read/unread; " +
 					"{\"add_tags\":[...],\"remove_tags\":[...]} to edit the tag set, starting from the story's live NewsBlur tags; " +
 					"{\"user_tags\":[...],\"force\":true} to REPLACE the whole set, an empty array clears it -- refused without force, " +

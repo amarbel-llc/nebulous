@@ -66,6 +66,9 @@ type Client interface {
 	DeleteFolder(ctx context.Context, folderName, inFolder string) (json.RawMessage, error)
 	MoveFolder(ctx context.Context, folderName, inFolder, toFolder string) (json.RawMessage, error)
 	Subscribe(ctx context.Context, feedURL, folder string) (json.RawMessage, error)
+	// SaveStory saves an external URL as a starred story (create_child.go's
+	// stories-root case), returning the hash NewsBlur assigned.
+	SaveStory(ctx context.Context, in newsblur.SaveStoryInput) (newsblur.SavedStory, error)
 }
 
 var _ Client = (*newsblur.Client)(nil)
