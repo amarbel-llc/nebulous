@@ -5,11 +5,13 @@
 #   moxy.enable          render a moxyfile holding the `nebulous serve mcp` child
 #                        (include it from your moxyfile, see moxy.moxyfile)
 #   cuttingGarden.enable add the newsblur:// wire plugin to programs.cutting-garden
-#                        (cutting-garden's own home-manager module must be imported)
+#                        (cutting-garden's own home-manager module must be imported);
+#                        cuttingGarden.writable also names the piggy entry holding the
+#                        token, read by the plugin on a first mutation
 #   fetch.enable         a systemd user timer running `nebulous fetch`, since
 #                        `serve mcp` and the plugin read the store fetch populates
 #
-# No credential is wired anywhere: the package's bin/nebulous reads the NewsBlur
+# No secret is wired anywhere: the package's bin/nebulous reads the NewsBlur
 # token itself with the `piggy` the package carries (NEWSBLUR_TOKEN, when set,
 # still wins). The periodic-fetch timer for headless hosts lives in
 # nix/nixos-module.nix. Mirrors cutting-garden's home-manager module shape.
@@ -43,11 +45,24 @@ let
 
   # A `programs.cutting-garden.plugins` entry: `command` is the base invocation,
   # the host appends `traversal-serve` itself (cutting-garden's config.nix).
+  # With `writable`, extraConfig renders the plugin's own `[nebulous]` section: one
+  # account naming the piggy entry that holds the NewsBlur token, in the same shape
+  # cutting-garden's caldav/fastmail accounts use. The plugin fetches the token the
+  # first time a mutation needs it; without an account it stays read-only.
   cuttingGardenStanza = {
     name = "nebulous";
     command = [ nebulousBin ];
     schemes = [ "newsblur" ];
     protocols = [ "traversal" ];
+    extraConfig = lib.optionalAttrs cfg.cuttingGarden.writable {
+      accounts = [
+        {
+          name = "newsblur";
+          password_source = "piggy";
+          password_key = cfg.cuttingGarden.tokenPassKey;
+        }
+      ];
+    };
   };
 in
 {
@@ -76,10 +91,26 @@ in
       };
     };
 
-    cuttingGarden.enable = mkEnableOption ''
-      the newsblur:// wire plugin in `programs.cutting-garden.plugins`
-      (requires cutting-garden's home-manager module)
-    '';
+    cuttingGarden = {
+      enable = mkEnableOption ''
+        the newsblur:// wire plugin in `programs.cutting-garden.plugins`
+        (requires cutting-garden's home-manager module); read-only unless
+        `writable`
+      '';
+
+      writable = mkEnableOption ''
+        write access through the plugin (mutate_nodes): renders a `[nebulous]`
+        section naming the piggy entry in `tokenPassKey`, which the plugin reads
+        the first time a mutation needs the token. Without it the plugin only reads
+      '';
+
+      tokenPassKey = mkOption {
+        type = types.str;
+        default = "newsblur-api-token";
+        example = "tent/newsblur";
+        description = "The `piggy pass show` entry holding the NewsBlur session cookie.";
+      };
+    };
 
     fetch = {
       enable = mkEnableOption "a systemd user timer running `nebulous fetch`";

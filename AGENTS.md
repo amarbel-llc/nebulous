@@ -45,8 +45,15 @@ direnv via `.envrc`). When it is unset, nebulous reads it itself from
 that launches `nebulous serve mcp` (a moxyfile child, e.g. `command =
 "nebulous serve mcp"`) never carries the secret in its env or argv; piggy must
 be on that process's PATH (the nix package's wrapper supplies it).
-`traversal-serve` does not consult piggy: only `NEWSBLUR_TOKEN` in its env
-makes it read-write. `just explore-mcp-description-size` prints the
+`traversal-serve` never consults piggy at startup; it is read-write only when
+`NEWSBLUR_TOKEN` is in its env or its cutting-garden config has a
+`[[nebulous.accounts]]` entry (`name`, `password_source = "piggy"|"env"`,
+`password_key`; the shared `config_common` account shape, decoded in
+`cmd/nebulous/traversal_config.go` from the `config_toml` cutting-garden hands
+the plugin at initialize). That account's credential is fetched the first time a
+mutation needs the token (`Client.EnableWrites`), so reads never touch piggy.
+`just debug-verify-config-account` checks both halves against a real
+cutting-garden. `just explore-mcp-description-size` prints the
 characters `serve mcp` loads into a session (tool, resource and template
 descriptions). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 `corpus-*`, and `traversal-serve` read only the local store and do not
@@ -307,7 +314,9 @@ an RFC 0001 producer: `mkGoPkgs { manifest = ./go.nix; }` publishes `go-pkgs`
 piggy on the caller's PATH. The home-manager module's opt-in wiring for a local
 session (`programs.nebulous.moxy.enable` renders a moxyfile with the
 `serve mcp` child to `include`; `cuttingGarden.enable` adds the newsblur://
-stanza to `programs.cutting-garden.plugins`; `fetch.enable` a user timer) is
+stanza to `programs.cutting-garden.plugins`, read-only unless
+`cuttingGarden.writable`, which adds the `[nebulous]` account section naming
+`cuttingGarden.tokenPassKey`; `fetch.enable` a user timer) is
 covered by `checks.home-module-eval`, which stubs home-manager's options.
 
 `nix/nixos-module.nix` + `nix/home-manager-module.nix` are the self-passing

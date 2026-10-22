@@ -271,7 +271,11 @@
                   programs.nebulous = {
                     enable = true;
                     moxy.enable = true;
-                    cuttingGarden.enable = true;
+                    cuttingGarden = {
+                      enable = true;
+                      writable = true;
+                      tokenPassKey = "tent/newsblur";
+                    };
                     fetch = {
                       enable = true;
                       interval = "42min";
@@ -290,6 +294,7 @@
               .schemes;
               pluginCommand = builtins.concatStringsSep " " (builtins.head hm.programs.cutting-garden.plugins)
               .command;
+              pluginAccount = builtins.toJSON (builtins.head hm.programs.cutting-garden.plugins).extraConfig;
               fetchExecStart = hm.systemd.user.services.nebulous-fetch.Service.ExecStart;
               fetchInterval = hm.systemd.user.timers.nebulous-fetch.Timer.OnUnitActiveSec;
               installsPackage = if builtins.elem nebulous hm.home.packages then "1" else "";
@@ -301,6 +306,7 @@
               [ "$moxyfilePath" = "/home/u/.config/moxy/nebulous.moxyfile" ]
               [ "$pluginSchemes" = "newsblur" ]
               echo "$pluginCommand" | grep -q '/bin/nebulous$'
+              [ "$pluginAccount" = '{"accounts":[{"name":"newsblur","password_key":"tent/newsblur","password_source":"piggy"}]}' ]
               echo "$fetchExecStart" | grep -q '/bin/nebulous fetch -no-capture'
               [ "$fetchInterval" = "42min" ]
               [ -n "$installsPackage" ]

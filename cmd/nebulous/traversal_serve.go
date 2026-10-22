@@ -24,10 +24,11 @@ import (
 // SDK side, so every interface cgplugin.Plugin implements is advertised
 // automatically — no capability list to maintain here.
 func runTraversalServe(ctx context.Context) int {
-	// Only NEWSBLUR_TOKEN opts in to write mode. piggy is deliberately not
-	// consulted: a locked agent would stall the handshake cutting-garden waits
-	// on, and a credential lookup should not silently change what a spawned
-	// plugin may do.
+	// Write mode is an explicit opt-in: NEWSBLUR_TOKEN here, or an account in
+	// the plugin's config section (ConfigApply below), whose credential is
+	// fetched only when a mutation first needs it. piggy is never consulted
+	// at startup: a locked agent would stall the handshake cutting-garden
+	// waits on, and a credential lookup should not silently widen a plugin.
 	token := os.Getenv("NEWSBLUR_TOKEN")
 	client, err := buildTraversalServeClient(ctx, token)
 	if err != nil {
@@ -98,9 +99,19 @@ func runTraversalServe(ctx context.Context) int {
 			Name:    "nebulous",
 			Version: "0.1.0",
 		},
-		// ConfigApply is intentionally left nil: nebulous has no TOML config
-		// section today (NEWSBLUR_TOKEN + XDG paths already cover everything
-		// it needs), so there is nothing for a config_toml payload to carry.
+		ConfigApply: func(configTOML string) error {
+			source, err := newsblurTokenSource(configTOML)
+			if err != nil {
+				return err
+			}
+			// NEWSBLUR_TOKEN already made this client live and writable.
+			if source == nil || token != "" {
+				return nil
+			}
+			client.EnableWrites(source)
+			cgplugin.SetClient(client)
+			return nil
+		},
 	}); err != nil {
 		if servCtx.Err() != nil {
 			return 0

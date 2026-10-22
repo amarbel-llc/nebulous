@@ -191,6 +191,78 @@ debug-verify-save-story cg_bin url title tag: build-go
   mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_nodes","arguments":{"uri":"newsblur://stories","bare":true}}}' \
     | jq -c '.result // .error'
 
+# End-to-end check of the plugin's config-driven credential: a REAL
+# cutting-garden spawns `nebulous traversal-serve` with NEWSBLUR_TOKEN unset.
+# First without a `[[nebulous.accounts]]` section, where the save must be
+# refused (read-only), then with a piggy account, where it must go through and
+# fetch the token only then. Throwaway XDG dirs; the saved story is unstarred
+# again with a direct API call (token read from piggy for that cleanup only,
+# never printed). MUTATES the live account on the second step.
+# Usage: just debug-verify-config-account cutting-garden https://example.com/x "Title"
+#
+# check read-only without an account and a lazy piggy-backed write with one, via cutting-garden
+[group('debug')]
+debug-verify-config-account cg_bin url title: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  unset NEWSBLUR_TOKEN
+  work="$(mktemp -d)"
+  hash=""
+  cleanup() {
+    if [ -n "$hash" ]; then
+      echo "##### cleanup: unstar $hash"
+      curl -sS -X POST https://www.newsblur.com/reader/mark_story_hash_as_unstarred \
+        -H "Cookie: newsblur_sessionid=$(piggy pass show newsblur-api-token)" \
+        --data-urlencode "story_hash=$hash" | jq -c '{code}'
+    fi
+    rm -rf "$work"
+  }
+  trap cleanup EXIT
+  real_data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  real_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+  mkdir -p "$work/config/cutting-garden" "$work/data"
+  # piggy finds its store under the XDG dirs, which this recipe replaces.
+  for dir in data:"$real_data" config:"$real_config"; do
+    [ -e "${dir#*:}/piggy" ] && ln -s "${dir#*:}/piggy" "$work/${dir%%:*}/piggy"
+  done
+  export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data"
+  plugin_stanza=$(cat <<EOF
+  [[plugins]]
+  name = "nebulous"
+  command = ["$(pwd)/build/debug/nebulous"]
+  schemes = ["newsblur"]
+  protocols = ["traversal"]
+  EOF
+  )
+  create=$(jq -nc --arg url "{{url}}" --arg title "{{title}}" \
+    '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"mutate_nodes",arguments:{groups:[{anchor:"newsblur://stories",ops:[{kind:"create",id:"+s",type:"newsblur-story-v1",body:({url:$url,title:$title,content:"<p>config-account check</p>"}|tojson)}]}]}}}')
+  mcp() {
+    {
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+      printf '%s\n' "$1"
+    } | {{cg_bin}} mcp | jq -c 'select(.id == 2)'
+  }
+
+  echo "##### 1. no account section: the save must be refused"
+  printf '%s\n' "$plugin_stanza" > "$work/config/cutting-garden/config.toml"
+  out=$(mcp "$create")
+  echo "$out" | jq -c '.result // .error'
+  if echo "$out" | grep -q 'newsblur://story/'; then
+    echo "FAIL: a story was saved with no account configured"; exit 1
+  fi
+
+  echo "##### 2. piggy account: the save must succeed"
+  {
+    printf '%s\n' "$plugin_stanza"
+    printf '%s\n' '[[nebulous.accounts]]' 'name = "newsblur"' 'password_source = "piggy"' 'password_key = "newsblur-api-token"'
+  } > "$work/config/cutting-garden/config.toml"
+  out=$(mcp "$create")
+  echo "$out" | jq -c '.result // .error'
+  hash=$(echo "$out" | grep -o 'newsblur://story/[^"\\ ]*' | head -1 | sed 's|newsblur://story/||' || true)
+  [ -n "$hash" ] || { echo "FAIL: no story URI in the create result"; exit 1; }
+  echo "created hash: $hash"
+
 # End-to-end check of cutting-garden's `_words` word search (RFC 0016 words
 # mode) against `nebulous traversal-serve`, on a tiny SEEDED corpus in a
 # throwaway HOME: seeds a legacy cache, migrates it into the madder store,

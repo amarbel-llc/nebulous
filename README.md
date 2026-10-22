@@ -18,7 +18,8 @@ One Go module, two surfaces over one local store:
    `RootLister` / `LeafReader`. Served as an RFC 0013 wire plugin —
    cutting-garden's own main binary spawns it over an AF_UNIX rendezvous
    socket per a `[[plugins]]` config stanza. Read-only by default; no token
-   required. Optionally becomes read-write when `NEWSBLUR_TOKEN` is set,
+   required. Optionally becomes read-write when `NEWSBLUR_TOKEN` is set or its
+   cutting-garden config names an account (see Auth & configuration),
    implementing `NodeMutator` (`create`/`patch`/`delete` ops of cutting-garden's `mutate_nodes` —
    star/unstar, mark_read/mark_unread, replace/clear a story's user tags,
    unsubscribe, rename_feed/move_feed, folder create/rename/delete/move)
@@ -111,7 +112,7 @@ newsblur://feeds`. Reads only the local cache — no NewsBlur token needed.
 path locally against a real `cutting-garden` binary for a quick sanity
 check.
 
-When `NEWSBLUR_TOKEN` is set, the plugin also becomes read-write via
+When `NEWSBLUR_TOKEN` is set or an account is configured, the plugin also becomes read-write via
 `NodeMutator` and `ContainerCreator` (`internal/charlie/cgplugin/mutate.go`,
 `create_child.go`): `mutate_nodes` `create`/`patch`/`delete` ops on
 `story/{hash}` (star/unstar, read/unread, and tags) and `feed/{id}` (rename/move/
@@ -184,7 +185,9 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
   session: `moxy.enable` renders a moxyfile with the `serve mcp` child
   (`moxy.moxyfile` is its path, to `include` from your own moxyfile),
   `cuttingGarden.enable` adds the `newsblur://` plugin stanza to
-  `programs.cutting-garden.plugins`, and `fetch.enable` runs `nebulous fetch`
+  `programs.cutting-garden.plugins` (read-only; `cuttingGarden.writable` adds
+  a piggy-backed account, `tokenPassKey`, whose token is read on the first
+  mutation), and `fetch.enable` runs `nebulous fetch`
   on a systemd user timer (`fetch.interval`, default `1h`).
 
 ## CLI
@@ -215,8 +218,18 @@ nebulous traversal-serve              RFC 0013 wire plugin: serve newsblur:// fo
   (the nix package carries its own piggy). The
   corpus and `traversal-serve` subcommands read only the local store and
   need no token. `traversal-serve` optionally becomes read-write (mutations
-  via `mutate_nodes`) when `NEWSBLUR_TOKEN` is
-  set; without it, it stays read-only exactly as before.
+  via `mutate_nodes`) when `NEWSBLUR_TOKEN` is set or the plugin's
+  cutting-garden config has an account:
+
+  ```toml
+  [[nebulous.accounts]]
+  name = "newsblur"
+  password_source = "piggy"        # or "env"
+  password_key = "newsblur-api-token"
+  ```
+
+  The same account shape caldav/fastmail use; the token is read the first
+  time a mutation needs it. Without either, it stays read-only.
 
 ## Development
 

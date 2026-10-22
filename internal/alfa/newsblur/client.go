@@ -3,12 +3,14 @@ package newsblur
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,6 +55,15 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	cache      *responseCache
+
+	// tokenFn, set by EnableWrites, yields the session cookie on first use
+	// instead of at construction; tokenMu guards token while it is filled.
+	tokenMu sync.Mutex
+	tokenFn func(context.Context) (string, error)
+
+	// cacheOnlyReads keeps ordinary reads (get) on the local cache even though
+	// the client can now reach NewsBlur, so a read never needs the token.
+	cacheOnlyReads bool
 }
 
 func NewClient(token string) *Client {
@@ -81,6 +92,36 @@ func (c *Client) WithCache(manifestPath string, ttl time.Duration, sink BlobSink
 	}
 	c.cache = rc
 	return nil
+}
+
+// EnableWrites lets a cache-only client write to NewsBlur, with the session
+// cookie fetched from tokenFn the first time something goes to the network (a
+// mutation, or the live reads one needs) and kept once it succeeds. Ordinary
+// reads stay on the local cache and never call tokenFn, so a locked credential
+// store costs a read nothing. A failed tokenFn is not remembered: the next
+// network call asks again.
+func (c *Client) EnableWrites(tokenFn func(context.Context) (string, error)) {
+	c.baseURL = DefaultBaseURL
+	c.httpClient = &http.Client{}
+	c.tokenFn = tokenFn
+	c.cacheOnlyReads = true
+}
+
+// cookie returns the session cookie header value for a network call.
+func (c *Client) cookie(ctx context.Context) (string, error) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	if c.token == "" && c.tokenFn != nil {
+		token, err := c.tokenFn(ctx)
+		if err != nil {
+			return "", fmt.Errorf("newsblur: no session token: %w", err)
+		}
+		if token == "" {
+			return "", errors.New("newsblur: no session token: the credential source returned an empty value")
+		}
+		c.token = token
+	}
+	return "newsblur_sessionid=" + c.token, nil
 }
 
 // ManifestPath returns the on-disk location of the persistent cache
@@ -124,7 +165,7 @@ func (c *Client) ForceManifestRefresh() {
 func (c *Client) get(ctx context.Context, path string, params url.Values) (json.RawMessage, error) {
 	if c.cache != nil {
 		cacheKey := c.cache.cacheKey(path, params)
-		if c.httpClient == nil {
+		if c.httpClient == nil || c.cacheOnlyReads {
 			// Cache-only client (NewCacheOnlyClient, ttl=0): there is no
 			// live source to fall back to, so a TTL-expired entry is
 			// still the best available data — never fall through to
@@ -165,7 +206,11 @@ func (c *Client) doGet(ctx context.Context, path string, params url.Values) (jso
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Cookie", "newsblur_sessionid="+c.token)
+	cookie, err := c.cookie(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", cookie)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -297,7 +342,11 @@ func (c *Client) post(ctx context.Context, path string, form url.Values) (json.R
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Cookie", "newsblur_sessionid="+c.token)
+	cookie, err := c.cookie(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)

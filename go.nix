@@ -43,7 +43,6 @@
     "code.linenisgreat.com/tommy" = {
       go = "1.26";
       hash = "sha256-Stc6rRy+e/nVDkH7Ykww3NxBR/KeAy+UXDt13peknDg=";
-      indirect = true;
       version = "v0.5.0";
     };
     "filippo.io/age" = {
