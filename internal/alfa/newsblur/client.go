@@ -189,6 +189,15 @@ func (c *Client) doGet(ctx context.Context, path string, params url.Values) (jso
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Every endpoint read here answers JSON. A 200 that is not (an HTML
+	// error or interstitial page) is a failed fetch, not an answer: cached,
+	// it would stop `fetch` from asking again (HasCachedOriginalText) while
+	// every reader quietly finds nothing in it.
+	if !json.Valid(body) {
+		return nil, fmt.Errorf("newsblur: GET %s returned a non-JSON body (HTTP 200, content-type %q): %.80q",
+			path, resp.Header.Get("Content-Type"), body)
+	}
+
 	raw := json.RawMessage(body)
 
 	if c.cache != nil {
