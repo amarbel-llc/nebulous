@@ -568,6 +568,10 @@
         "igloo": "igloo",
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master",
+        "piggy": [
+          "madder",
+          "piggy"
+        ],
         "purse-first": "purse-first",
         "tap": "tap",
         "utils": "utils"

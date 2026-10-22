@@ -35,6 +35,11 @@
     tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
     tap.inputs.bats.follows = "madder/bats";
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
+    # The piggy binary `nebulous` runs to read its NewsBlur token when
+    # NEWSBLUR_TOKEN is unset (cmd/nebulous/token.go); the package wraps
+    # bin/nebulous so the store path, not the caller's PATH, supplies it.
+    # Follows madder's pin so one rev of piggy resolves.
+    piggy.follows = "madder/piggy";
     madder.inputs.purse-first.follows = "purse-first";
     tap.inputs.purse-first.follows = "purse-first";
     tap.inputs.gomod2nix.follows = "purse-first/gomod2nix";
@@ -162,8 +167,16 @@
             export HOME="$TMPDIR"
           '';
 
+          # generate-plugin runs the real binary; the wrapper goes on after,
+          # SUFFIXing piggy so a caller's own PATH (or a test stub) still wins.
           postInstall = ''
             $out/bin/nebulous generate-plugin $out
+            mv $out/bin/nebulous $out/bin/.nebulous-wrapped
+            printf '%s\n' \
+              '#!${pkgs.runtimeShell}' \
+              'export PATH="$PATH:${inputs.piggy.packages.${system}.default}/bin"' \
+              'exec '"$out"'/bin/.nebulous-wrapped "$@"' > $out/bin/nebulous
+            chmod +x $out/bin/nebulous
           '';
 
           bgaArgs = {
@@ -215,6 +228,84 @@
           conformist-pre-commit = conformistEval.config.build.preCommit;
           conformist-repair = conformistEval.config.build.repair;
         };
+
+        # Eval-check for the home-manager module: home-manager itself is not an
+        # input here, so the options the module writes to (xdg, home, systemd.user,
+        # programs.cutting-garden.plugins) are stubbed, and the module is
+        # evaluated with every optional wiring on, asserting what it renders.
+        checks.home-module-eval =
+          let
+            stub =
+              { lib, ... }:
+              let
+                bag = lib.mkOption {
+                  type = lib.types.attrsOf lib.types.raw;
+                  default = { };
+                };
+              in
+              {
+                options = {
+                  xdg.configHome = lib.mkOption {
+                    type = lib.types.str;
+                    default = "/home/u/.config";
+                  };
+                  xdg.configFile = bag;
+                  home.packages = lib.mkOption {
+                    type = lib.types.listOf lib.types.package;
+                    default = [ ];
+                  };
+                  programs.cutting-garden.plugins = lib.mkOption {
+                    type = lib.types.listOf lib.types.raw;
+                    default = [ ];
+                  };
+                  systemd.user.services = bag;
+                  systemd.user.timers = bag;
+                };
+              };
+            homeEval = pkgs.lib.evalModules {
+              specialArgs = { inherit pkgs; };
+              modules = [
+                stub
+                (import ./nix/home-manager-module.nix self)
+                {
+                  programs.nebulous = {
+                    enable = true;
+                    moxy.enable = true;
+                    cuttingGarden.enable = true;
+                    fetch = {
+                      enable = true;
+                      interval = "42min";
+                    };
+                  };
+                }
+              ];
+            };
+            hm = homeEval.config;
+          in
+          pkgs.runCommand "nebulous-home-module-eval"
+            {
+              moxyfile = hm.xdg.configFile."moxy/nebulous.moxyfile".source;
+              moxyfilePath = hm.programs.nebulous.moxy.moxyfile;
+              pluginSchemes = builtins.concatStringsSep "," (builtins.head hm.programs.cutting-garden.plugins)
+              .schemes;
+              pluginCommand = builtins.concatStringsSep " " (builtins.head hm.programs.cutting-garden.plugins)
+              .command;
+              fetchExecStart = hm.systemd.user.services.nebulous-fetch.Service.ExecStart;
+              fetchInterval = hm.systemd.user.timers.nebulous-fetch.Timer.OnUnitActiveSec;
+              installsPackage = if builtins.elem nebulous hm.home.packages then "1" else "";
+            }
+            ''
+              cat "$moxyfile"
+              grep -q 'name = "nebulous"' "$moxyfile"
+              grep -q 'serve", "mcp"' "$moxyfile"
+              [ "$moxyfilePath" = "/home/u/.config/moxy/nebulous.moxyfile" ]
+              [ "$pluginSchemes" = "newsblur" ]
+              echo "$pluginCommand" | grep -q '/bin/nebulous$'
+              echo "$fetchExecStart" | grep -q '/bin/nebulous fetch -no-capture'
+              [ "$fetchInterval" = "42min" ]
+              [ -n "$installsPackage" ]
+              touch "$out"
+            '';
 
         # Eval-check for the exported NixOS/home-manager modules
         # (docs/features/0001-krone-live-service.md Stage 2): instantiate

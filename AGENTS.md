@@ -300,6 +300,15 @@ whose Go module is bridged through `go.nix` `flakeInputs`. nebulous is itself
 an RFC 0001 producer: `mkGoPkgs { manifest = ./go.nix; }` publishes `go-pkgs`
 / `go-pkgs-test`, and the binaries build from `go-pkgs-test`.
 
+`bin/nebulous` in the nix package is a wrapper that appends the flake's `piggy`
+(a `piggy.follows = "madder/piggy"` input) to PATH before exec'ing
+`.nebulous-wrapped`, so the token lookup in `cmd/nebulous/token.go` needs no
+piggy on the caller's PATH. The home-manager module's opt-in wiring for a local
+session (`programs.nebulous.moxy.enable` renders a moxyfile with the
+`serve mcp` child to `include`; `cuttingGarden.enable` adds the newsblur://
+stanza to `programs.cutting-garden.plugins`; `fetch.enable` a user timer) is
+covered by `checks.home-module-eval`, which stubs home-manager's options.
+
 `nix/nixos-module.nix` + `nix/home-manager-module.nix` are the self-passing
 producer modules (`circus-host-integration(7)`) exported as
 `nixosModules.default` / `homeManagerModules.default`; `checks.modules-eval`
