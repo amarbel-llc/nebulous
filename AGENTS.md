@@ -40,7 +40,14 @@ inside nix and rewrites go.nix: `just codemod-go -- go get <module>@<version>`.
 
 `NEWSBLUR_TOKEN` env var (NewsBlur session cookie) is required at runtime for
 `serve mcp` and `fetch`. Store it in `.secrets.env` (gitignored, loaded by
-direnv via `.envrc`). The subcommands `generate-plugin`, `hook`, `install-mcp`,
+direnv via `.envrc`). When it is unset, nebulous reads it itself from
+`piggy pass show newsblur-api-token` (`cmd/nebulous/token.go`), so a session
+that launches `nebulous serve mcp` (a moxyfile child, e.g. `command =
+"nebulous serve mcp"`) never carries the secret in its env or argv; piggy must
+be on that process's PATH. `traversal-serve` falls back to read-only when
+neither is available. `just explore-mcp-description-size` prints the
+characters `serve mcp` loads into a session (tool, resource and template
+descriptions). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 `corpus-*`, and `traversal-serve` read only the local store and do not
 require a token. `traversal-serve` optionally becomes read-write when
 `NEWSBLUR_TOKEN` is set: its plugin gains `NodeMutator` support

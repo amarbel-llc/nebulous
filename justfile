@@ -618,3 +618,39 @@ explore-corpus: build-go
   @echo "total keys: $(./build/debug/nebulous corpus-list | wc -l)"
   @echo "---"
   ./build/debug/nebulous corpus-read "$(./build/debug/nebulous corpus-list | head -1)"
+
+# Measure what `nebulous serve mcp` loads into a session's context: characters of
+# the initialize instructions, tools/list (compact JSON: name, description, input
+# schema), resources/list and resources/templates/list, per tool and in total.
+# Runs the debug build with a dummy token against a throwaway XDG tree (listing
+# makes no NewsBlur call). Serves the context-cost number for the Krone-connector
+# replacement (circus EPIC 0001 story 1); tokens are not computed here.
+#
+# print the character count of nebulous's loaded MCP descriptions
+[group('explore')]
+explore-mcp-description-size: build-go
+  #!/usr/bin/env bash
+  set -euo pipefail
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' EXIT
+  export HOME="$work" XDG_DATA_HOME="$work/data" XDG_CONFIG_HOME="$work/config" XDG_CACHE_HOME="$work/cache"
+  export NEWSBLUR_TOKEN=dummy-not-a-token
+  {
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"resources/list"}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":4,"method":"resources/templates/list"}'
+    sleep 2
+  } | ./build/debug/nebulous serve mcp | jq -s -r '
+    def len: tojson | length;
+    (map(select(.id == 1))[0].result.instructions // "") as $ins
+    | (map(select(.id == 2))[0].result.tools // []) as $tools
+    | (map(select(.id == 3))[0].result.resources // []) as $res
+    | (map(select(.id == 4))[0].result.resourceTemplates // []) as $tpl
+    | ($tools[] | "tool \(.name): \(len) chars (description \(.description | length))"),
+      "instructions: \($ins | length) chars",
+      "tools/list total: \($tools | len) chars over \($tools | length) tools",
+      "resources/list total: \($res | len) chars over \($res | length) resources",
+      "resource templates total: \($tpl | len) chars over \($tpl | length) templates",
+      "GRAND TOTAL: \(($ins | length) + ($tools | len) + ($res | len) + ($tpl | len)) chars"'

@@ -43,7 +43,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  nebulous traversal-serve      RFC 0013 wire plugin: serve newsblur:// out-of-process\n")
 		fmt.Fprintf(os.Stderr, "                                for a cutting-garden [[plugins]] traversalPlugins stanza\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
-		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`)\n")
+		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`; when unset, read\n")
+		fmt.Fprintf(os.Stderr, "                             from `piggy pass show newsblur-api-token` by nebulous itself)\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME              honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n")
 		fmt.Fprintf(os.Stderr, "  NEBULOUS_CAPTURE_INTERVAL  how often `fetch`'s folded-in capture phase actually runs (default 6h)\n")
 		fmt.Fprintf(os.Stderr, "  NEBULOUS_ORIGINAL_TEXT_RETRY_INTERVAL  how old a failed original-text answer must be before `fetch` asks\n")
@@ -117,9 +118,9 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "fetch" {
-		token := os.Getenv("NEWSBLUR_TOKEN")
-		if token == "" {
-			log.Fatal("NEWSBLUR_TOKEN environment variable is required")
+		token, err := resolveNewsblurToken(context.Background())
+		if err != nil {
+			log.Fatalf("fetch: %v", err)
 		}
 
 		fetchFlags := flag.NewFlagSet("fetch", flag.ExitOnError)
@@ -221,13 +222,13 @@ func main() {
 
 // serveMCP starts the MCP server over stdio. Requires NEWSBLUR_TOKEN.
 func serveMCP() {
-	token := os.Getenv("NEWSBLUR_TOKEN")
-	if token == "" {
-		log.Fatal("NEWSBLUR_TOKEN environment variable is required")
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	token, err := resolveNewsblurToken(ctx)
+	if err != nil {
+		log.Fatalf("serve mcp: %v", err)
+	}
 
 	client := newsblur.NewClient(token)
 	if err := attachCache(ctx, client, 1*time.Hour); err != nil {

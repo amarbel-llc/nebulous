@@ -24,7 +24,12 @@ import (
 // SDK side, so every interface cgplugin.Plugin implements is advertised
 // automatically — no capability list to maintain here.
 func runTraversalServe(ctx context.Context) int {
-	token := os.Getenv("NEWSBLUR_TOKEN")
+	// No token (and no piggy) leaves the plugin read-only, the documented
+	// token-free mode, so a resolve error is deliberately not fatal here.
+	token, tokenErr := resolveNewsblurToken(ctx)
+	if tokenErr != nil {
+		fmt.Fprintf(os.Stderr, "nebulous traversal-serve: read-only (no NewsBlur token): %v\n", tokenErr)
+	}
 	client, err := buildTraversalServeClient(ctx, token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nebulous traversal-serve: %v\n", err)
