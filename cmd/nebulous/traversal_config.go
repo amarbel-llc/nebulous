@@ -20,7 +20,7 @@ import (
 //	[[nebulous.accounts]]      # [[accounts]] once the section name is stripped
 //	name = "newsblur"
 //	password_source = "piggy"  # or "env"
-//	password_key = "newsblur-api-token"
+//	password_key = "newsblur-api-token"   # optional for piggy: defaults to tokenPassEntry()
 //
 // A nil source with a nil error means the section holds no account: the plugin
 // stays read-only. The source is only called when a mutation first needs the
@@ -57,6 +57,10 @@ func newsblurTokenSource(configTOML string) (func(context.Context) (string, erro
 	}
 	if account.URL != "" {
 		return nil, fmt.Errorf("nebulous config: accounts[%q]: url is not used (the NewsBlur host is fixed)", account.Name)
+	}
+	// A piggy account that names no key takes the entry every other path uses.
+	if account.PasswordSource == "piggy" && account.PasswordKey == "" {
+		account.PasswordKey = tokenPassEntry()
 	}
 	if err := account.ValidatePassword(); err != nil {
 		return nil, fmt.Errorf("nebulous config: accounts[%q]: %w", account.Name, err)

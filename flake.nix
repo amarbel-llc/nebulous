@@ -270,11 +270,12 @@
                 {
                   programs.nebulous = {
                     enable = true;
+                    tokenPassKey = "tent/newsblur-token";
+                    piggyStoreDir = "/srv/piggy";
                     moxy.enable = true;
                     cuttingGarden = {
                       enable = true;
                       writable = true;
-                      tokenPassKey = "tent/newsblur";
                     };
                     fetch = {
                       enable = true;
@@ -296,17 +297,23 @@
               .command;
               pluginAccount = builtins.toJSON (builtins.head hm.programs.cutting-garden.plugins).extraConfig;
               fetchExecStart = hm.systemd.user.services.nebulous-fetch.Service.ExecStart;
+              fetchEnvironment = builtins.concatStringsSep "\n" hm.systemd.user.services.nebulous-fetch.Service.Environment;
               fetchInterval = hm.systemd.user.timers.nebulous-fetch.Timer.OnUnitActiveSec;
               installsPackage = if builtins.elem nebulous hm.home.packages then "1" else "";
             }
             ''
               cat "$moxyfile"
               grep -q 'name = "nebulous"' "$moxyfile"
-              grep -q 'serve", "mcp"' "$moxyfile"
+              grep -q 'serve","mcp"' "$moxyfile"
+              grep -q 'NEBULOUS_TOKEN_PASS_KEY=tent/newsblur-token' "$moxyfile"
+              grep -q 'PIGGY_STORE_DIR=/srv/piggy' "$moxyfile"
+              echo "$fetchEnvironment" | grep -qx 'NEBULOUS_TOKEN_PASS_KEY=tent/newsblur-token'
+              echo "$fetchEnvironment" | grep -qx 'PIGGY_STORE_DIR=/srv/piggy'
+              echo "$pluginCommand" | grep -q 'PIGGY_STORE_DIR=/srv/piggy'
               [ "$moxyfilePath" = "/home/u/.config/moxy/nebulous.moxyfile" ]
               [ "$pluginSchemes" = "newsblur" ]
               echo "$pluginCommand" | grep -q '/bin/nebulous$'
-              [ "$pluginAccount" = '{"accounts":[{"name":"newsblur","password_key":"tent/newsblur","password_source":"piggy"}]}' ]
+              [ "$pluginAccount" = '{"accounts":[{"name":"newsblur","password_key":"tent/newsblur-token","password_source":"piggy"}]}' ]
               echo "$fetchExecStart" | grep -q '/bin/nebulous fetch -no-capture'
               [ "$fetchInterval" = "42min" ]
               [ -n "$installsPackage" ]

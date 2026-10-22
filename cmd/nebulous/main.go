@@ -45,6 +45,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  NEWSBLUR_TOKEN            NewsBlur session cookie (required for `serve mcp` and `fetch`; when unset, read\n")
 		fmt.Fprintf(os.Stderr, "                             from `piggy pass show newsblur-api-token` by nebulous itself)\n")
+		fmt.Fprintf(os.Stderr, "  NEBULOUS_TOKEN_PASS_KEY   the piggy pass entry read when NEWSBLUR_TOKEN is unset (default newsblur-api-token);\n")
+		fmt.Fprintf(os.Stderr, "                             which piggy store holds it is piggy's PIGGY_STORE_DIR\n")
 		fmt.Fprintf(os.Stderr, "  XDG_DATA_HOME              honored when resolving the nebulous manifest path ($XDG_DATA_HOME/nebulous/manifest.json)\n")
 		fmt.Fprintf(os.Stderr, "  NEBULOUS_CAPTURE_INTERVAL  how often `fetch`'s folded-in capture phase actually runs (default 6h)\n")
 		fmt.Fprintf(os.Stderr, "  NEBULOUS_ORIGINAL_TEXT_RETRY_INTERVAL  how old a failed original-text answer must be before `fetch` asks\n")

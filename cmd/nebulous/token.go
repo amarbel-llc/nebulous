@@ -11,12 +11,22 @@ import (
 )
 
 const (
-	// newsblurTokenPassEntry is the piggy pass entry holding the NewsBlur
-	// session cookie.
-	newsblurTokenPassEntry = "newsblur-api-token"
+	// defaultTokenPassEntry is the piggy pass entry holding the NewsBlur
+	// session cookie, unless NEBULOUS_TOKEN_PASS_KEY names another.
+	defaultTokenPassEntry = "newsblur-api-token"
 
 	piggyLookupTimeout = 30 * time.Second
 )
+
+// tokenPassEntry is the piggy pass entry to read the NewsBlur token from:
+// NEBULOUS_TOKEN_PASS_KEY when set, else defaultTokenPassEntry. Which store the
+// entry is looked up in is piggy's own business (PIGGY_STORE_DIR).
+func tokenPassEntry() string {
+	if entry := os.Getenv("NEBULOUS_TOKEN_PASS_KEY"); entry != "" {
+		return entry
+	}
+	return defaultTokenPassEntry
+}
 
 // readPiggyPass returns the stdout of `piggy pass show <entry>`. A variable so
 // tests can stand in for piggy.
@@ -48,14 +58,15 @@ func resolveNewsblurToken(ctx context.Context) (string, error) {
 		return token, nil
 	}
 
-	raw, err := readPiggyPass(ctx, newsblurTokenPassEntry)
+	entry := tokenPassEntry()
+	raw, err := readPiggyPass(ctx, entry)
 	if err != nil {
-		return "", fmt.Errorf("NEWSBLUR_TOKEN is unset and `piggy pass show %s` failed: %w", newsblurTokenPassEntry, err)
+		return "", fmt.Errorf("NEWSBLUR_TOKEN is unset and `piggy pass show %s` failed: %w", entry, err)
 	}
 
 	token := strings.TrimSpace(string(raw))
 	if token == "" {
-		return "", fmt.Errorf("NEWSBLUR_TOKEN is unset and piggy pass entry %s is empty", newsblurTokenPassEntry)
+		return "", fmt.Errorf("NEWSBLUR_TOKEN is unset and piggy pass entry %s is empty", entry)
 	}
 	return token, nil
 }

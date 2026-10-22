@@ -37,10 +37,29 @@ let
 
   nebulousBin = "${cfg.package}/bin/nebulous";
 
+  # The piggy lookup's inputs, set only when the user chose them: the entry name
+  # (always, so every wiring agrees) and the store (piggy's own default or an
+  # inherited PIGGY_STORE_DIR otherwise).
+  lookupEnv = [
+    "NEBULOUS_TOKEN_PASS_KEY=${cfg.tokenPassKey}"
+  ]
+  ++ lib.optional (cfg.piggyStoreDir != null) "PIGGY_STORE_DIR=${cfg.piggyStoreDir}";
+
+  # moxyfile servers take no env table, so the child runs under env(1).
   moxyfile = pkgs.writeText "nebulous.moxyfile" ''
     [[servers]]
     name = "nebulous"
-    command = ["${nebulousBin}", "serve", "mcp"]
+    command = ${
+      builtins.toJSON (
+        [ "${pkgs.coreutils}/bin/env" ]
+        ++ lookupEnv
+        ++ [
+          nebulousBin
+          "serve"
+          "mcp"
+        ]
+      )
+    }
   '';
 
   # A `programs.cutting-garden.plugins` entry: `command` is the base invocation,
@@ -51,7 +70,14 @@ let
   # first time a mutation needs it; without an account it stays read-only.
   cuttingGardenStanza = {
     name = "nebulous";
-    command = [ nebulousBin ];
+    # Under env(1) only when a store was chosen: the account's lookup runs in the
+    # plugin process, which otherwise inherits whatever cutting-garden has.
+    command =
+      lib.optionals (cfg.piggyStoreDir != null) [
+        "${pkgs.coreutils}/bin/env"
+        "PIGGY_STORE_DIR=${cfg.piggyStoreDir}"
+      ]
+      ++ [ nebulousBin ];
     schemes = [ "newsblur" ];
     protocols = [ "traversal" ];
     extraConfig = lib.optionalAttrs cfg.cuttingGarden.writable {
@@ -74,6 +100,30 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "nebulous.packages.\${system}.default";
       description = "The nebulous package to install into the user environment.";
+    };
+
+    tokenPassKey = mkOption {
+      type = types.str;
+      default = "newsblur-api-token";
+      example = "tent/newsblur-token";
+      description = ''
+        The `piggy pass show` entry holding the NewsBlur session cookie, given to
+        `serve mcp` and `fetch` as NEBULOUS_TOKEN_PASS_KEY and the default for
+        `cuttingGarden.tokenPassKey`.
+      '';
+    };
+
+    piggyStoreDir = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "/home/me/repos/circus/infra/secrets";
+      description = ''
+        The piggy password store the token is read from, as PIGGY_STORE_DIR for the
+        moxy child, the fetch unit and the plugin. Null leaves piggy's own default
+        (`$XDG_DATA_HOME/piggy`) or whatever PIGGY_STORE_DIR the launching process
+        already carries; a user unit carries none, so `fetch.enable` reads the
+        personal store unless this is set.
+      '';
     };
 
     moxy = {
@@ -106,9 +156,10 @@ in
 
       tokenPassKey = mkOption {
         type = types.str;
-        default = "newsblur-api-token";
+        default = cfg.tokenPassKey;
+        defaultText = lib.literalExpression "config.programs.nebulous.tokenPassKey";
         example = "tent/newsblur";
-        description = "The `piggy pass show` entry holding the NewsBlur session cookie.";
+        description = "The `piggy pass show` entry the plugin's account reads the token from.";
       };
     };
 
@@ -152,6 +203,7 @@ in
         Unit.Description = "nebulous fetch: sync feeds, starred stories and original text from NewsBlur";
         Service = {
           Type = "oneshot";
+          Environment = lookupEnv;
           ExecStart = lib.escapeShellArgs (
             [
               nebulousBin

@@ -186,9 +186,11 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
   (`moxy.moxyfile` is its path, to `include` from your own moxyfile),
   `cuttingGarden.enable` adds the `newsblur://` plugin stanza to
   `programs.cutting-garden.plugins` (read-only; `cuttingGarden.writable` adds
-  a piggy-backed account, `tokenPassKey`, whose token is read on the first
-  mutation), and `fetch.enable` runs `nebulous fetch`
-  on a systemd user timer (`fetch.interval`, default `1h`).
+  a piggy-backed account whose token is read on the first mutation), and
+  `fetch.enable` runs `nebulous fetch`
+  on a systemd user timer (`fetch.interval`, default `1h`). The top-level
+  `tokenPassKey` (default `newsblur-api-token`) and `piggyStoreDir` (default
+  unset) say which piggy entry and store all of these read the token from.
 
 ## CLI
 
@@ -215,7 +217,8 @@ nebulous traversal-serve              RFC 0013 wire plugin: serve newsblur:// fo
 - `NEWSBLUR_TOKEN` (NewsBlur session cookie) is required for `serve mcp` and
   `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv); when it
   is unset, nebulous reads it itself from `piggy pass show newsblur-api-token`
-  (the nix package carries its own piggy). The
+  (the nix package carries its own piggy); `NEBULOUS_TOKEN_PASS_KEY` names a
+  different entry, and piggy's `PIGGY_STORE_DIR` picks the store. The
   corpus and `traversal-serve` subcommands read only the local store and
   need no token. `traversal-serve` optionally becomes read-write (mutations
   via `mutate_nodes`) when `NEWSBLUR_TOKEN` is set or the plugin's

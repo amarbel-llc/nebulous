@@ -41,7 +41,8 @@ inside nix and rewrites go.nix: `just codemod-go -- go get <module>@<version>`.
 `NEWSBLUR_TOKEN` env var (NewsBlur session cookie) is required at runtime for
 `serve mcp` and `fetch`. Store it in `.secrets.env` (gitignored, loaded by
 direnv via `.envrc`). When it is unset, nebulous reads it itself from
-`piggy pass show newsblur-api-token` (`cmd/nebulous/token.go`), so a session
+`piggy pass show newsblur-api-token` (`cmd/nebulous/token.go`; the entry name is
+`NEBULOUS_TOKEN_PASS_KEY`, and the store is piggy's own `PIGGY_STORE_DIR`), so a session
 that launches `nebulous serve mcp` (a moxyfile child, e.g. `command =
 "nebulous serve mcp"`) never carries the secret in its env or argv; piggy must
 be on that process's PATH (the nix package's wrapper supplies it).
@@ -316,7 +317,10 @@ session (`programs.nebulous.moxy.enable` renders a moxyfile with the
 `serve mcp` child to `include`; `cuttingGarden.enable` adds the newsblur://
 stanza to `programs.cutting-garden.plugins`, read-only unless
 `cuttingGarden.writable`, which adds the `[nebulous]` account section naming
-`cuttingGarden.tokenPassKey`; `fetch.enable` a user timer) is
+`cuttingGarden.tokenPassKey`; `fetch.enable` a user timer; the top-level
+`tokenPassKey` and optional `piggyStoreDir` are exported as
+`NEBULOUS_TOKEN_PASS_KEY` / `PIGGY_STORE_DIR` to the moxy child, the fetch unit
+and the plugin, which a piggy account without `password_key` also defaults to) is
 covered by `checks.home-module-eval`, which stubs home-manager's options.
 
 `nix/nixos-module.nix` + `nix/home-manager-module.nix` are the self-passing

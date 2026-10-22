@@ -41,8 +41,21 @@ func TestResolveNewsblurTokenFallsBackToPiggy(t *testing.T) {
 	if err != nil || got != "from-piggy" {
 		t.Fatalf("got %q, %v; want from-piggy (trailing newline trimmed)", got, err)
 	}
-	if len(*entries) != 1 || (*entries)[0] != newsblurTokenPassEntry {
-		t.Fatalf("piggy entries = %v, want [%s]", *entries, newsblurTokenPassEntry)
+	if len(*entries) != 1 || (*entries)[0] != defaultTokenPassEntry {
+		t.Fatalf("piggy entries = %v, want [%s]", *entries, defaultTokenPassEntry)
+	}
+}
+
+func TestResolveNewsblurTokenUsesTheConfiguredEntry(t *testing.T) {
+	t.Setenv("NEWSBLUR_TOKEN", "")
+	t.Setenv("NEBULOUS_TOKEN_PASS_KEY", "tent/newsblur-token")
+	entries := stubPiggy(t, "from-piggy\n", nil)
+
+	if got, err := resolveNewsblurToken(context.Background()); err != nil || got != "from-piggy" {
+		t.Fatalf("got %q, %v; want from-piggy", got, err)
+	}
+	if len(*entries) != 1 || (*entries)[0] != "tent/newsblur-token" {
+		t.Fatalf("piggy entries = %v, want [tent/newsblur-token]", *entries)
 	}
 }
 

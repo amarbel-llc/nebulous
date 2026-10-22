@@ -42,7 +42,6 @@ func TestNewsblurTokenSourceRejectsBadAccounts(t *testing.T) {
 		{"no name", "[[accounts]]\npassword_source = \"env\"\npassword_key = \"X\"\n", "needs a name"},
 		{"url", "[[accounts]]\nname = \"a\"\nurl = \"https://example.com\"\npassword_source = \"env\"\npassword_key = \"X\"\n", "url is not used"},
 		{"no credential", "[[accounts]]\nname = \"a\"\n", "set password_source"},
-		{"source without key", "[[accounts]]\nname = \"a\"\npassword_source = \"piggy\"\n", "must be set together"},
 		{"unknown source", "[[accounts]]\nname = \"a\"\npassword_source = \"vault\"\npassword_key = \"X\"\n", "unknown password_source"},
 	}
 	for _, tc := range cases {
@@ -52,6 +51,17 @@ func TestNewsblurTokenSourceRejectsBadAccounts(t *testing.T) {
 				t.Fatalf("newsblurTokenSource = %v, %v; want an error containing %q", source != nil, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestNewsblurTokenSourceDefaultsAPiggyAccountsKey(t *testing.T) {
+	t.Setenv("NEBULOUS_TOKEN_PASS_KEY", "tent/newsblur-token")
+
+	// The lookup itself goes through config_common (not readPiggyPass), so only
+	// the decode is checked: without the default key it fails ValidatePassword.
+	source, err := newsblurTokenSource("[[accounts]]\nname = \"a\"\npassword_source = \"piggy\"\n")
+	if err != nil || source == nil {
+		t.Fatalf("a piggy account without a key must take the default entry: %v, source=%v", err, source != nil)
 	}
 }
 
