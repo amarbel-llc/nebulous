@@ -180,8 +180,12 @@ self-passing convention, mirroring `cutting-garden`'s own module shape):
   a host that only wants NewsBlur sync (no captures) leaves them unset and
   `fetch` runs sync-only.
 - `homeManagerModules.default` (`programs.nebulous`) — installs the
-  binaries for interactive/workstation use. No systemd unit; the periodic
-  timer is a NixOS-host concern.
+  binaries for interactive/workstation use, plus opt-in wiring for a local
+  session: `moxy.enable` renders a moxyfile with the `serve mcp` child
+  (`moxy.moxyfile` is its path, to `include` from your own moxyfile),
+  `cuttingGarden.enable` adds the `newsblur://` plugin stanza to
+  `programs.cutting-garden.plugins`, and `fetch.enable` runs `nebulous fetch`
+  on a systemd user timer (`fetch.interval`, default `1h`).
 
 ## CLI
 
@@ -206,7 +210,9 @@ nebulous traversal-serve              RFC 0013 wire plugin: serve newsblur:// fo
 ## Auth & configuration
 
 - `NEWSBLUR_TOKEN` (NewsBlur session cookie) is required for `serve mcp` and
-  `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv). The
+  `fetch`. Store it in `.secrets.env` (gitignored, loaded by direnv); when it
+  is unset, nebulous reads it itself from `piggy pass show newsblur-api-token`
+  (the nix package carries its own piggy). The
   corpus and `traversal-serve` subcommands read only the local store and
   need no token. `traversal-serve` optionally becomes read-write (mutations
   via `mutate_nodes`) when `NEWSBLUR_TOKEN` is

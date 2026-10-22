@@ -619,12 +619,10 @@ explore-corpus: build-go
   @echo "---"
   ./build/debug/nebulous corpus-read "$(./build/debug/nebulous corpus-list | head -1)"
 
-# Measure what `nebulous serve mcp` loads into a session's context: characters of
-# the initialize instructions, tools/list (compact JSON: name, description, input
-# schema), resources/list and resources/templates/list, per tool and in total.
 # Runs the debug build with a dummy token against a throwaway XDG tree (listing
-# makes no NewsBlur call). Serves the context-cost number for the Krone-connector
-# replacement (circus EPIC 0001 story 1); tokens are not computed here.
+# makes no NewsBlur call) and counts the characters of the initialize
+# instructions, tools/list, resources/list and resources/templates/list (compact
+# JSON), per tool and in total. Context-cost number for circus EPIC 0001 story 1.
 #
 # print the character count of nebulous's loaded MCP descriptions
 [group('explore')]
@@ -641,7 +639,6 @@ explore-mcp-description-size: build-go
     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"resources/list"}'
     printf '%s\n' '{"jsonrpc":"2.0","id":4,"method":"resources/templates/list"}'
-    sleep 2
   } | ./build/debug/nebulous serve mcp | jq -s -r '
     def len: tojson | length;
     (map(select(.id == 1))[0].result.instructions // "") as $ins

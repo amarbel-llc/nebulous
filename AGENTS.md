@@ -44,8 +44,9 @@ direnv via `.envrc`). When it is unset, nebulous reads it itself from
 `piggy pass show newsblur-api-token` (`cmd/nebulous/token.go`), so a session
 that launches `nebulous serve mcp` (a moxyfile child, e.g. `command =
 "nebulous serve mcp"`) never carries the secret in its env or argv; piggy must
-be on that process's PATH. `traversal-serve` falls back to read-only when
-neither is available. `just explore-mcp-description-size` prints the
+be on that process's PATH (the nix package's wrapper supplies it).
+`traversal-serve` does not consult piggy: only `NEWSBLUR_TOKEN` in its env
+makes it read-write. `just explore-mcp-description-size` prints the
 characters `serve mcp` loads into a session (tool, resource and template
 descriptions). The subcommands `generate-plugin`, `hook`, `install-mcp`,
 `corpus-*`, and `traversal-serve` read only the local store and do not

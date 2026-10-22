@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,9 +39,7 @@ var readPiggyPass = func(ctx context.Context, entry string) ([]byte, error) {
 // resolveNewsblurToken returns the NewsBlur session cookie: NEWSBLUR_TOKEN
 // when set (the systemd EnvironmentFile and justfile path), otherwise the piggy
 // pass entry, fetched by this process itself so a session that launches
-// nebulous never carries the secret in its own env or argv. An empty result
-// with a nil error cannot happen; a caller that tolerates having no token
-// (traversal-serve's read-only mode) ignores the error.
+// nebulous never carries the secret in its own env or argv.
 func resolveNewsblurToken(ctx context.Context) (string, error) {
 	if token := os.Getenv("NEWSBLUR_TOKEN"); token != "" {
 		return token, nil
@@ -50,10 +47,6 @@ func resolveNewsblurToken(ctx context.Context) (string, error) {
 
 	raw, err := readPiggyPass(ctx, newsblurTokenPassEntry)
 	if err != nil {
-		var notFound *exec.Error
-		if errors.As(err, &notFound) {
-			return "", errors.New("NEWSBLUR_TOKEN is unset and piggy is not on PATH")
-		}
 		return "", fmt.Errorf("NEWSBLUR_TOKEN is unset and `piggy pass show %s` failed: %w", newsblurTokenPassEntry, err)
 	}
 

@@ -118,11 +118,6 @@ func main() {
 	}
 
 	if flag.NArg() >= 1 && flag.Arg(0) == "fetch" {
-		token, err := resolveNewsblurToken(context.Background())
-		if err != nil {
-			log.Fatalf("fetch: %v", err)
-		}
-
 		fetchFlags := flag.NewFlagSet("fetch", flag.ExitOnError)
 		formatsFlag := fetchFlags.String(
 			"formats", strings.Join(tools.DefaultCaptureFormats, ","),
@@ -152,6 +147,11 @@ func main() {
 
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
+
+		token, err := resolveNewsblurToken(ctx)
+		if err != nil {
+			log.Fatalf("fetch: %v", err)
+		}
 
 		client := newsblur.NewClient(token)
 		if err := attachCache(ctx, client, 1*time.Hour); err != nil {
@@ -220,7 +220,8 @@ func main() {
 	os.Exit(1)
 }
 
-// serveMCP starts the MCP server over stdio. Requires NEWSBLUR_TOKEN.
+// serveMCP starts the MCP server over stdio. Requires a NewsBlur token; see
+// resolveNewsblurToken.
 func serveMCP() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()

@@ -53,7 +53,7 @@ func TestResolveNewsblurTokenErrors(t *testing.T) {
 		err     error
 		wantMsg string
 	}{
-		{"piggy missing", "", &exec.Error{Name: "piggy", Err: exec.ErrNotFound}, "piggy is not on PATH"},
+		{"piggy missing", "", &exec.Error{Name: "piggy", Err: exec.ErrNotFound}, "not found"},
 		{"piggy fails", "", errors.New("agent locked"), "failed"},
 		{"empty entry", "  \n", nil, "is empty"},
 	}
